@@ -1,0 +1,82 @@
+### Networking and Security Group Rules Tests
+
+@baseUrl = http://localhost:8085/api/v1/ec2
+
+### 1. Create a Security Group
+# @name createSG
+POST {{baseUrl}}/security-groups
+Content-Type: application/json
+
+{
+    "name": "web-server-sg",
+    "description": "Security group for web servers"
+}
+
+###
+
+@sgId = {{createSG.response.body.data.id}}
+
+### 2. List Security Groups
+GET {{baseUrl}}/security-groups
+
+### 3. Get Security Group Details
+GET {{baseUrl}}/security-groups/{{sgId}}
+
+### 4. Add Inbound Rule (TCP 80)
+POST {{baseUrl}}/security-groups/{{sgId}}/rules
+Content-Type: application/json
+
+{
+    "type": "inbound",
+    "protocol": "tcp",
+    "from_port": 80,
+    "to_port": 80,
+    "source_dest_cidr": "0.0.0.0/0",
+    "description": "Allow HTTP"
+}
+
+### 5. Add Inbound Rule (TCP 443)
+POST {{baseUrl}}/security-groups/{{sgId}}/rules
+Content-Type: application/json
+
+{
+    "type": "inbound",
+    "protocol": "tcp",
+    "from_port": 443,
+    "to_port": 443,
+    "source_dest_cidr": "0.0.0.0/0",
+    "description": "Allow HTTPS"
+}
+
+### 6. Add Outbound Rule (Allow All)
+POST {{baseUrl}}/security-groups/{{sgId}}/rules
+Content-Type: application/json
+
+{
+    "type": "outbound",
+    "protocol": "all",
+    "source_dest_cidr": "0.0.0.0/0",
+    "description": "Allow all outbound"
+}
+
+### 7. List Instances to get an ID
+# @name listInstances
+GET {{baseUrl}}/instances
+
+###
+
+@instanceId = {{listInstances.response.body.data[0].id}}
+
+### 8. Assign SG to Instance
+POST {{baseUrl}}/instances/{{instanceId}}/security-groups
+Content-Type: application/json
+
+{
+    "security_group_id": {{sgId}}
+}
+
+### 9. List SGs for Instance
+GET {{baseUrl}}/instances/{{instanceId}}/security-groups
+
+### 10. Remove Rule (requires actual rule ID from response 4 or 5)
+# DELETE {{baseUrl}}/security-groups/{{sgId}}/rules/1

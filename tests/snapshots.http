@@ -1,0 +1,23 @@
+### Snapshot Management API (Future Implementation)
+
+@baseUrl = http://localhost:8080/api/v1
+@instanceId = i-33c0ab42
+@snapshotId = replace-with-actual-id
+
+# @name CreateSnapshot
+POST {{baseUrl}}/instances/{{instanceId}}/snapshot
+Content-Type: application/json
+
+###
+
+# @name ListSnapshots
+GET {{baseUrl}}/snapshots
+Accept: application/json
+
+###
+
+# @name DeleteSnapshot
+DELETE {{baseUrl}}/snapshots/{{snapshotId}}
+Accept: application/json
+
+### Variables
