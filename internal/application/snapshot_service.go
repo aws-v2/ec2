@@ -141,3 +141,20 @@ func (s *SnapshotService) DeleteSnapshot(id int) error {
 
 	return s.repo.Delete(id)
 }
+
+func (s *SnapshotService) DeleteVolumeSnapshot(id int) error {
+	snapshot, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+
+	if snapshot.VolumeID == nil {
+		return fmt.Errorf("snapshot is not linked to a volume")
+	}
+
+	// Future enhancement: if volume snapshots map directly to libvirt snapshots when attached,
+	// or specific disk files, cleanup logic would go here.
+	
+	// For now, we simply remove the record from the database.
+	return s.repo.Delete(id)
+}
