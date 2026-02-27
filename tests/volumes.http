@@ -1,0 +1,52 @@
+### Volume Management API
+
+@baseUrl = http://localhost:8080/api/v1
+
+# @name ListVolumes
+GET {{baseUrl}}/volumes
+Accept: application/json
+
+###
+
+# @name CreateVolume
+POST {{baseUrl}}/volumes
+Content-Type: application/json
+
+{
+    "size": 10,
+    "format": "qcow2"
+}
+
+###
+@volumeId = 2
+
+@instanceId = i-33c0ab42
+
+
+# @name GetVolume
+GET {{baseUrl}}/volumes/{{volumeId}}
+Accept: application/json
+
+###
+
+# @name AttachVolume
+POST {{baseUrl}}/volumes/{{volumeId}}/attach
+Content-Type: application/json
+
+{
+    "instance_id": "{{instanceId}}"
+}
+
+###
+
+# @name DetachVolume
+POST {{baseUrl}}/volumes/{{volumeId}}/detach
+Accept: application/json
+
+###
+
+# @name DeleteVolume
+DELETE {{baseUrl}}/volumes/{{volumeId}}
+Accept: application/json
+
+### Variables

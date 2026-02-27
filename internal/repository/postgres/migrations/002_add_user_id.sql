@@ -1,0 +1,1 @@
+ALTER TABLE instances ADD COLUMN user_id VARCHAR(255) DEFAULT '';

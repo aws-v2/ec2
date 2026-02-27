@@ -1,0 +1,64 @@
+### Instance Management API
+
+@baseUrl = http://localhost:8085/api/v1/ec2
+@sshKey = ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCL2nT/HmmOKj7OAVfTVAP8eLBtm1uZ9jGUBqst/qIPwx5mhPUTeKyG1hgUbOukmu7bvEy0hoS7MDNUI8oc4KNdUGEA+NwcjZ07UKAnl0hrggMjxebwp8HvZJVt6meJ9oRNLRmi+smfVG2y3zWlJCUf89sT1+gfM3XsWsUhOvOElwUpQfx2k7jO43WI3/xqStP4Tc47cBUJV9ih8Xc3VBtqyUFj7K13Zm4l1VUnZOFz+RrO/M3bXp3GOUZcdUvmBgHBIF32DyDmcmoTbaIDZT/fptzx0efy5x/ckJRcat+7C4eEQdXxRCbLbR+hxqHmrag7GrD1V3Mm8rZa0ajo4O/jDXgL/Ir22XBtVImULbtvZ0tzE940BCWTQVAObU4gGeMry4A9BqD5cgnpzdmqDdoruh8bZeKwSDzqB/IrFPeCK4++4q+ZKIVbLp/J5i6Nei8/dO27ENsD/oQ60qwp/Y73cHsT18dMgqvDfhROnsKmusmltEQx8B4Dir7JDQktG+ig7bw0kg5Oh99YI2KYP0DXwTdxrYynH0mwGNboYb/hO2wdlJajUUycyZ11zb3hPENTE7zy6KZUyz2zkF+xUBYRx3yNa8CRGTRICd+ecxO0/JrRRJXnDK7HJph5N1xThl3QKDmoKVimBZE6BDMI3FsoqRA1NCR4UAOZYrvVgXDspQ== emqarani@gmail.com
+
+
+
+# @name ListInstances
+GET {{baseUrl}}/instances
+Accept: application/json
+
+###
+
+# @name CreateInstance
+POST {{baseUrl}}/instances
+Content-Type: application/json
+
+{
+    "image": "ubuntu-24.04",
+    "cpu": 2,
+    "ram": 2048,
+    "ssh_key": "{{sshKey}}"
+}
+
+###
+
+@instanceId = i-33c0ab42
+# @name GetInstance
+GET {{baseUrl}}/instances/{{instanceId}}
+Accept: application/json
+
+###
+
+# @name StartInstance
+POST {{baseUrl}}/instances/{{instanceId}}/start
+Accept: application/json
+
+###
+
+# @name StopInstance
+POST {{baseUrl}}/instances/{{instanceId}}/stop
+Accept: application/json
+
+###
+
+# @name RestartInstance
+POST {{baseUrl}}/instances/{{instanceId}}/restart
+Accept: application/json
+
+###
+
+# @name DeleteInstance
+DELETE {{baseUrl}}/instances/{{instanceId}}
+Accept: application/json
+
+###
+# @name GetStatusChecks
+GET {{baseUrl}}/instances/{{instanceId}}/status-checks
+Accept: application/json
+
+###
+# @name GetMetrics
+GET {{baseUrl}}/instances/{{instanceId}}/metrics
+Accept: application/json
