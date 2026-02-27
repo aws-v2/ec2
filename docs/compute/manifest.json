@@ -1,0 +1,42 @@
+{
+  "service": "Compute",
+  "version": "V2",
+  "categories": [
+    {
+      "title": "Getting Started",
+      "items": [
+        { "title": "EC2 Overview", "slug": "ec2-overview" },
+        { "title": "Quickstart: Launch an Instance", "slug": "ec2-quickstart" }
+      ]
+    },
+    {
+      "title": "Instances",
+      "items": [
+        { "title": "Instance Lifecycle", "slug": "ec2-lifecycle" },
+        { "title": "Instance Types", "slug": "ec2-instance-types" },
+        { "title": "SSH Keys", "slug": "ec2-ssh-keys" },
+        { "title": "Security Groups", "slug": "ec2-security-groups" }
+      ]
+    },
+    {
+      "title": "Storage",
+      "items": [
+        { "title": "EBS Volumes", "slug": "ec2-volumes" },
+        { "title": "Snapshots", "slug": "ec2-snapshots" }
+      ]
+    },
+    {
+      "title": "Launch Templates",
+      "items": [
+        { "title": "Templates Overview", "slug": "ec2-templates" }
+      ]
+    },
+    {
+      "title": "Monitoring",
+      "items": [
+        { "title": "Metrics & Status Checks", "slug": "ec2-monitoring" },
+        { "title": "Tags", "slug": "ec2-tags" }
+      ]
+    }
+  ]
+}
