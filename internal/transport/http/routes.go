@@ -90,6 +90,7 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume) // Detach volume from instance
 		api.POST("/volumes/:id/snapshots", volumeHandler.CreateSnapshot) // Create volume snapshot
 		api.GET("/volumes/:id/snapshots", volumeHandler.ListSnapshots)   // List volume snapshots
+		api.DELETE("/volumes/:id/snapshot", volumeHandler.DeleteVolumeSnapshot) // Delete volume snapshot
 		api.GET("/volumes/:id/tags", volumeHandler.ListTags)             // List volume tags
 		api.POST("/volumes/:id/tags", volumeHandler.AddTag)               // Add/Update volume tag
 		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)    // Delete volume tag

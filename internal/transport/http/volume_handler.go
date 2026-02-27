@@ -214,6 +214,26 @@ func (h *VolumeHandler) ListSnapshots(c *gin.Context) {
 	SendSuccess(c, http.StatusOK, "Snapshots retrieved successfully", snapshots)
 }
 
+func (h *VolumeHandler) DeleteVolumeSnapshot(c *gin.Context) {
+	snapshotIDStr := c.Param("id")
+	snapshotID, err := strconv.Atoi(snapshotIDStr)
+	if err != nil {
+		SendError(c, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+
+	if err := h.snapshotService.DeleteVolumeSnapshot(snapshotID); err != nil {
+		if err == domain.ErrSnapshotNotFound {
+			SendError(c, http.StatusNotFound, "snapshot not found")
+			return
+		}
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusOK, "Volume snapshot deleted successfully", nil)
+}
+
 func (h *VolumeHandler) ListTags(c *gin.Context) {
 	volumeIDStr := c.Param("id")
 	volumeID, err := strconv.Atoi(volumeIDStr)
