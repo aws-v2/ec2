@@ -14,7 +14,8 @@ func SetupRoutes(r *gin.Engine,
 	networkingHandler *NetworkingHandler, 
 	templateHandler *TemplateHandler, 
 	terminalHandler *TerminalHandler,
-	fleetHandler *FleetHandler) {
+	fleetHandler *FleetHandler,
+	docsHandler *DocsHandler) {
 	
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
@@ -23,6 +24,13 @@ func SetupRoutes(r *gin.Engine,
 		fleet.GET("/events", fleetHandler.GetEvents)
 	}
 
+	// Documentation Endpoints (public, no auth)
+	computeDocs := r.Group("/api/v1/compute/docs")
+	{
+		computeDocs.GET("", docsHandler.GetManifest)
+		computeDocs.GET("/:slug", docsHandler.GetDocBySlug)
+	}
+// "/api/v1/compute/docs"
 	api := r.Group("/api/v1/ec2")
 	{
 		// Instance CRUD

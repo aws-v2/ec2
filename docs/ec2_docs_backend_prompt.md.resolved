@@ -1,0 +1,192 @@
+# Backend Prompt: EC2 Documentation API
+
+## Objective
+
+Implement a documentation API for the EC2/Compute service. This API will serve structured **manifest** and **markdown content** for the docs portal at `/api/v1/compute/docs`.
+
+The frontend `docsStore` currently uses hardcoded mock data for the compute service. Once the backend is live, I will update the store to fetch from the real API.
+
+---
+
+## API Endpoints Required
+
+### 1. GET `/api/v1/compute/docs`
+Returns the **manifest** — the full table-of-contents for EC2 documentation, organized into categories and items.
+
+**Expected Response Shape:**
+```json
+{
+  "data": {
+    "service": "Compute",
+    "version": "V2",
+    "categories": [
+      {
+        "title": "Getting Started",
+        "items": [
+          { "title": "EC2 Overview", "slug": "ec2-overview" },
+          { "title": "Quickstart: Launch an Instance", "slug": "ec2-quickstart" }
+        ]
+      },
+      {
+        "title": "Instances",
+        "items": [
+          { "title": "Instance Lifecycle", "slug": "ec2-lifecycle" },
+          { "title": "Instance Types", "slug": "ec2-instance-types" },
+          { "title": "SSH Keys", "slug": "ec2-ssh-keys" },
+          { "title": "Security Groups", "slug": "ec2-security-groups" }
+        ]
+      },
+      {
+        "title": "Storage",
+        "items": [
+          { "title": "EBS Volumes", "slug": "ec2-volumes" },
+          { "title": "Snapshots", "slug": "ec2-snapshots" }
+        ]
+      },
+      {
+        "title": "Launch Templates",
+        "items": [
+          { "title": "Templates Overview", "slug": "ec2-templates" }
+        ]
+      },
+      {
+        "title": "Monitoring",
+        "items": [
+          { "title": "Metrics & Status Checks", "slug": "ec2-monitoring" },
+          { "title": "Tags", "slug": "ec2-tags" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 2. GET `/api/v1/compute/docs/:slug`
+Returns the **full documentation content** for a specific page, identified by its `slug`.
+
+**Expected Response Shape:**
+```json
+{
+  "data": {
+    "metadata": {
+      "title": "EC2 Overview",
+      "description": "A complete guide to Elastic Compute Cloud on Serwin — provision, manage, and scale virtual machines.",
+      "icon": "cpu",
+      "lastUpdated": "2026-02-27",
+      "tags": ["Compute", "Core", "EC2"]
+    },
+    "content": "# EC2 Overview\n\n..."
+  }
+}
+```
+
+- `metadata.icon`: one of `cpu`, `server`, `layers`, `database`, `shield`, `settings`
+- `content`: A full **markdown string**. The frontend uses a `MarkdownRenderer` component that handles `h1`, `h2`, `h3`, code blocks, tables, lists, and blockquotes.
+
+---
+
+## Required Documentation Pages (slugs + suggested content)
+
+Implement the following pages. The content must be thorough, real-world documentation written in **GitHub Flavored Markdown**.
+
+### `ec2-overview`
+- What EC2 is, key concepts, regions/AZs
+- Supported OS images, root disk types
+- Architecture diagram description (no image needed, text-based)
+
+### `ec2-quickstart`
+- Step-by-step: Choose image → Choose Instance Type → Set SSH Key → Launch
+- First connection instructions via SSH
+- Code block: `ssh -i your-key.pem ubuntu@<public-ip>`
+
+### `ec2-lifecycle`
+- States: `pending`, `running`, `stopping`, `stopped`, `terminated`
+- API actions: start, stop, restart, terminate
+- Include a table of states and their transitions
+
+### `ec2-instance-types`
+- General Purpose, Compute Optimized, Memory Optimized categories
+- Table with: Name, vCPU, RAM, Use Case columns
+
+### `ec2-ssh-keys`
+- What SSH keys are, how they work
+- How to generate a key pair
+- How to download the `.pem` file
+- Security best practices
+
+### `ec2-security-groups`
+- What security groups are: virtual firewalls
+- Inbound vs outbound rules
+- Protocol, port, CIDR explanations
+- Default security group behavior (port 22 open by default)
+
+### `ec2-volumes`
+- Elastic Block Storage concept
+- How to create, attach, detach, expand
+- Storage types (SSD, HDD)
+- Table: Volume States
+
+### `ec2-snapshots`
+- What snapshots are (point-in-time backups)
+- Instance snapshots vs Volume snapshots
+- How to create and decommission
+- API endpoints for snapshot management
+
+### `ec2-templates`
+- Launch Templates as reusable blueprints
+- Fields: name, image, cpu, ram, storage
+- How to launch from a template
+
+### `ec2-monitoring`
+- CPU usage, RAM usage, Network I/O, Disk IOPS
+- Status Checks: system check vs instance check
+- Metrics polling interval
+
+### `ec2-tags`
+- What tags are (key-value metadata)
+- How to add, update, and remove tags via the UI
+- Tags API endpoints
+
+---
+
+## Implementation Notes
+
+1. **Static or Database-Driven**: The docs can be stored as either static markdown files (served from disk) or as database rows. Static files (one [.md](file:///C:/Users/0x6D617274696E/.gemini/antigravity/brain/391a6742-20e2-4a00-93c8-f94a097f17a3/task.md) file per slug) are simpler and recommended.
+
+2. **Route Registration**: Register under the existing router:
+   ```
+   GET  /api/v1/compute/docs            → handler.GetManifest
+   GET  /api/v1/compute/docs/:slug      → handler.GetDocBySlug
+   ```
+
+3. **File Structure (if static)**:
+   ```
+   docs/
+     compute/
+       manifest.json
+       ec2-overview.md
+       ec2-quickstart.md
+       ec2-lifecycle.md
+       ec2-instance-types.md
+       ec2-ssh-keys.md
+       ec2-security-groups.md
+       ec2-volumes.md
+       ec2-snapshots.md
+       ec2-templates.md
+       ec2-monitoring.md
+       ec2-tags.md
+   ```
+
+4. **Metadata**: Each markdown file should have a companion metadata block (either YAML front-matter parsed server-side, or a `manifest.json` that also stores per-doc metadata).
+
+5. **CORS / Auth**: These docs endpoints should be **publicly accessible** — no authentication required, since the docs portal is public-facing.
+
+---
+
+## Frontend Integration (Already Handled)
+
+Once the backend is live, I will update [docsStore.ts](file:///c:/Users/0x6D617274696E/Desktop/aws-v2/frontend/src/modules/docs/store/docsStore.ts) to:
+- Remove `compute` from `MOCK_DATA`
+- Add `compute` to `SERVICE_REGISTRY` and the live-fetch logic (same pattern as `s3`)

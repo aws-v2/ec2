@@ -126,6 +126,11 @@ func main() {
 	terminalHandler := transport.NewTerminalHandler(terminalService)
 	fleetHandler := transport.NewFleetHandler(fleetService)
 
+	// Docs handler — docs are stored in <workdir>/docs/compute
+	workDir, _ := os.Getwd()
+	computeDocsDir := filepath.Join(workDir, "docs", "compute")
+	docsHandler := transport.NewDocsHandler(computeDocsDir)
+
 	// 5. Setup Router
 	router := gin.Default()
 	router.SetTrustedProxies(nil)
@@ -135,7 +140,7 @@ func main() {
 		c.JSON(httpd.StatusOK, gin.H{"status": "UP"})
 	})
 
-	transport.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler)
+	transport.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler)
 
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()
