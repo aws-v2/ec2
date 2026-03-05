@@ -74,18 +74,18 @@ var imageURLMap = map[string]string{
 
 func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher) *InstanceService {
 	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher}
-	
+
 	// Start background health update loop
 	if publisher != nil {
 		go s.startHealthUpdateLoop()
 	}
-	
+
 	return s
 }
 
 // startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
-// Why this is being implemented: The purpose is to allow the Network Service to learn 
-// about EC2 instances and track their health, so we can later integrate VPC/subnet 
+// Why this is being implemented: The purpose is to allow the Network Service to learn
+// about EC2 instances and track their health, so we can later integrate VPC/subnet
 // awareness safely.
 func (s *InstanceService) startHealthUpdateLoop() {
 	ticker := time.NewTicker(30 * time.Second)
@@ -209,10 +209,11 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	vmName := fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
-	// Why this is being done: to allow EC2 to know each instance’s default VPC, 
-	// enabling consistent VPC assignments for other services (RDS, multi-instance setups) 
+	// Why this is being done: to allow EC2 to know each instance’s default VPC,
+	// enabling consistent VPC assignments for other services (RDS, multi-instance setups)
 	// in future phases.
 	vpcID := ""
+	bridgeName := ""
 	if s.publisher != nil {
 		if req.VPCID != "" {
 			// User specified a VPC - validate it
@@ -230,11 +231,11 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		} else {
 			// No VPC specified - get default
 			var err error
-			vpcID, err = s.publisher.GetDefaultVPC(userID)
+			vpcID, bridgeName, err = s.publisher.GetDefaultVPC(userID)
 			if err != nil {
 				log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v. Using existing default networking.", userID, err)
 			} else {
-				log.Printf("[VPC] [SUCCESS] Assigned default VPC %s to instance %s (user: %s)", vpcID, instanceID, userID)
+				log.Printf("[VPC] [SUCCESS] Assigned default VPC %s (bridge: %s) to instance %s (user: %s)", vpcID, bridgeName, instanceID, userID)
 			}
 		}
 	}
@@ -261,12 +262,12 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	}
 	// TODO: Fire event: instance_db_created (instance details)
 	// Start VM creation in background
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName)
 	// TODO: Fire event: vm_creation_queued (instance ID)
 	return instance, nil
 }
 
-func (s *InstanceService) createVMAsync(instance *domain.Instance, req *domain.CreateInstanceRequest, baseImagePath, newDiskPath string) {
+func (s *InstanceService) createVMAsync(instance *domain.Instance, req *domain.CreateInstanceRequest, baseImagePath, newDiskPath, bridgeName string) {
 	// TODO: Fire event: vm_creation_async_started (instance ID, VM name)
 	// Clone disk
 	// TODO: Fire event: disk_cloning_started (source path, destination path)
@@ -295,7 +296,7 @@ func (s *InstanceService) createVMAsync(instance *domain.Instance, req *domain.C
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
-	vmID, ip, err := s.libvirtClient.CreateAndStartVM(instance.VMName, absNew, req.CPU, req.RAM, combinedKeys)
+	vmID, ip, err := s.libvirtClient.CreateAndStartVM(instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName)
 	if err != nil {
 		// TODO: Fire event: vm_libvirt_creation_failed (instance ID, error)
 		fmt.Printf("Failed to create VM %s: %v\n", instance.VMName, err)
@@ -586,10 +587,10 @@ func (s *InstanceService) MoveInstanceVPC(instanceID, userID, targetVPCID string
 	}
 
 	log.Printf("[VPC] [SUCCESS] Moved instance %s from VPC %s to %s (user: %s)", instanceID, oldVPC, targetVPCID, userID)
-	
+
 	// Why this is being implemented:
-	// This allows EC2 instances to participate in tenant-specific VPCs, enabling multi-instance 
+	// This allows EC2 instances to participate in tenant-specific VPCs, enabling multi-instance
 	// and multi-service isolation, while still preserving default behavior for single-instance tenants.
-	
+
 	return nil
 }
