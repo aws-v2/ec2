@@ -26,8 +26,9 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		    root_volume_id = $6,
 		    storage_size = $7,
 		    storage_type = $8,
-		    device_name = $9
-		WHERE id = $10
+		    device_name = $9,
+		    vpc_id = $10
+		WHERE id = $11
 	`
 	_, err := r.db.Exec(query,
 		instance.Status,
@@ -39,18 +40,19 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		instance.StorageSize,
 		instance.StorageType,
 		instance.DeviceName,
+		instance.VPCID,
 		instance.ID,
 	)
 	return err
 }
 func (r *instanceRepository) Create(instance *domain.Instance) error {
-	query := `INSERT INTO instances (id, vm_name, image, cpu, ram, ssh_key, status, ip, public_ip, proxmox_id, created_at, user_id, root_volume_id, storage_size, storage_type, device_name) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
+	query := `INSERT INTO instances (id, vm_name, image, cpu, ram, ssh_key, status, ip, public_ip, proxmox_id, created_at, user_id, root_volume_id, storage_size, storage_type, device_name, vpc_id) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	instance.CreatedAt = time.Now()
 	_, err := r.db.Exec(query, instance.ID, instance.VMName, instance.Image, instance.CPU, instance.RAM,
 		instance.SSHKey, instance.Status, instance.IP, instance.PublicIP, instance.ProxmoxID, instance.CreatedAt, instance.UserID,
-		instance.RootVolumeID, instance.StorageSize, instance.StorageType, instance.DeviceName)
+		instance.RootVolumeID, instance.StorageSize, instance.StorageType, instance.DeviceName, instance.VPCID)
 	return err
 }
 

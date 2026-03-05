@@ -13,6 +13,33 @@ const (
 	StatusRestarting InstanceStatus = "Restarting"
 )
 
+// InstanceLifecycleEvent represents the event published to NATS for Network Service integration.
+type InstanceLifecycleEvent struct {
+	CorrelationID string                  `json:"correlation_id"`
+	InstanceID    string                  `json:"instance_id"`
+	EventType     string                  `json:"event_type"`
+	Timestamp     string                  `json:"timestamp"`
+	Payload       InstanceLifecyclePayload `json:"payload"`
+}
+
+type InstanceLifecyclePayload struct {
+	IPAddress   string            `json:"ip_address"`
+	VPCID       string            `json:"vpc_id"`
+	ServicePort int               `json:"service_port"`
+	Metadata    InstanceMetadata `json:"metadata"`
+}
+
+type InstanceMetadata struct {
+	InstanceType string `json:"instance_type"`
+	AMIID        string `json:"ami_id"`
+}
+
+const (
+	EventInstanceStarted = "INSTANCE_STARTED"
+	EventInstanceStopped = "INSTANCE_STOPPED"
+	EventHealthUpdate    = "HEALTH_UPDATE"
+)
+
 type Instance struct {
 	ID           string         `json:"id" db:"id"`
 	VMName       string         `json:"vm_name" db:"vm_name"`
@@ -30,6 +57,7 @@ type Instance struct {
 	DeviceName   string         `json:"device_name" db:"device_name"`
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UserID       string         `json:"user_id" db:"user_id"`
+	VPCID        string         `json:"vpc_id" db:"vpc_id"`
 }
 
 type CreateInstanceRequest struct {
@@ -37,6 +65,7 @@ type CreateInstanceRequest struct {
 	CPU    int    `json:"cpu" binding:"required"`
 	RAM    int    `json:"ram" binding:"required"`
 	SSHKey string `json:"ssh_key" binding:"required"`
+	VPCID  string `json:"vpc_id"`
 }
 
 type InstanceStatusCheck struct {
