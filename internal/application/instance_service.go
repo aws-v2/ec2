@@ -184,12 +184,17 @@ func (s *InstanceService) downloadImage(url string, destPath string) error {
 	return nil
 }
 
+
+
+
+
+
+
 func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
-	// TODO: Fire event: instance_creation_started
-	// Validate image exists in map
+
+	// ── Step 1: Validate image ────────────────────────────────────────────────
 	baseImageName, ok := imageMap[req.Image]
 	if !ok {
-		// ... (keep current error handling)
 		availableImages := make([]string, 0, len(imageMap))
 		for k := range imageMap {
 			availableImages = append(availableImages, k)
@@ -198,25 +203,34 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	}
 	baseImagePath := filepath.Join(s.imagesDir, baseImageName)
 
-	// TODO: Fire event: image_validation_passed
-	// Ensure the base image exists (download if needed)
 	if err := s.ensureImageExists(req.Image, baseImagePath); err != nil {
-		// TODO: Fire event: image_download_failed
 		return nil, fmt.Errorf("failed to ensure image exists: %w", err)
 	}
-	// TODO: Fire event: image_ready
+
 	instanceID := fmt.Sprintf("i-%s", uuid.New().String()[:8])
 	vmName := fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
-	// Why this is being done: to allow EC2 to know each instance’s default VPC,
-	// enabling consistent VPC assignments for other services (RDS, multi-instance setups)
-	// in future phases.
-	vpcID := ""
-	bridgeName := ""
+	// ── Step 2: Ask Network Service to prepare networking BEFORE creating VM ──
+	// This is the critical change: we get the IP, gateway, and bridge from the
+	// network service first. The VM will be created with this IP baked into
+	// cloud-init as a static address — no DHCP polling needed.
+	var (
+		vpcID      string
+		privateIP  string
+		gateway    string
+		bridgeName string
+	)
+
+fmt.Println("---------Preparing network for instance", instanceID)
+
+
+
 	if s.publisher != nil {
 		if req.VPCID != "" {
-			// User specified a VPC - validate it
+fmt.Println("--------->>>1")
+
+			// User specified a VPC — validate it first
 			valid, err := s.publisher.ValidateVPC(userID, req.VPCID)
 			if err != nil {
 				log.Printf("[VPC] [ERROR] VPC validation failed for user %s, vpc %s: %v", userID, req.VPCID, err)
@@ -227,20 +241,43 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 				return nil, fmt.Errorf("invalid VPC ID: %s", req.VPCID)
 			}
 			vpcID = req.VPCID
-			log.Printf("[VPC] [SUCCESS] Validated and assigned requested VPC %s to instance %s", vpcID, instanceID)
+			log.Printf("[VPC] [OK] Validated VPC %s for instance %s", vpcID, instanceID)
 		} else {
-			// No VPC specified - get default
+fmt.Println("--------->>>2")
+
+			// No VPC specified — get the default VPC
 			var err error
 			vpcID, bridgeName, err = s.publisher.GetDefaultVPC(userID)
 			if err != nil {
-				log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v. Using existing default networking.", userID, err)
-			} else {
-				log.Printf("[VPC] [SUCCESS] Assigned default VPC %s (bridge: %s) to instance %s (user: %s)", vpcID, bridgeName, instanceID, userID)
+				log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v", userID, err)
+				return nil, fmt.Errorf("failed to get default VPC: %w", err)
 			}
+			log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", vpcID, bridgeName, instanceID)
 		}
+fmt.Println("--------->>>3")
+
+		// Ask network service to allocate an IP from the VPC subnet.
+		// This returns the private IP, gateway, and confirms the bridge name.
+		// The VM will be created with this exact IP — the network service is the
+		// single source of truth for all IP addresses.
+		var err error
+		privateIP, gateway, bridgeName, err = s.publisher.PrepareInstanceNetwork(userID, instanceID, vpcID)
+		if err != nil {
+			log.Printf("[NETWORK] [ERROR] Failed to prepare network for instance %s in VPC %s: %v", instanceID, vpcID, err)
+			return nil, fmt.Errorf("failed to prepare instance network: %w", err)
+		}
+fmt.Println("--------->>>4")
+		log.Printf("[NETWORK] [OK] Network ready for instance %s — IP: %s, gateway: %s, bridge: %s",
+			instanceID, privateIP, gateway, bridgeName)
 	}
 
-	// Create instance record immediately with pending status
+
+fmt.Println("---+++++------Preparing network for instance", instanceID)
+
+
+	// ── Step 3: Save instance record with pending status and the known IP ─────
+	// We save the IP now because we already know it — the network service
+	// allocated it above. No need to update it again after VM creation.
 	instance := &domain.Instance{
 		ID:        instanceID,
 		VMName:    vmName,
@@ -249,101 +286,151 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		RAM:       req.RAM,
 		SSHKey:    req.SSHKey,
 		Status:    domain.StatusPending,
-		IP:        "",
+		IP:        privateIP,  // ← known before VM creation
 		PublicIP:  "",
 		ProxmoxID: 0,
 		CreatedAt: time.Now(),
 		UserID:    userID,
 		VPCID:     vpcID,
 	}
+
 	if err := s.repo.Create(instance); err != nil {
-		// TODO: Fire event: instance_db_create_failed
+		// IP was allocated but instance won't be created — release it back
+		if s.publisher != nil && privateIP != "" {
+			if releaseErr := s.publisher.ReleaseInstanceNetwork(userID, instanceID, vpcID); releaseErr != nil {
+				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
+			}
+		}
 		return nil, fmt.Errorf("failed to save instance: %w", err)
 	}
-	// TODO: Fire event: instance_db_created (instance details)
-	// Start VM creation in background
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName)
-	// TODO: Fire event: vm_creation_queued (instance ID)
+
+	// ── Step 4: Launch VM creation in background ──────────────────────────────
+	// privateIP and gateway are passed in — libvirt will bake them into
+	// cloud-init so the VM boots with a static IP. No DHCP polling.
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway)
+
 	return instance, nil
 }
 
-func (s *InstanceService) createVMAsync(instance *domain.Instance, req *domain.CreateInstanceRequest, baseImagePath, newDiskPath, bridgeName string) {
-	// TODO: Fire event: vm_creation_async_started (instance ID, VM name)
-	// Clone disk
-	// TODO: Fire event: disk_cloning_started (source path, destination path)
+func (s *InstanceService) createVMAsync(
+	instance *domain.Instance,
+	req *domain.CreateInstanceRequest,
+	baseImagePath, newDiskPath, bridgeName, privateIP, gateway string,
+) {
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
+
+	// ── Step 1: Clone base disk ───────────────────────────────────────────────
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2",
 		"-F", "qcow2", "-b", absBase, absNew)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		// TODO: Fire event: disk_cloning_failed (instance ID, error)
-		fmt.Printf("Failed to clone disk for %s: %v\nOutput: %s\n", instance.VMName, err, string(output))
-		instance.Status = domain.StatusTerminated
-		s.repo.Update(instance)
-		// TODO: Fire event: instance_terminated (instance ID, reason: disk_clone_failed)
+		log.Printf("[VM] Failed to clone disk for %s: %v\nOutput: %s", instance.VMName, err, string(output))
+		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return
 	}
-	// TODO: Fire event: disk_cloning_completed (instance ID, disk path, disk size)
-	// Create and start VM
-	// TODO: Fire event: vm_libvirt_creation_started (instance ID, VM name, CPU, RAM)
+
+	// ── Step 2: Validate libvirt is available ─────────────────────────────────
 	if s.libvirtClient == nil {
-		fmt.Printf("Failed to create VM %s: libvirt client is not initialized\n", instance.VMName)
-		instance.Status = domain.StatusTerminated
-		s.repo.Update(instance)
+		log.Printf("[VM] libvirt client not initialized for %s", instance.VMName)
+		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return
 	}
+
 	combinedKeys := req.SSHKey
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
-	vmID, ip, err := s.libvirtClient.CreateAndStartVM(instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName)
+
+	log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
+
+	// ── Step 3: Create and start VM with pre-allocated static IP ─────────────
+	// privateIP and gateway are passed into CreateAndStartVM which writes them
+	// into the cloud-init network-config. The VM boots already knowing its IP.
+	// waitForVMIP is no longer needed since the IP is statically configured.
+	vmID, err := s.libvirtClient.CreateAndStartVM(
+		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway,
+	)
 	if err != nil {
-		// TODO: Fire event: vm_libvirt_creation_failed (instance ID, error)
-		fmt.Printf("Failed to create VM %s: %v\n", instance.VMName, err)
-		// Cleanup disk on failure
+		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
 		exec.Command("rm", "-f", newDiskPath).Run()
-		// TODO: Fire event: disk_cleanup_completed (instance ID, disk path)
-		instance.Status = domain.StatusTerminated
-		s.repo.Update(instance)
-		// TODO: Fire event: instance_terminated (instance ID, reason: vm_creation_failed)
+		s.markTerminatedAndReleaseNetwork(instance, "")
 		return
 	}
-	// TODO: Fire event: vm_started (instance ID, VM ID, IP address)
-	// Update instance with VM details
+
+	// ── Step 4: Persist running state ────────────────────────────────────────
+	// IP is already set on the instance from CreateInstance — just update
+	// status, public IP, and the libvirt VM ID.
 	instance.Status = domain.StatusRunning
-	instance.IP = ip
 	instance.PublicIP = s.libvirtClient.GetPublicIP(vmID)
 	instance.ProxmoxID = vmID
-	// TODO: Fire event: instance_status_updating (instance ID, status: running)
+
 	if err := s.repo.Update(instance); err != nil {
-		fmt.Printf("Failed to update instance %s: %v\n", instance.ID, err)
-		// Cleanup VM on DB failure
+		log.Printf("[VM] Failed to update instance %s in DB: %v", instance.ID, err)
 		s.libvirtClient.DeleteVM(instance.VMName)
 		exec.Command("rm", "-f", newDiskPath).Run()
 		return
 	}
 
-	// Publish INSTANCE_STARTED event to Network Service
+	// ── Step 5: Notify Network Service that instance is live ──────────────────
+	// The network service already allocated the IP and recorded the reservation.
+	// This event tells it the VM actually booted so it can start health monitoring.
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance)
+		if err := s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance); err != nil {
+			log.Printf("[NATS] [WARN] Failed to publish INSTANCE_STARTED for %s: %v", instance.ID, err)
+		}
 	}
 
-	// Auto-assign default security group
+	// ── Step 6: Auto-assign default security group ────────────────────────────
 	go func() {
 		sg, err := s.sgService.GetSecurityGroupByName("default")
 		if err == nil {
 			if err := s.sgService.AssignToInstance(instance.ID, sg.ID); err != nil {
-				fmt.Printf("Warning: Failed to auto-assign default SG to %s: %v\n", instance.ID, err)
+				log.Printf("[SG] Failed to auto-assign default SG to %s: %v", instance.ID, err)
 			} else {
-				fmt.Printf("✓ Auto-assigned 'default' security group to %s\n", instance.ID)
+				log.Printf("[SG] ✓ Auto-assigned 'default' security group to %s", instance.ID)
 			}
 		} else {
-			fmt.Printf("Warning: Could not find 'default' security group for auto-assignment: %v\n", err)
+			log.Printf("[SG] Could not find 'default' SG for auto-assignment: %v", err)
 		}
 	}()
-	// TODO: Fire event: instance_running (instance ID, VM name, IP, public IP)
-	// TODO: Fire event: vm_creation_completed (instance ID, duration, final status)
-	fmt.Printf("✓ VM %s created successfully (ID: %s, IP: %s)\n", instance.VMName, instance.ID, ip)
+
+	log.Printf("✓ VM %s created successfully (ID: %s, IP: %s, bridge: %s)",
+		instance.VMName, instance.ID, privateIP, bridgeName)
+}
+
+// markTerminatedAndReleaseNetwork marks the instance as terminated and releases
+// the pre-allocated IP back to the network service pool so it can be reused.
+func (s *InstanceService) markTerminatedAndReleaseNetwork(instance *domain.Instance, diskPath string) {
+	instance.Status = domain.StatusTerminated
+	if err := s.repo.Update(instance); err != nil {
+		log.Printf("[VM] Failed to mark instance %s as terminated: %v", instance.ID, err)
+	}
+	if diskPath != "" {
+		exec.Command("rm", "-f", diskPath).Run()
+	}
+	// Release the IP back to the subnet pool
+	if s.publisher != nil && instance.VPCID != "" {
+		if err := s.publisher.ReleaseInstanceNetwork(instance.UserID, instance.ID, instance.VPCID); err != nil {
+			log.Printf("[NETWORK] [WARN] Failed to release network for terminated instance %s: %v", instance.ID, err)
+		}
+	}
+}
+
+
+
+
+
+
+
+// markTerminated is a helper to set instance status to terminated and persist it.
+func (s *InstanceService) markTerminated(instance *domain.Instance, diskPath string) {
+	instance.Status = domain.StatusTerminated
+	if err := s.repo.Update(instance); err != nil {
+		log.Printf("[VM] Failed to mark instance %s as terminated: %v", instance.ID, err)
+	}
+	if diskPath != "" {
+		exec.Command("rm", "-f", diskPath).Run()
+	}
 }
 
 func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, error) {
@@ -574,7 +661,7 @@ func (s *InstanceService) MoveInstanceVPC(instanceID, userID, targetVPCID string
 		}
 
 		// 4. Attach to new VPC
-		if err := s.publisher.AttachResource(userID, instanceID, targetVPCID); err != nil {
+		if _, err := s.publisher.AttachResource(userID, instanceID, targetVPCID); err != nil {
 			return fmt.Errorf("failed to attach to new VPC: %w", err)
 		}
 	}
