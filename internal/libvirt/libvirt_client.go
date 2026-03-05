@@ -29,10 +29,14 @@ func (l *LibvirtClient) Close() error {
 	return err
 }
 
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey string) (int, string, error) {
-	// Ensure network is ready
-	if err := l.EnsureDefaultNetwork(); err != nil {
-		return 0, "", fmt.Errorf("network setup failed: %w", err)
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName string) (int, string, error) {
+	// If bridgeName is empty, fallback to default network for backward compatibility or safety
+	if bridgeName == "" {
+		if err := l.EnsureDefaultNetwork(); err != nil {
+			return 0, "", fmt.Errorf("network setup failed: %w", err)
+		}
+	} else {
+		fmt.Printf("[Libvirt] Attaching VM %s to bridge %s\n", vmName, bridgeName)
 	}
 
 	// Create cloud-init ISO
@@ -43,7 +47,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 	defer cleanupFn()
 
 	// Build VM XML with cloud-init ISO attached
-	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram)
+	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName)
 
 	domain, err := l.conn.DomainDefineXML(xmlConfig)
 	if err != nil {
@@ -98,7 +102,6 @@ users:
     shell: /bin/bash
     lock_passwd: true
 `, keysYaml)
-
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
 		cleanup()
@@ -234,7 +237,24 @@ func (l *LibvirtClient) GetPublicIP(vmID int) string {
 	// Return NAT port mapping for SSH access
 	return fmt.Sprintf("localhost:%d", 2200+vmID)
 }
-func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int) string {
+func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int, bridgeName string) string {
+	networkXML := ""
+	if bridgeName != "" {
+		networkXML = fmt.Sprintf(`
+    <interface type='bridge'>
+      <source bridge='%s'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+    </interface>`, bridgeName)
+	} else {
+		networkXML = `
+    <interface type='network'>
+      <source network='default'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+    </interface>`
+	}
+
 	return fmt.Sprintf(`
 <domain type='kvm'>
   <name>%s</name>
@@ -277,11 +297,7 @@ func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int)
       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
     </controller>
     <!-- Network with DHCP -->
-    <interface type='network'>
-      <source network='default'/>
-      <model type='virtio'/>
-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
-    </interface>
+    %s
     <!-- Serial console -->
     <serial type='pty'>
       <target type='isa-serial' port='0'>
@@ -304,7 +320,7 @@ func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int)
     </memballoon>
   </devices>
 </domain>
-`, name, ram, cpu, diskPath, isoPath)
+`, name, ram, cpu, diskPath, isoPath, networkXML)
 }
 
 // EnsureDefaultNetwork ensures the default network is active and has DHCP

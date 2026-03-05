@@ -14,7 +14,7 @@ import (
 // Publisher defines the interface for publishing lifecycle events.
 type Publisher interface {
 	PublishInstanceEvent(eventType string, instance *domain.Instance) error
-	GetDefaultVPC(tenantID string) (string, error)
+	GetDefaultVPC(tenantID string) (string, string, error)
 	ValidateVPC(tenantID, vpcID string) (bool, error)
 	AttachResource(tenantID, instanceID, vpcID string) error
 	DetachResource(tenantID, instanceID, vpcID string) error
@@ -53,14 +53,14 @@ func (p *NATSPublisher) Close() {
 }
 
 // PublishInstanceEvent publishes an instance lifecycle event to NATS.
-// It is non-blocking in the sense that NATS Publish is asynchronous, 
+// It is non-blocking in the sense that NATS Publish is asynchronous,
 // and we log any errors without failing the caller.
 func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance) error {
 	if p == nil || p.nc == nil {
 		return fmt.Errorf("NATS publisher or connection not initialized")
 	}
 	correlationID := uuid.New().String()
-	
+
 	event := domain.InstanceLifecycleEvent{
 		CorrelationID: correlationID,
 		InstanceID:    instance.ID,
@@ -86,21 +86,21 @@ func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.
 	// Logging requirement: correlation_id, instance_id, event_type, publish status
 	err = p.nc.Publish(p.subject, data)
 	if err != nil {
-		log.Printf("[NATS] [FAILURE] correlation_id=%s instance_id=%s event_type=%s status=failed error=%v", 
+		log.Printf("[NATS] [FAILURE] correlation_id=%s instance_id=%s event_type=%s status=failed error=%v",
 			correlationID, instance.ID, eventType, err)
 		return err
 	}
 
-	log.Printf("[NATS] [SUCCESS] correlation_id=%s instance_id=%s event_type=%s status=success", 
+	log.Printf("[NATS] [SUCCESS] correlation_id=%s instance_id=%s event_type=%s status=success",
 		correlationID, instance.ID, eventType)
-	
+
 	return nil
 }
 
-// GetDefaultVPC queries the Network Service for the tenant's default VPC ID.
-func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, error) {
+// GetDefaultVPC queries the Network Service for the tenant's default VPC ID and bridge name.
+func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	if p == nil || p.nc == nil {
-		return "", fmt.Errorf("NATS publisher or connection not initialized")
+		return "", "", fmt.Errorf("NATS publisher or connection not initialized")
 	}
 
 	correlationID := uuid.New().String()
@@ -113,7 +113,7 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, error) {
 
 	data, err := json.Marshal(request)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal VPC request: %w", err)
+		return "", "", fmt.Errorf("failed to marshal VPC request: %w", err)
 	}
 
 	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s tenant_id=%s", subject, correlationID, tenantID)
@@ -121,24 +121,25 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, error) {
 	msg, err := p.nc.Request(subject, data, 2*time.Second)
 	if err != nil {
 		log.Printf("[NATS] [ERROR] VPC request failed: correlation_id=%s tenant_id=%s error=%v", correlationID, tenantID, err)
-		return "", fmt.Errorf("NATS request failed: %w", err)
+		return "", "", fmt.Errorf("NATS request failed: %w", err)
 	}
 
 	var response struct {
-		VPCID string `json:"vpc_id"`
+		VPCID      string `json:"vpc_id"`
+		BridgeName string `json:"bridge_name"`
 	}
 	if err := json.Unmarshal(msg.Data, &response); err != nil {
 		log.Printf("[NATS] [ERROR] Failed to unmarshal VPC response: correlation_id=%s error=%v", correlationID, err)
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+		return "", "", fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	if response.VPCID == "" {
 		log.Printf("[NATS] [FAILURE] VPC response empty: correlation_id=%s", correlationID)
-		return "", fmt.Errorf("received empty VPC ID")
+		return "", "", fmt.Errorf("received empty VPC ID")
 	}
 
-	log.Printf("[NATS] [RESPONSE] correlation_id=%s vpc_id=%s status=success", correlationID, response.VPCID)
-	return response.VPCID, nil
+	log.Printf("[NATS] [RESPONSE] correlation_id=%s vpc_id=%s bridge_name=%s status=success", correlationID, response.VPCID, response.BridgeName)
+	return response.VPCID, response.BridgeName, nil
 }
 
 // ValidateVPC checks if a VPC ID is valid for a given tenant.
@@ -272,6 +273,6 @@ func (p *NATSPublisher) DetachResource(tenantID, instanceID, vpcID string) error
 	return nil
 }
 
-// Why this is being implemented: 
-// This publisher allows the Network Service to learn about EC2 instances and track their health, 
+// Why this is being implemented:
+// This publisher allows the Network Service to learn about EC2 instances and track their health,
 // enabling future integration of VPC/subnet awareness safely without breaking existing libvirt logic.
