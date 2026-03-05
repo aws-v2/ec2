@@ -18,27 +18,29 @@ import (
 	"path/filepath"
 	"strings"
 	"github.com/Qarani-m/ec2-api/internal/application"
+	"github.com/Qarani-m/ec2-api/internal/config"
 	"github.com/Qarani-m/ec2-api/internal/domain"
 	"github.com/Qarani-m/ec2-api/internal/libvirt"
 	"github.com/Qarani-m/ec2-api/internal/repository/postgres"
 	transport "github.com/Qarani-m/ec2-api/internal/transport/http"
 	"github.com/Qarani-m/ec2-api/pkg/database"
+	"github.com/Qarani-m/ec2-api/pkg/messaging"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		log.Println("Note: No .env file found, using system environment variables")
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Load configuration from environment variables
-	// Load configuration from environment variables
-	postgresConn := getEnv("POSTGRES_CONN", "postgres://root:root@localhost:5432/ec2?sslmode=disable")
-	serverPort := getEnv("SERVER_PORT", "8085")
-	libvirtURI := getEnv("LIBVIRT_URI", "qemu:///system")
-	imagesDir := getEnv("IMAGES_DIR", "/var/lib/libvirt/images")
+	postgresConn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		cfg.DB.User, cfg.DB.Password, cfg.DB.Host, cfg.DB.Port, cfg.DB.Database, cfg.DB.SSLMode)
+	
+	libvirtURI := cfg.Libvirt.URI
+	imagesDir := cfg.Libvirt.ImagesDir
+	natsSubject := getEnv("NATS_LIFECYCLE_SUBJECT", "dev.compute.v1.instance.lifecycle")
 	// libvirtURI := getEnv("LIBVIRT_URI", "qemu:///session")
 
 	// 1. Initialize Infrastructure Layer
@@ -64,6 +66,18 @@ func main() {
 	} else {
 		defer libvirtClient.Close()
 		log.Println("Libvirt connected successfully")
+	}
+
+	// 1.5 Initialize Messaging Layer
+	log.Println("Initializing NATS publisher...")
+	natsPublisher, err := messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, natsSubject)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to NATS at %s: %v", cfg.NATS.URL, err)
+		log.Println("Continuing without NATS publishing support...")
+		natsPublisher = nil
+	} else {
+		defer natsPublisher.Close()
+		log.Println("NATS publisher initialized successfully")
 	}
 
 	log.Println(postgresConn)
@@ -106,7 +120,7 @@ func main() {
 		log.Printf("Warning: Failed to create keys directory: %v", err)
 	}
 
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir)
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
@@ -151,7 +165,7 @@ func main() {
 	}
 
 	// 7. Start Server with Graceful Shutdown
-	addr := serverPort
+	addr := cfg.Server.Port
 	if !strings.HasPrefix(addr, ":") {
 		addr = ":" + addr
 	}
@@ -163,7 +177,7 @@ func main() {
 
 	// Initializing the server in a goroutine so that it won't block the graceful shutdown handling below
 	go func() {
-		log.Printf("🚀 Server starting on port %s...", serverPort)
+		log.Printf("🚀 Server starting on port %s...", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != httpd.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

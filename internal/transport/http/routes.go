@@ -32,6 +32,7 @@ func SetupRoutes(r *gin.Engine,
 	}
 // "/api/v1/compute/docs"
 	api := r.Group("/api/v1/ec2")
+	api.Use(AuthMiddleware())
 	{
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
@@ -43,6 +44,7 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/instances/:id/tags", instanceHandler.AddOrUpdateTag)
 		api.DELETE("/instances/:id/tags/:key", instanceHandler.DeleteTag)
 		api.DELETE("/instances/:id", instanceHandler.DeleteInstance)
+		api.POST("/instances/:id/vpc", instanceHandler.MoveInstanceVPC)
 		api.GET("/instances/:id/terminal", terminalHandler.HandleTerminal)
 
 
