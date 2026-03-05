@@ -29,7 +29,6 @@ func (l *LibvirtClient) Close() error {
 	return err
 }
 
-
 // CreateAndStartVM creates and starts a VM with a statically configured IP.
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
@@ -81,12 +80,13 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 //
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
+
 func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway string) (string, func(), error) {
-	userDataPath    := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
-	metaDataPath    := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
-	networkCfgPath  := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
-	absDir, _       := filepath.Abs(l.imagesDir)
-	isoPath         := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
+	userDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
+	metaDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
+	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
+	absDir, _      := filepath.Abs(l.imagesDir)
+	isoPath        := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
 
 	cleanup := func() {
 		os.Remove(userDataPath)
@@ -102,14 +102,20 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway st
 		}
 	}
 
+	if keysYaml == "" {
+		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
+	}
+
 	userData := fmt.Sprintf(`#cloud-config
+ssh_pwauth: true
 users:
   - name: ubuntu
-    ssh-authorized-keys:
-%s
+    plain_text_passwd: "ubuntu"
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
     shell: /bin/bash
-    lock_passwd: true
+    lock_passwd: false
+    ssh-authorized-keys:
+%s
 `, keysYaml)
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
@@ -128,20 +134,14 @@ local-hostname: %s
 	}
 
 	// ── network-config ────────────────────────────────────────────────────────
-	// Cloud-init v2 network config format.
-	// This tells the VM to configure eth0 with the pre-allocated static IP
-	// instead of requesting one via DHCP. The IP and gateway come from the
-	// network service which allocated them before VM creation.
-	//
-	// /24 prefix is assumed — if your subnets use different sizes you can pass
-	// the prefix length through as an extra parameter.
-	//
-	// DNS is set to 8.8.8.8 (Google) — adjust if you have an internal resolver.
+	// Interface name is ens3 — this is the KVM/QEMU default interface name.
+	// Previously this was enp1s0 which does not exist in this VM configuration,
+	// causing cloud-init to skip network setup entirely and leaving the VM with no IP.
 	var networkConfig string
 	if privateIP != "" && gateway != "" {
 		networkConfig = fmt.Sprintf(`version: 2
 ethernets:
-  eth0:
+  ens3:
     dhcp4: false
     addresses:
       - %s/24
@@ -152,13 +152,9 @@ ethernets:
         - 8.8.4.4
 `, privateIP, gateway)
 	} else {
-		// Fallback to DHCP if no IP was provided — should not happen in normal
-		// flow since network service always allocates before VM creation, but
-		// kept as a safety net for local dev without a network service.
-		fmt.Printf("[Libvirt] [WARN] No static IP provided for %s — falling back to DHCP\n", vmName)
 		networkConfig = `version: 2
 ethernets:
-  eth0:
+  ens3:
     dhcp4: true
 `
 	}
@@ -168,9 +164,6 @@ ethernets:
 		return "", nil, fmt.Errorf("failed to write network-config: %w", err)
 	}
 
-	// ── Build ISO ─────────────────────────────────────────────────────────────
-	// network-config must be named exactly "network-config" inside the ISO
-	// for cloud-init to pick it up automatically.
 	cmd := exec.Command("genisoimage",
 		"-output", isoPath,
 		"-volid", "cidata",
@@ -191,30 +184,6 @@ ethernets:
 
 	return isoPath, cleanup, nil
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 func (l *LibvirtClient) RestartVM(vmName string) error {
 	// Lookup the domain by name
 	domain, err := l.conn.LookupDomainByName(vmName)
