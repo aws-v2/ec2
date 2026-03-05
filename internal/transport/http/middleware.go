@@ -63,7 +63,11 @@ func ExtractUserIDFromToken(tokenString string) (string, error) {
 		return "", fmt.Errorf("failed to parse token claims")
 	}
 
-	// Extract user ID (try 'sub' first, then 'user_id' or 'username' if needed)
+	// Extract user ID (try 'userId' first as specific to this app's JWT, then 'sub' or others)
+	if uid, ok := claims["userId"].(string); ok && uid != "" {
+		return uid, nil
+	}
+
 	userID, ok := claims["sub"].(string)
 	if !ok || userID == "" {
 		// Fallback to 'user_name' or other claims if your auth service uses them

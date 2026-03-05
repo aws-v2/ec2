@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Qarani-m/ec2-api/internal/domain"
 	"github.com/Qarani-m/ec2-api/internal/libvirt"
+	"github.com/Qarani-m/ec2-api/pkg/messaging"
 	"github.com/google/uuid"
 )
 
@@ -20,6 +22,7 @@ type InstanceService struct {
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
 	imagesDir     string
+	publisher     messaging.Publisher
 }
 
 var imageMap = map[string]string{
@@ -69,8 +72,40 @@ var imageURLMap = map[string]string{
 	"centos-stream-9": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
 }
 
-func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string) *InstanceService {
-	return &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir}
+func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher) *InstanceService {
+	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher}
+	
+	// Start background health update loop
+	if publisher != nil {
+		go s.startHealthUpdateLoop()
+	}
+	
+	return s
+}
+
+// startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
+// Why this is being implemented: The purpose is to allow the Network Service to learn 
+// about EC2 instances and track their health, so we can later integrate VPC/subnet 
+// awareness safely.
+func (s *InstanceService) startHealthUpdateLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		instances, err := s.repo.FindAll("") // Find all across all users
+		if err != nil {
+			log.Printf("[InstanceService] Error fetching instances for health update: %v", err)
+			continue
+		}
+
+		for _, instance := range instances {
+			// Only publish health for running or stopped instances, but mainly we want the registry to know they exist
+			// The Network Service will use this to track health.
+			if (instance.Status == domain.StatusRunning || instance.Status == domain.StatusStopped) && s.publisher != nil {
+				s.publisher.PublishInstanceEvent(domain.EventHealthUpdate, instance)
+			}
+		}
+	}
 }
 
 // ensureImageExists checks if an image exists, and downloads it if it doesn't
@@ -170,11 +205,40 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		return nil, fmt.Errorf("failed to ensure image exists: %w", err)
 	}
 	// TODO: Fire event: image_ready
-	// Generate instance details
 	instanceID := fmt.Sprintf("i-%s", uuid.New().String()[:8])
 	vmName := fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
-	// TODO: Fire event: instance_id_generated (instance ID, VM name)
+
+	// Why this is being done: to allow EC2 to know each instance’s default VPC, 
+	// enabling consistent VPC assignments for other services (RDS, multi-instance setups) 
+	// in future phases.
+	vpcID := ""
+	if s.publisher != nil {
+		if req.VPCID != "" {
+			// User specified a VPC - validate it
+			valid, err := s.publisher.ValidateVPC(userID, req.VPCID)
+			if err != nil {
+				log.Printf("[VPC] [ERROR] VPC validation failed for user %s, vpc %s: %v", userID, req.VPCID, err)
+				return nil, fmt.Errorf("failed to validate VPC: %w", err)
+			}
+			if !valid {
+				log.Printf("[VPC] [FAILURE] Invalid VPC %s for user %s", req.VPCID, userID)
+				return nil, fmt.Errorf("invalid VPC ID: %s", req.VPCID)
+			}
+			vpcID = req.VPCID
+			log.Printf("[VPC] [SUCCESS] Validated and assigned requested VPC %s to instance %s", vpcID, instanceID)
+		} else {
+			// No VPC specified - get default
+			var err error
+			vpcID, err = s.publisher.GetDefaultVPC(userID)
+			if err != nil {
+				log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v. Using existing default networking.", userID, err)
+			} else {
+				log.Printf("[VPC] [SUCCESS] Assigned default VPC %s to instance %s (user: %s)", vpcID, instanceID, userID)
+			}
+		}
+	}
+
 	// Create instance record immediately with pending status
 	instance := &domain.Instance{
 		ID:        instanceID,
@@ -189,6 +253,7 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		ProxmoxID: 0,
 		CreatedAt: time.Now(),
 		UserID:    userID,
+		VPCID:     vpcID,
 	}
 	if err := s.repo.Create(instance); err != nil {
 		// TODO: Fire event: instance_db_create_failed
@@ -198,7 +263,6 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	// Start VM creation in background
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath)
 	// TODO: Fire event: vm_creation_queued (instance ID)
-	fmt.Println(instance)
 	return instance, nil
 }
 
@@ -251,14 +315,16 @@ func (s *InstanceService) createVMAsync(instance *domain.Instance, req *domain.C
 	instance.ProxmoxID = vmID
 	// TODO: Fire event: instance_status_updating (instance ID, status: running)
 	if err := s.repo.Update(instance); err != nil {
-		// TODO: Fire event: instance_db_update_failed (instance ID, error)
 		fmt.Printf("Failed to update instance %s: %v\n", instance.ID, err)
 		// Cleanup VM on DB failure
 		s.libvirtClient.DeleteVM(instance.VMName)
-		// TODO: Fire event: vm_cleanup_completed (instance ID, VM ID)
 		exec.Command("rm", "-f", newDiskPath).Run()
-		// TODO: Fire event: disk_cleanup_completed (instance ID, disk path)
 		return
+	}
+
+	// Publish INSTANCE_STARTED event to Network Service
+	if s.publisher != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance)
 	}
 
 	// Auto-assign default security group
@@ -304,8 +370,17 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 		return err
 	}
 
-	instance.Status = domain.WaitForShutdown
-	return s.repo.Update(instance)
+	instance.Status = domain.StatusStopped
+	if err := s.repo.Update(instance); err != nil {
+		return err
+	}
+
+	// Publish INSTANCE_STOPPED event
+	if s.publisher != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStopped, instance)
+	}
+
+	return nil
 }
 
 func (s *InstanceService) RestartInstance(instanceID, userID string) error {
@@ -340,7 +415,17 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 		return err
 	}
 
-	return s.repo.UpdateStatus(id, domain.StatusRunning)
+	if err := s.repo.UpdateStatus(id, domain.StatusRunning); err != nil {
+		return err
+	}
+
+	// Publish INSTANCE_STARTED event
+	if s.publisher != nil {
+		instance.Status = domain.StatusRunning
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance)
+	}
+
+	return nil
 }
 
 func (s *InstanceService) DeleteInstance(id, userID string) error {
@@ -457,4 +542,54 @@ func (s *InstanceService) DeleteTag(id, userID string, key string) error {
 		return err
 	}
 	return s.repo.DeleteTag(id, key)
+}
+
+// MoveInstanceVPC moves an existing instance to another VPC.
+func (s *InstanceService) MoveInstanceVPC(instanceID, userID, targetVPCID string) error {
+	// 1. Validate instance ownership and existence
+	instance, err := s.repo.FindByID(instanceID)
+	if err != nil {
+		return err
+	}
+	if instance.UserID != userID {
+		return fmt.Errorf("unauthorized: instance does not belong to user")
+	}
+
+	// 2. Validate target VPC ownership if publisher is available
+	if s.publisher != nil {
+		valid, err := s.publisher.ValidateVPC(userID, targetVPCID)
+		if err != nil {
+			return fmt.Errorf("failed to validate target VPC: %w", err)
+		}
+		if !valid {
+			return fmt.Errorf("invalid target VPC ID: %s", targetVPCID)
+		}
+
+		// 3. Detach from current VPC if it has one
+		if instance.VPCID != "" {
+			if err := s.publisher.DetachResource(userID, instanceID, instance.VPCID); err != nil {
+				log.Printf("[VPC] [WARNING] Detach from VPC %s failed for instance %s: %v", instance.VPCID, instanceID, err)
+			}
+		}
+
+		// 4. Attach to new VPC
+		if err := s.publisher.AttachResource(userID, instanceID, targetVPCID); err != nil {
+			return fmt.Errorf("failed to attach to new VPC: %w", err)
+		}
+	}
+
+	// 5. Update local database
+	oldVPC := instance.VPCID
+	instance.VPCID = targetVPCID
+	if err := s.repo.Update(instance); err != nil {
+		return fmt.Errorf("failed to update instance record: %w", err)
+	}
+
+	log.Printf("[VPC] [SUCCESS] Moved instance %s from VPC %s to %s (user: %s)", instanceID, oldVPC, targetVPCID, userID)
+	
+	// Why this is being implemented:
+	// This allows EC2 instances to participate in tenant-specific VPCs, enabling multi-instance 
+	// and multi-service isolation, while still preserving default behavior for single-instance tenants.
+	
+	return nil
 }

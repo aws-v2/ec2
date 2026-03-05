@@ -30,4 +30,7 @@ var schema10 string
 //go:embed migrations/011_add_template_config_fields.sql
 var schema11 string
 
-var Schema = schema1 + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11
+//go:embed migrations/012_add_vpc_id_to_instances.sql
+var schema12 string
+
+var Schema = schema1 + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12
