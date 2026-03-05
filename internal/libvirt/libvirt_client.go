@@ -29,63 +29,72 @@ func (l *LibvirtClient) Close() error {
 	return err
 }
 
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName string) (int, string, error) {
-	// If bridgeName is empty, fallback to default network for backward compatibility or safety
+
+// CreateAndStartVM creates and starts a VM with a statically configured IP.
+// privateIP and gateway come from the network service — they are pre-allocated
+// before this function is called. The VM boots with this IP already configured
+// via cloud-init network-config, so waitForVMIP is no longer needed.
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
-			return 0, "", fmt.Errorf("network setup failed: %w", err)
+			return 0, fmt.Errorf("network setup failed: %w", err)
 		}
 	} else {
 		fmt.Printf("[Libvirt] Attaching VM %s to bridge %s\n", vmName, bridgeName)
 	}
 
-	// Create cloud-init ISO
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey)
+	// Create cloud-init ISO with static network config baked in
+	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway)
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to create cloud-init ISO: %w", err)
+		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
 	defer cleanupFn()
 
-	// Build VM XML with cloud-init ISO attached
 	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName)
 
 	domain, err := l.conn.DomainDefineXML(xmlConfig)
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to define domain: %w", err)
+		return 0, fmt.Errorf("failed to define domain: %w", err)
 	}
 
 	if err := domain.Create(); err != nil {
 		domain.Undefine()
-		return 0, "", fmt.Errorf("failed to start VM: %w", err)
+		return 0, fmt.Errorf("failed to start VM: %w", err)
 	}
 
 	id, err := domain.GetID()
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to get VM ID: %w", err)
+		return 0, fmt.Errorf("failed to get VM ID: %w", err)
 	}
 
-	// Wait longer for cloud-init to complete
-	ip, err := l.waitForVMIP(domain, 60*time.Second)
-	if err != nil {
-		ip = "" // Continue without IP if timeout
-	}
+	// We no longer wait for DHCP — the IP was pre-allocated and is baked into
+	// cloud-init. The VM will boot with it immediately.
+	fmt.Printf("[Libvirt] VM %s started with static IP %s (bridge: %s)\n", vmName, privateIP, bridgeName)
 
-	return int(id), ip, nil
+	return int(id), nil
 }
 
-func (l *LibvirtClient) createCloudInitISO(vmName, sshKey string) (string, func(), error) {
-	// Temp files can have any name on the filesystem
-	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
-	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
-	absDir, _ := filepath.Abs(l.imagesDir)
-	isoPath := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
+// createCloudInitISO builds a cloud-init ISO with three files:
+//   - user-data  : SSH keys, user setup
+//   - meta-data  : instance ID and hostname
+//   - network-config : static IP configuration (v2 format)
+//
+// The network-config file is what tells cloud-init to configure the NIC with
+// the pre-allocated IP from the network service instead of using DHCP.
+func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway string) (string, func(), error) {
+	userDataPath    := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
+	metaDataPath    := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
+	networkCfgPath  := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
+	absDir, _       := filepath.Abs(l.imagesDir)
+	isoPath         := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
 
 	cleanup := func() {
 		os.Remove(userDataPath)
 		os.Remove(metaDataPath)
+		os.Remove(networkCfgPath)
 	}
 
-	// Write user-data
+	// ── user-data ─────────────────────────────────────────────────────────────
 	keysYaml := ""
 	for _, key := range strings.Split(sshKey, "\n") {
 		if strings.TrimSpace(key) != "" {
@@ -108,7 +117,7 @@ users:
 		return "", nil, fmt.Errorf("failed to write user-data: %w", err)
 	}
 
-	// Write meta-data
+	// ── meta-data ─────────────────────────────────────────────────────────────
 	metaData := fmt.Sprintf(`instance-id: %s
 local-hostname: %s
 `, vmName, vmName)
@@ -118,15 +127,59 @@ local-hostname: %s
 		return "", nil, fmt.Errorf("failed to write meta-data: %w", err)
 	}
 
-	// CRITICAL: Use -graft-points to rename files inside ISO
-	// Cloud-init expects files named exactly "user-data" and "meta-data"
+	// ── network-config ────────────────────────────────────────────────────────
+	// Cloud-init v2 network config format.
+	// This tells the VM to configure eth0 with the pre-allocated static IP
+	// instead of requesting one via DHCP. The IP and gateway come from the
+	// network service which allocated them before VM creation.
+	//
+	// /24 prefix is assumed — if your subnets use different sizes you can pass
+	// the prefix length through as an extra parameter.
+	//
+	// DNS is set to 8.8.8.8 (Google) — adjust if you have an internal resolver.
+	var networkConfig string
+	if privateIP != "" && gateway != "" {
+		networkConfig = fmt.Sprintf(`version: 2
+ethernets:
+  eth0:
+    dhcp4: false
+    addresses:
+      - %s/24
+    gateway4: %s
+    nameservers:
+      addresses:
+        - 8.8.8.8
+        - 8.8.4.4
+`, privateIP, gateway)
+	} else {
+		// Fallback to DHCP if no IP was provided — should not happen in normal
+		// flow since network service always allocates before VM creation, but
+		// kept as a safety net for local dev without a network service.
+		fmt.Printf("[Libvirt] [WARN] No static IP provided for %s — falling back to DHCP\n", vmName)
+		networkConfig = `version: 2
+ethernets:
+  eth0:
+    dhcp4: true
+`
+	}
+
+	if err := os.WriteFile(networkCfgPath, []byte(networkConfig), 0600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to write network-config: %w", err)
+	}
+
+	// ── Build ISO ─────────────────────────────────────────────────────────────
+	// network-config must be named exactly "network-config" inside the ISO
+	// for cloud-init to pick it up automatically.
 	cmd := exec.Command("genisoimage",
 		"-output", isoPath,
 		"-volid", "cidata",
 		"-joliet", "-rock",
 		"-graft-points",
 		"user-data="+userDataPath,
-		"meta-data="+metaDataPath)
+		"meta-data="+metaDataPath,
+		"network-config="+networkCfgPath,
+	)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -134,10 +187,33 @@ local-hostname: %s
 		return "", nil, fmt.Errorf("genisoimage failed: %w\nOutput: %s", err, output)
 	}
 
-	fmt.Printf("✓ Cloud-init ISO created: %s\n", isoPath)
+	fmt.Printf("✓ Cloud-init ISO created: %s (static IP: %s)\n", isoPath, privateIP)
 
 	return isoPath, cleanup, nil
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 func (l *LibvirtClient) RestartVM(vmName string) error {
 	// Lookup the domain by name
