@@ -110,7 +110,7 @@ func main() {
 
 	// 3. Initialize Application Layer (Services)
 	log.Println("Initializing services...")
-	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient)
+	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher)
 	if err := networkingService.SeedDefaultSecurityGroup(); err != nil {
 		log.Printf("Warning: Failed to seed default security group: %v", err)
 	}

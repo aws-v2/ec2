@@ -22,6 +22,8 @@ type Publisher interface {
 	ValidateVPC(tenantID, vpcID string) (bool, error)
 	AttachResource(tenantID, instanceID, vpcID string) (string, error)
 	DetachResource(tenantID, instanceID, vpcID string) error
+	ListVPCs(tenantID string) ([]domain.VPC, error)
+	CreateVPC(tenantID, vpcName, requestedBy string) error
 
 
 	PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
@@ -378,7 +380,6 @@ func (p *NATSPublisher) AttachResource(tenantID, instanceID, vpcID string) (stri
 	return response.PrivateIP, nil
 }
 
-// DetachResource sends a request to the Network Service to detach an instance from a VPC.
 func (p *NATSPublisher) DetachResource(tenantID, instanceID, vpcID string) error {
 	if p == nil || p.nc == nil {
 		return fmt.Errorf("NATS publisher or connection not initialized")
@@ -423,3 +424,83 @@ func (p *NATSPublisher) DetachResource(tenantID, instanceID, vpcID string) error
 	log.Printf("[NATS] [SUCCESS] Resource detached: correlation_id=%s", correlationID)
 	return nil
 }
+
+type listVPCsRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	TenantID      string `json:"tenant_id"`
+}
+
+type listVPCsResponse struct {
+	VPCs  []domain.VPC `json:"vpcs"`
+	Error string       `json:"error"`
+}
+
+type createVPCEvent struct {
+	CorrelationID string `json:"correlation_id"`
+	TenantID      string `json:"tenant_id"`
+	VPCName       string `json:"vpc_name"`
+	RequestedBy   string `json:"requested_by"`
+}
+
+// ListVPCs requests the list of VPCs for a tenant from the Network Service via NATS.
+func (p *NATSPublisher) ListVPCs(tenantID string) ([]domain.VPC, error) {
+	if p == nil || p.nc == nil {
+		return nil, fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	req := listVPCsRequest{
+		CorrelationID: correlationID,
+		TenantID:      tenantID,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	log.Printf("[RDS-NATS] Sending ListVPCs request for tenant %s (correlation_id=%s)", tenantID, correlationID)
+
+	msg, err := p.nc.Request("dev.network.v1.vpc.list", reqData, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var resp listVPCsResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if resp.Error != "" {
+		return nil, fmt.Errorf("failed to list VPCs: %s", resp.Error)
+	}
+
+	log.Printf("[NATS] Successfully retrieved %d VPCs for tenant %s", len(resp.VPCs), tenantID)
+	return resp.VPCs, nil
+}
+
+// CreateVPC dispatches an asynchronous NATS message to create a new VPC.
+func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	event := createVPCEvent{
+		CorrelationID: correlationID,
+		TenantID:      tenantID,
+		VPCName:       vpcName,
+		RequestedBy:   requestedBy,
+	}
+
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal create VPC event: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] Publishing CreateVPC event for tenant %s, vpc %s (correlation_id=%s)", tenantID, vpcName, correlationID)
+	if err := p.nc.Publish("dev.network.v1.vpc.create", eventData); err != nil {
+		return fmt.Errorf("failed to publish create VPC event: %w", err)
+	}
+
+	return nil
+}
