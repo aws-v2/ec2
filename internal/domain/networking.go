@@ -19,6 +19,7 @@ type IPAllocation struct {
 	PortMappings string    `json:"port_mappings" db:"port_mappings"`
 	Status       string    `json:"status" db:"status"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UserID       string    `json:"user_id" db:"user_id"`
 }
 
 type AllocateIPRequest struct {
@@ -44,6 +45,7 @@ type SecurityGroup struct {
 	Description string              `json:"description" db:"description"`
 	Rules       []SecurityGroupRule `json:"rules"` // Now structured
 	CreatedAt   time.Time           `json:"created_at" db:"created_at"`
+	UserID      string              `json:"user_id" db:"user_id"`
 }
 
 type CreateSecurityGroupRequest struct {

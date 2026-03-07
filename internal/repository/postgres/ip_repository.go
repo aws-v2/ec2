@@ -17,12 +17,12 @@ func NewIPRepository(db *sqlx.DB) domain.IPRepository {
 }
 
 func (r *ipRepository) Create(ip *domain.IPAllocation) error {
-	query := `INSERT INTO ip_allocations (instance_id, public_ip, private_ip, port_mappings, status, created_at) 
-	          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	query := `INSERT INTO ip_allocations (instance_id, public_ip, private_ip, port_mappings, status, created_at, user_id) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
 
 	ip.CreatedAt = time.Now()
 	err := r.db.QueryRow(query, ip.InstanceID, ip.PublicIP, ip.PrivateIP, ip.PortMappings,
-		ip.Status, ip.CreatedAt).Scan(&ip.ID)
+		ip.Status, ip.CreatedAt, ip.UserID).Scan(&ip.ID)
 	return err
 }
 

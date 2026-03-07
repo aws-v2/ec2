@@ -19,6 +19,7 @@ type Volume struct {
 	DevicePath       string    `json:"device_path" db:"device_path"`
 	CreatedAt  time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+	UserID     string    `json:"user_id" db:"user_id"`
 }
 
 const (

@@ -19,8 +19,8 @@ func NewVolumeRepository(db *sqlx.DB) *VolumeRepository {
 
 func (r *VolumeRepository) Create(volume *domain.Volume) error {
 	query := `
-		INSERT INTO volumes (volume_name, name, size, format, type, availability_zone, status, attached_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO volumes (volume_name, name, size, format, type, availability_zone, status, attached_to, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at
 	`
 
@@ -33,6 +33,7 @@ func (r *VolumeRepository) Create(volume *domain.Volume) error {
 		volume.AvailabilityZone,
 		volume.Status,
 		nullString(volume.AttachedTo),
+		volume.UserID,
 	).Scan(&volume.ID, &volume.CreatedAt, &volume.UpdatedAt)
 	
 	return err

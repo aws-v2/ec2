@@ -27,6 +27,7 @@ type Template struct {
 	RAM         int            `json:"ram" db:"ram"`
 	Status      TemplateStatus `json:"status" db:"status"`
 	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
+	UserID      string         `json:"user_id" db:"user_id"`
 }
 
 type CreateTemplateRequest struct {

@@ -64,7 +64,7 @@ func Load() (*Config, error) {
 			Port:            getEnvInt("DB_PORT", 5432),
 			User:            getEnv("DB_USER", "root"),
 			Password:        getEnv("DB_PASSWORD", "root"),
-			Database:        getEnv("DB_NAME", "ec2"), // Changed from network_db to ec2 to match context
+			Database:        getEnv("DB_NAME", "ec2_db"), // Changed from network_db to ec2 to match context
 			SSLMode:         getEnv("DB_SSLMODE", "disable"),
 			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
 			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 10),

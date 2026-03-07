@@ -17,12 +17,12 @@ func NewTemplateRepository(db *sqlx.DB) domain.TemplateRepository {
 }
 
 func (r *templateRepository) Create(template *domain.Template) error {
-	query := `INSERT INTO templates (instance_id, name, description, image, cpu, ram, status, created_at) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+	query := `INSERT INTO templates (instance_id, name, description, image, cpu, ram, status, created_at, user_id) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 
 	template.CreatedAt = time.Now()
 	err := r.db.QueryRow(query, template.InstanceID, template.Name, template.Description,
-		template.Image, template.CPU, template.RAM, template.Status, template.CreatedAt).Scan(&template.ID)
+		template.Image, template.CPU, template.RAM, template.Status, template.CreatedAt, template.UserID).Scan(&template.ID)
 	return err
 }
 

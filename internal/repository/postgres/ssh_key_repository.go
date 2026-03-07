@@ -17,11 +17,11 @@ func NewSSHKeyRepository(db *sqlx.DB) domain.SSHKeyRepository {
 }
 
 func (r *sshKeyRepository) Create(key *domain.SSHKey) error {
-	query := `INSERT INTO ssh_keys (name, public_key, created_at) 
-	          VALUES ($1, $2, $3) RETURNING id`
+	query := `INSERT INTO ssh_keys (name, public_key, created_at, user_id) 
+	          VALUES ($1, $2, $3, $4) RETURNING id`
 
 	key.CreatedAt = time.Now()
-	err := r.db.QueryRow(query, key.Name, key.PublicKey, key.CreatedAt).Scan(&key.ID)
+	err := r.db.QueryRow(query, key.Name, key.PublicKey, key.CreatedAt, key.UserID).Scan(&key.ID)
 	return err
 }
 
