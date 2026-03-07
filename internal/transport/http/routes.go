@@ -30,7 +30,14 @@ func SetupRoutes(r *gin.Engine,
 		computeDocs.GET("", docsHandler.GetManifest)
 		computeDocs.GET("/:slug", docsHandler.GetDocBySlug)
 	}
-// "/api/v1/compute/docs"
+	
+	// Compute API
+	compute := r.Group("/api/v1/compute")
+	compute.Use(AuthMiddleware())
+	{
+		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
+	}
+
 	api := r.Group("/api/v1/ec2")
 	api.Use(AuthMiddleware())
 	{
@@ -44,7 +51,7 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/instances/:id/tags", instanceHandler.AddOrUpdateTag)
 		api.DELETE("/instances/:id/tags/:key", instanceHandler.DeleteTag)
 		api.DELETE("/instances/:id", instanceHandler.DeleteInstance)
-		api.POST("/instances/:id/vpc", instanceHandler.MoveInstanceVPC)
+		api.PUT("/instances/:id/vpc", networkingHandler.AssignVPC)
 		api.GET("/instances/:id/terminal", terminalHandler.HandleTerminal)
 
 
@@ -75,6 +82,14 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/ip/allocate", networkingHandler.AllocateIP)
 		api.POST("/ip/:id/release", networkingHandler.ReleaseIP)
 		api.GET("/ip", networkingHandler.ListIPs)
+		
+		vpcs := api.Group("/vpcs")
+		{
+			vpcs.GET("", networkingHandler.ListVPCs)
+			vpcs.POST("", networkingHandler.CreateVPC)
+			vpcs.PUT("/:id/vpc", networkingHandler.AssignVPC)
+
+		}
 
 		// Security Groups
 		api.POST("/security-groups", networkingHandler.CreateSecurityGroup)

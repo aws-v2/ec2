@@ -10,6 +10,26 @@ var (
 	ErrSecurityGroupNotFound = errors.New("security group not found")
 )
 
+// VPC represents a Virtual Private Cloud
+type VPC struct {
+	ID          string    `json:"id" db:"id"`
+	TenantID    string    `json:"tenant_id" db:"tenant_id"`
+	Name        string    `json:"name" db:"name"`
+	CIDR        string    `json:"cidr" db:"cidr"`
+	Status      string    `json:"status" db:"status"`
+	BridgeName  string    `json:"bridge_name" db:"bridge_name"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	IsDefault   bool      `json:"is_default" db:"is_default"`
+}
+
+// ResourceNetworkAssignment represents an assignment of a resource to a VPC
+type ResourceNetworkAssignment struct {
+	ResourceARN string `json:"resource_arn"`
+	VPCID       string `json:"vpc_id"`
+	PrivateIP   string `json:"private_ip"`
+	Status      string `json:"status"`
+}
+
 // IP Allocation
 type IPAllocation struct {
 	ID           int       `json:"id" db:"id"`

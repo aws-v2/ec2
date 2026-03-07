@@ -29,6 +29,10 @@ func (l *LibvirtClient) Close() error {
 	return err
 }
 
+func (l *LibvirtClient) GetImagesDir() string {
+	return l.imagesDir
+}
+
 // CreateAndStartVM creates and starts a VM with a statically configured IP.
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured

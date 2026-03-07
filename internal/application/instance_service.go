@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -632,52 +633,85 @@ func (s *InstanceService) DeleteTag(id, userID string, key string) error {
 	return s.repo.DeleteTag(id, key)
 }
 
-// MoveInstanceVPC moves an existing instance to another VPC.
-func (s *InstanceService) MoveInstanceVPC(instanceID, userID, targetVPCID string) error {
-	// 1. Validate instance ownership and existence
-	instance, err := s.repo.FindByID(instanceID)
+// AssignVPC performs a coordinated VPC migration for an instance.
+func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, newVPCID string) error {
+	// 1. Fetch Instance
+	instance, err := s.GetInstance(instanceID, userID)
 	if err != nil {
 		return err
 	}
-	if instance.UserID != userID {
-		return fmt.Errorf("unauthorized: instance does not belong to user")
+
+	oldVPCID := instance.VPCID
+	if oldVPCID == newVPCID {
+		return fmt.Errorf("instance is already in VPC %s", newVPCID)
 	}
 
-	// 2. Validate target VPC ownership if publisher is available
+	log.Printf("[VPC-HOP] Starting migration for instance %s from VPC %s to %s", instanceID, oldVPCID, newVPCID)
+
+	// 2. Stop the Instance
+	log.Printf("[VPC-HOP] Stopping VM %s", instance.VMName)
+	if err := s.libvirtClient.StopVM(instance.VMName); err != nil {
+		log.Printf("[VPC-HOP] Warning: StopVM failed: %v", err)
+		// Continue anyway as it might already be stopped
+	}
+
+	// 3. Release Old Network
+	if oldVPCID != "" && s.publisher != nil {
+		log.Printf("[VPC-HOP] Releasing network in VPC %s", oldVPCID)
+		if err := s.publisher.ReleaseInstanceNetwork(userID, instanceID, oldVPCID); err != nil {
+			log.Printf("[VPC-HOP] Warning: ReleaseInstanceNetwork failed: %v", err)
+		}
+	}
+
+	// 4. Prepare New Network
+	var privateIP, gateway, bridgeName string
 	if s.publisher != nil {
-		valid, err := s.publisher.ValidateVPC(userID, targetVPCID)
+		log.Printf("[VPC-HOP] Preparing network in VPC %s", newVPCID)
+		privateIP, gateway, bridgeName, err = s.publisher.PrepareInstanceNetwork(userID, instanceID, newVPCID)
 		if err != nil {
-			return fmt.Errorf("failed to validate target VPC: %w", err)
-		}
-		if !valid {
-			return fmt.Errorf("invalid target VPC ID: %s", targetVPCID)
-		}
-
-		// 3. Detach from current VPC if it has one
-		if instance.VPCID != "" {
-			if err := s.publisher.DetachResource(userID, instanceID, instance.VPCID); err != nil {
-				log.Printf("[VPC] [WARNING] Detach from VPC %s failed for instance %s: %v", instance.VPCID, instanceID, err)
-			}
-		}
-
-		// 4. Attach to new VPC
-		if _, err := s.publisher.AttachResource(userID, instanceID, targetVPCID); err != nil {
-			return fmt.Errorf("failed to attach to new VPC: %w", err)
+			return fmt.Errorf("failed to prepare new network in VPC %s: %w", newVPCID, err)
 		}
 	}
 
-	// 5. Update local database
-	oldVPC := instance.VPCID
-	instance.VPCID = targetVPCID
+	// 5. Update Instance Metadata
+	instance.VPCID = newVPCID
+	instance.IP = privateIP
+	// Note: bridgeName might be used in the XML reconfiguration
 	if err := s.repo.Update(instance); err != nil {
 		return fmt.Errorf("failed to update instance record: %w", err)
 	}
 
-	log.Printf("[VPC] [SUCCESS] Moved instance %s from VPC %s to %s (user: %s)", instanceID, oldVPC, targetVPCID, userID)
+	// 6. Re-configure Libvirt XML & Restart
+	// We achieve this by deleting the old definition and creating a new one with same disk but new bridge
+	log.Printf("[VPC-HOP] Reconfiguring VM %s with new bridge %s and IP %s", instance.VMName, bridgeName, privateIP)
+	if err := s.libvirtClient.DeleteVM(instance.VMName); err != nil {
+		log.Printf("[VPC-HOP] Warning: DeleteVM (undefine) failed: %v", err)
+	}
 
-	// Why this is being implemented:
-	// This allows EC2 instances to participate in tenant-specific VPCs, enabling multi-instance
-	// and multi-service isolation, while still preserving default behavior for single-instance tenants.
+	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
+	
+	combinedKeys := instance.SSHKey
+	if s.systemPubKey != "" {
+		combinedKeys += "\n" + s.systemPubKey
+	}
 
+	_, err = s.libvirtClient.CreateAndStartVM(
+		instance.VMName,
+		diskPath,
+		instance.CPU,
+		instance.RAM,
+		combinedKeys,
+		bridgeName,
+		privateIP,
+		gateway,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
+	}
+
+	instance.Status = domain.StatusRunning
+	_ = s.repo.UpdateStatus(instance.ID, domain.StatusRunning)
+
+	log.Printf("[VPC-HOP] Successfully moved instance %s to VPC %s", instanceID, newVPCID)
 	return nil
 }
