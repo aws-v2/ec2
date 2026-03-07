@@ -17,11 +17,11 @@ func NewSecurityGroupRepository(db *sqlx.DB) domain.SecurityGroupRepository {
 }
 
 func (r *securityGroupRepository) Create(sg *domain.SecurityGroup) error {
-	query := `INSERT INTO security_groups (name, description, created_at) 
-	          VALUES ($1, $2, $3) RETURNING id`
+	query := `INSERT INTO security_groups (name, description, created_at, user_id) 
+	          VALUES ($1, $2, $3, $4) RETURNING id`
 
 	sg.CreatedAt = time.Now()
-	err := r.db.QueryRow(query, sg.Name, sg.Description, sg.CreatedAt).Scan(&sg.ID)
+	err := r.db.QueryRow(query, sg.Name, sg.Description, sg.CreatedAt, sg.UserID).Scan(&sg.ID)
 	return err
 }
 
