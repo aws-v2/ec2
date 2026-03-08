@@ -37,7 +37,7 @@ func (l *LibvirtClient) GetImagesDir() string {
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
 // via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway string) (int, error) {
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
@@ -46,8 +46,8 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 		fmt.Printf("[Libvirt] Attaching VM %s to bridge %s\n", vmName, bridgeName)
 	}
 
-	// Create cloud-init ISO with static network config baked in
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway)
+	// Create cloud-init ISO with static network config and metrics agent token baked in
+	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
@@ -85,12 +85,15 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway string) (string, func(), error) {
+func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken string) (string, func(), error) {
 	userDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
 	absDir, _      := filepath.Abs(l.imagesDir)
 	isoPath        := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
+
+	// Derive the instance ID from vmName (vm-i-abc12345 → i-abc12345)
+	instanceID := strings.TrimPrefix(vmName, "vm-")
 
 	cleanup := func() {
 		os.Remove(userDataPath)
@@ -120,7 +123,60 @@ users:
     lock_passwd: false
     ssh-authorized-keys:
 %s
+write_files:
+  - path: /opt/metrics-agent/config
+    permissions: '0600'
+    content: |
+      INSTANCE_ID="__INSTANCE_ID__"
+      IAM_TOKEN="__IAM_TOKEN__"
+      METRICS_ENDPOINT="http://__GATEWAY_IP__:8085/api/v1/internal/metrics"
+
+  - path: /opt/metrics-agent/report.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      source /opt/metrics-agent/config
+      while true; do
+        CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+        MEM_TOTAL=$(free -m | awk '/Mem:/{print $2}')
+        MEM_USED=$(free -m | awk '/Mem:/{print $3}')
+        MEM_PCT=$(awk "BEGIN{printf \"%%%%%.1f\", $MEM_USED/$MEM_TOTAL*100}")
+        curl -s -X POST "${METRICS_ENDPOINT}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${IAM_TOKEN}" \
+          -d "{
+            \"instance_id\": \"${INSTANCE_ID}\",
+            \"cpu_percent\": ${CPU},
+            \"mem_total_mb\": ${MEM_TOTAL},
+            \"mem_used_mb\": ${MEM_USED},
+            \"mem_percent\": ${MEM_PCT}
+          }" 2>/dev/null
+        sleep 5
+      done
+
+  - path: /etc/systemd/system/metrics-agent.service
+    content: |
+      [Unit]
+      Description=Instance Metrics Agent
+      After=network-online.target
+      [Service]
+      Type=simple
+      ExecStart=/opt/metrics-agent/report.sh
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable metrics-agent
+  - systemctl start metrics-agent
 `, keysYaml)
+
+	// ── Replace placeholders with actual values ──────────────────────────────
+	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
+	userData = strings.ReplaceAll(userData, "__IAM_TOKEN__", instanceToken)
+	userData = strings.ReplaceAll(userData, "__GATEWAY_IP__", gateway)
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
 		cleanup()

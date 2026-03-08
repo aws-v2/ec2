@@ -212,6 +212,19 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	vmName := fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
+
+	// ── Step 1b: Request IAM token for the metrics agent ──────────────────────
+	var instanceToken string
+	if s.publisher != nil {
+		var err error
+		instanceToken, err = s.publisher.RequestInstanceToken(userID, instanceID)
+		if err != nil {
+			log.Printf("[IAM] [ERROR] Failed to get instance token for %s: %v", instanceID, err)
+			return nil, fmt.Errorf("failed to get instance token: %w", err)
+		}
+		log.Printf("[IAM] [OK] Received instance token for %s", instanceID)
+	}
+
 	// ── Step 2: Ask Network Service to prepare networking BEFORE creating VM ──
 	// This is the critical change: we get the IP, gateway, and bridge from the
 	// network service first. The VM will be created with this IP baked into
@@ -308,7 +321,7 @@ fmt.Println("---+++++------Preparing network for instance", instanceID)
 	// ── Step 4: Launch VM creation in background ──────────────────────────────
 	// privateIP and gateway are passed in — libvirt will bake them into
 	// cloud-init so the VM boots with a static IP. No DHCP polling.
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken)
 
 	return instance, nil
 }
@@ -316,7 +329,7 @@ fmt.Println("---+++++------Preparing network for instance", instanceID)
 func (s *InstanceService) createVMAsync(
 	instance *domain.Instance,
 	req *domain.CreateInstanceRequest,
-	baseImagePath, newDiskPath, bridgeName, privateIP, gateway string,
+	baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken string,
 ) {
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
@@ -349,7 +362,7 @@ func (s *InstanceService) createVMAsync(
 	// into the cloud-init network-config. The VM boots already knowing its IP.
 	// waitForVMIP is no longer needed since the IP is statically configured.
 	vmID, err := s.libvirtClient.CreateAndStartVM(
-		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway,
+		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway, instanceToken,
 	)
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
@@ -704,6 +717,7 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 		bridgeName,
 		privateIP,
 		gateway,
+		"", // no metrics token needed for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)

@@ -279,6 +279,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		bridgeName,
 		privateIP,
 		gateway,
+		"", // no metrics token needed for VPC migration
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
