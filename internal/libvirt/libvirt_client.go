@@ -86,11 +86,11 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // the pre-allocated IP from the network service instead of using DHCP.
 
 func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken string) (string, func(), error) {
-	userDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
-	metaDataPath   := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
+	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
+	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
-	absDir, _      := filepath.Abs(l.imagesDir)
-	isoPath        := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
+	absDir, _ := filepath.Abs(l.imagesDir)
+	isoPath := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
 
 	// Derive the instance ID from vmName (vm-i-abc12345 → i-abc12345)
 	instanceID := strings.TrimPrefix(vmName, "vm-")
@@ -129,7 +129,7 @@ write_files:
     content: |
       INSTANCE_ID="__INSTANCE_ID__"
       IAM_TOKEN="__IAM_TOKEN__"
-      METRICS_ENDPOINT="http://__GATEWAY_IP__:8085/api/v1/internal/metrics"
+      METRICS_ENDPOINT="http://__GATEWAY_IP__:8099/api/v1/metrics-server/ec2/ingest"
 
   - path: /opt/metrics-agent/report.sh
     permissions: '0755'
