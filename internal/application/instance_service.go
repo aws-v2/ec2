@@ -729,3 +729,35 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	log.Printf("[VPC-HOP] Successfully moved instance %s to VPC %s", instanceID, newVPCID)
 	return nil
 }
+
+// CreateScalingPolicy publishes a scaling policy event via NATS.
+func (s *InstanceService) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
+	if s.publisher == nil {
+		return fmt.Errorf("NATS publisher is not configured")
+	}
+	return s.publisher.PublishScalingPolicy(userID, *req)
+}
+
+// GetScalingPolicies returns all scaling policies for the user.
+func (s *InstanceService) GetScalingPolicies(ctx context.Context, userID string) ([]domain.ScalingPolicy, error) {
+	if s.publisher == nil {
+		return nil, fmt.Errorf("NATS publisher is not configured")
+	}
+	return s.publisher.GetScalingPolicies(userID)
+}
+
+// UpdateScalingPolicy publishes an update event via NATS.
+func (s *InstanceService) UpdateScalingPolicy(ctx context.Context, userID, policyID string, req *domain.UpdateScalingPolicyRequest) error {
+	if s.publisher == nil {
+		return fmt.Errorf("NATS publisher is not configured")
+	}
+	return s.publisher.UpdateScalingPolicy(userID, policyID, *req)
+}
+
+// DeleteScalingPolicy publishes a delete event via NATS.
+func (s *InstanceService) DeleteScalingPolicy(ctx context.Context, userID, policyID string) error {
+	if s.publisher == nil {
+		return fmt.Errorf("NATS publisher is not configured")
+	}
+	return s.publisher.DeleteScalingPolicy(userID, policyID)
+}
