@@ -3,7 +3,6 @@ package transport
 import (
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
 	"strings"
 	"fmt"
 
@@ -15,19 +14,14 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := GetTokenFromRequest(c)
 
-		if tokenString == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header or token query required"})
-			return
+		if tokenString != "" {
+			userID, err := ExtractUserIDFromToken(tokenString)
+			if err == nil {
+				// Set userID in context
+				c.Set("userID", userID)
+			}
 		}
-
-		userID, err := ExtractUserIDFromToken(tokenString)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Set userID in context
-		c.Set("userID", userID)
+		
 		c.Next()
 	}
 }

@@ -21,13 +21,13 @@ func (r *snapshotRepository) GetDB() *sqlx.DB {
 }
 
 func (r *snapshotRepository) Create(snapshot *domain.Snapshot) error {
-	query := `INSERT INTO snapshots (instance_id, volume_id, name, description, status, created_at, size) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+	query := `INSERT INTO snapshots (instance_id, volume_id, name, description, status, created_at, size, user_id) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 
 	snapshot.CreatedAt = time.Now()
 
 	err := r.db.QueryRow(query, snapshot.InstanceID, snapshot.VolumeID, snapshot.Name, snapshot.Description,
-		snapshot.Status, snapshot.CreatedAt, snapshot.Size).Scan(&snapshot.ID)
+		snapshot.Status, snapshot.CreatedAt, snapshot.Size, snapshot.UserID).Scan(&snapshot.ID)
 	return err
 }
 

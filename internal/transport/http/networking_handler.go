@@ -224,3 +224,69 @@ func (h *NetworkingHandler) ListForInstance(c *gin.Context) {
 
 	SendSuccess(c, http.StatusOK, "Security groups for instance retrieved successfully", sgs)
 }
+
+func (h *NetworkingHandler) ListVPCs(c *gin.Context) {
+	tenantID := ""
+	if val, ok := c.Get("userID"); ok {
+		tenantID = val.(string)
+	}
+
+	vpcs, err := h.service.ListVPCs(c.Request.Context(), tenantID)
+	if err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if vpcs == nil {
+		vpcs = []domain.VPC{}
+	}
+
+	SendSuccess(c, http.StatusOK, "VPCs fetched successfully", vpcs)
+}
+
+type CreateVPCPayload struct {
+	Name string `json:"name" binding:"required"`
+}
+
+func (h *NetworkingHandler) CreateVPC(c *gin.Context) {
+	var payload CreateVPCPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	tenantID := ""
+	if val, ok := c.Get("userID"); ok {
+		tenantID = val.(string)
+	}
+
+	if err := h.service.CreateVPC(c.Request.Context(), tenantID, payload.Name); err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusAccepted, "VPC creation request submitted successfully", nil)
+}
+
+func (h *NetworkingHandler) AssignVPC(c *gin.Context) {
+	instanceID := c.Param("id")
+	tenantID := ""
+	if val, ok := c.Get("userID"); ok {
+		tenantID = val.(string)
+	}
+
+	var req struct {
+		VPCID string `json:"vpc_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.service.AssignVPC(tenantID, instanceID, req.VPCID); err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusOK, "VPC assignment successful", nil)
+}

@@ -212,19 +212,19 @@ func (h *InstanceHandler) DeleteTag(c *gin.Context) {
 	SendSuccess(c, http.StatusOK, "Tag deleted successfully", nil)
 }
 
-func (h *InstanceHandler) MoveInstanceVPC(c *gin.Context) {
+func (h *InstanceHandler) AssignVPC(c *gin.Context) {
 	instanceID := c.Param("id")
 	userID := c.GetString("userID")
 
 	var req struct {
-		TargetVPCID string `json:"target_vpc_id" binding:"required"`
+		VPCID string `json:"vpc_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.service.MoveInstanceVPC(instanceID, userID, req.TargetVPCID); err != nil {
+	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID); err != nil {
 		if err == domain.ErrInstanceNotFound {
 			SendError(c, http.StatusNotFound, "instance not found")
 			return

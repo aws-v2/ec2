@@ -110,7 +110,7 @@ func main() {
 
 	// 3. Initialize Application Layer (Services)
 	log.Println("Initializing services...")
-	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient)
+	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher)
 	if err := networkingService.SeedDefaultSecurityGroup(); err != nil {
 		log.Printf("Warning: Failed to seed default security group: %v", err)
 	}
@@ -250,13 +250,14 @@ type EurekaConfig struct {
 // getEurekaConfig reads Eureka configuration from environment variables
 func getEurekaConfig() *EurekaConfig {
 	// Windows host IP for Eureka server
-	windowsHostIP := getEnv("WINDOWS_HOST_IP", "192.168.1.2")
+	// windowsHostIP := getEnv("WINDOWS_HOST_IP", "192.168.1.2")
 	
 	// Get WSL's IP address that Windows can reach
 	wslIP := getWSLIPAddress()
 	
 	return &EurekaConfig{
-		ServerURL:         getEnv("EUREKA_SERVER_URL", fmt.Sprintf("http://%s:8761/eureka", windowsHostIP)),
+		ServerURL:          getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),
+		// ServerURL:         getEnv("EUREKA_SERVER_URL", fmt.Sprintf("http://%s:8761/eureka", windowsHostIP)),
 		AppName:           getEnv("EUREKA_APP_NAME", "ec2-service"),
 		HostName:          getEnv("EUREKA_HOSTNAME", wslIP),  // Use WSL IP
 		IPAddr:            getEnv("EUREKA_IP_ADDR", wslIP),   // Use WSL IP
