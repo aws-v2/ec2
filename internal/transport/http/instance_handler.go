@@ -235,3 +235,66 @@ func (h *InstanceHandler) AssignVPC(c *gin.Context) {
 
 	SendSuccess(c, http.StatusOK, "instance moved to new VPC", nil)
 }
+
+func (h *InstanceHandler) CreateScalingPolicy(c *gin.Context) {
+	userID := c.GetString("userID")
+
+	var req domain.ScalingPolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.service.CreateScalingPolicy(c.Request.Context(), userID, &req); err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusAccepted, "Scaling policy creation event published", nil)
+}
+
+func (h *InstanceHandler) GetScalingPolicies(c *gin.Context) {
+	userID := c.GetString("userID")
+
+	policies, err := h.service.GetScalingPolicies(c.Request.Context(), userID)
+	if err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if policies == nil {
+		policies = []domain.ScalingPolicy{}
+	}
+
+	SendSuccess(c, http.StatusOK, "Scaling policies retrieved successfully", policies)
+}
+
+func (h *InstanceHandler) UpdateScalingPolicy(c *gin.Context) {
+	userID := c.GetString("userID")
+	policyID := c.Param("id")
+
+	var req domain.UpdateScalingPolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.service.UpdateScalingPolicy(c.Request.Context(), userID, policyID, &req); err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusAccepted, "Scaling policy update event published", nil)
+}
+
+func (h *InstanceHandler) DeleteScalingPolicy(c *gin.Context) {
+	userID := c.GetString("userID")
+	policyID := c.Param("id")
+
+	if err := h.service.DeleteScalingPolicy(c.Request.Context(), userID, policyID); err != nil {
+		SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SendSuccess(c, http.StatusAccepted, "Scaling policy delete event published", nil)
+}
