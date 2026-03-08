@@ -129,7 +129,7 @@ write_files:
     content: |
       INSTANCE_ID="__INSTANCE_ID__"
       IAM_TOKEN="__IAM_TOKEN__"
-      METRICS_ENDPOINT="http://__GATEWAY_IP__:8099/api/v1/metrics-server/ec2/ingest"
+      METRICS_ENDPOINT="http://192.168.1.7:8099/api/v1/metrics-server/ec2/ingest"
 
   - path: /opt/metrics-agent/report.sh
     permissions: '0755'
@@ -137,10 +137,11 @@ write_files:
       #!/bin/bash
       source /opt/metrics-agent/config
       while true; do
-        CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+        CPU=$(top -bn2 -d 1 | grep "Cpu(s)" | tail -n 1 | awk '{print 100 - $8}')
+        if [ -z "$CPU" ]; then CPU="0.0"; fi
         MEM_TOTAL=$(free -m | awk '/Mem:/{print $2}')
         MEM_USED=$(free -m | awk '/Mem:/{print $3}')
-        MEM_PCT=$(awk "BEGIN{printf \"%%%%%.1f\", $MEM_USED/$MEM_TOTAL*100}")
+        MEM_PCT=$(awk -v used="$MEM_USED" -v total="$MEM_TOTAL" 'BEGIN{printf "%%.1f", (used/total)*100}')
         curl -s -X POST "${METRICS_ENDPOINT}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${IAM_TOKEN}" \
@@ -149,7 +150,9 @@ write_files:
             \"cpu_percent\": ${CPU},
             \"mem_total_mb\": ${MEM_TOTAL},
             \"mem_used_mb\": ${MEM_USED},
-            \"mem_percent\": ${MEM_PCT}
+            \"mem_percent\": ${MEM_PCT},
+            \"disk_total_gb\": 0,
+            \"disk_used_gb\": 0
           }" 2>/dev/null
         sleep 5
       done
