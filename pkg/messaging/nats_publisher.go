@@ -27,7 +27,8 @@ type Publisher interface {
 
 
 	PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
-ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
+	ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
+	RequestInstanceToken(userID, instanceID string) (string, error)
 }
 
 type NATSPublisher struct {
@@ -503,4 +504,64 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 	}
 
 	return nil
+}
+
+// ── IAM Token Request ────────────────────────────────────────────────────────
+
+type InstanceTokenRequest struct {
+	InstanceID string `json:"instance_id"`
+	UserID     string `json:"user_id"`
+}
+
+type InstanceTokenResponse struct {
+	Token string `json:"token"`
+	Error string `json:"error,omitempty"`
+}
+
+// RequestInstanceToken asks the IAM service for a scoped JWT token that will be
+// injected into the VM via cloud-init so the metrics agent can authenticate.
+func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.iam.v1.token.generate"
+
+	req := InstanceTokenRequest{
+		InstanceID: instanceID,
+		UserID:     userID,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal instance token request: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
+		subject, correlationID, userID, instanceID)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		log.Printf("[NATS] [ERROR] RequestInstanceToken failed: correlation_id=%s error=%v", correlationID, err)
+		return "", fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var resp InstanceTokenResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal instance token response: %w", err)
+	}
+
+	if resp.Error != "" {
+		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=%s", correlationID, resp.Error)
+		return "", fmt.Errorf("IAM service error: %s", resp.Error)
+	}
+
+	if resp.Token == "" {
+		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=empty_token", correlationID)
+		return "", fmt.Errorf("IAM service returned an empty token")
+	}
+
+	log.Printf("[NATS] [SUCCESS] Instance token received: correlation_id=%s instance_id=%s", correlationID, instanceID)
+	return resp.Token, nil
 }
