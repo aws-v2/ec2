@@ -27,6 +27,7 @@ type Snapshot struct {
 	Status      SnapshotStatus `json:"status" db:"status"`
 	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
 	Size        int            `json:"size" db:"size"`
+	UserID      string         `json:"user_id" db:"user_id"`
 }
 
 type VolumeSnapshot struct {
@@ -37,6 +38,7 @@ type VolumeSnapshot struct {
 	Status      SnapshotStatus `json:"status" db:"status"`
 	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
 	Size        int            `json:"size" db:"size"`
+	UserID      string         `json:"user_id" db:"user_id"`
 }
 
 type CreateSnapshotRequest struct {
