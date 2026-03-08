@@ -128,6 +128,19 @@ func main() {
 	terminalService := application.NewTerminalService(instanceService, systemKeyService)
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 
+	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
+	if cfg.NATS.URL != "" {
+		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, instanceService)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize NATS subscriber: %v", err)
+		} else {
+			if err := natsSubscriber.Start(); err != nil {
+				log.Printf("Warning: Failed to start NATS subscriber: %v", err)
+			} else {
+				defer natsSubscriber.Close()
+			}
+		}
+	}
 
 	// 4. Initialize Transport Layer (HTTP Handlers)
 	log.Println("Initializing HTTP handlers...")

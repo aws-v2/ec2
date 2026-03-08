@@ -761,3 +761,122 @@ func (s *InstanceService) DeleteScalingPolicy(ctx context.Context, userID, polic
 	}
 	return s.publisher.DeleteScalingPolicy(userID, policyID)
 }
+
+// ── Scaling Enforcement ──────────────────────────────────────────────────
+
+// EnforceScaling receives a requested scale action from the Metrics Service and attempts to execute it.
+func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error {
+	log.Printf("[SCALER] Enforcing scale action: %s for target: %s (tenant: %s)", event.Action, event.Policy.TargetID, event.TenantID)
+
+	// In the future, target_type could be "asg", and we'd look up the ASG details here.
+	// For now, if the target is an individual instance, we act on that instance directly.
+	if event.Policy.TargetType != "instance" {
+		return fmt.Errorf("unsupported target_type: %s", event.Policy.TargetType)
+	}
+
+	targetInstance, err := s.GetInstance(event.Policy.TargetID, event.TenantID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch target instance %s: %w", event.Policy.TargetID, err)
+	}
+
+	switch event.Action {
+	case domain.ScaleOutAction:
+		return s.handleScaleOut(targetInstance, event.Policy.MaxInstances)
+	case domain.ScaleInAction:
+		return s.handleScaleIn(targetInstance)
+	default:
+		return fmt.Errorf("unknown scale action: %s", event.Action)
+	}
+}
+
+func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInstances int) error {
+	log.Printf("[SCALER] Initiating scale-out based on instance %s (VPC: %s)", baseInstance.ID, baseInstance.VPCID)
+
+	// Check if max limit is reached
+	if maxInstances > 0 {
+		instances, err := s.ListInstances(baseInstance.UserID)
+		if err != nil {
+			return fmt.Errorf("failed to list instances to enforce scale limit: %w", err)
+		}
+
+		// Count instances derived from this baseInstance's ID, or all in same tenant?
+		// For now, count all active instances for this user that share the same image/specs as a proxy for the pool,
+		// or simplest: all running/pending instances for the User.
+		// A more robust ASG implementation would use a specific ASG ID tag.
+		currentCount := 0
+		for _, inst := range instances {
+			if inst.Status == domain.StatusRunning || inst.Status == domain.StatusPending {
+				// Only count instances in the same VPC doing the same workload
+				// For this simplified logic we count everything in the same VPC with the same image
+				if inst.VPCID == baseInstance.VPCID && inst.Image == baseInstance.Image {
+					currentCount++
+				}
+			}
+		}
+
+		if currentCount >= maxInstances {
+			log.Printf("[SCALER] [WARNING] Scale-out blocked. Current instances (%d) reached or exceeded max limit (%d) for user %s", currentCount, maxInstances, baseInstance.UserID)
+			return nil // Ignore alarm gracefully
+		}
+	}
+
+	// We create a new CreateInstanceRequest using the base instance as a exact template
+	req := &domain.CreateInstanceRequest{
+		Image:  baseInstance.Image,
+		CPU:    baseInstance.CPU,
+		RAM:    baseInstance.RAM,
+		SSHKey: baseInstance.SSHKey,
+		VPCID:  baseInstance.VPCID, // The critical part: place the replica in the SAME VPC
+	}
+
+	// We use the normal CreateInstance flow which will:
+	// 1. Ask Network Service for an IP on the base instance's VPC subnet
+	// 2. Provision the VM in libvirt
+	// 3. Register it with the Network Service (publishes INSTANCE_STARTED)
+	newInst, err := s.CreateInstance(req, baseInstance.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to spawn scale-out instance: %w", err)
+	}
+
+	log.Printf("[SCALER] Successfully spawned replica %s for scale-out of %s", newInst.ID, baseInstance.ID)
+	// TODO: Eventually register this newInst as a child of the baseInstance in an AutoScalingGroup table
+	return nil
+}
+
+func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
+	log.Printf("[SCALER] Initiating scale-in for target instance %s", baseInstance.ID)
+
+	instances, err := s.ListInstances(baseInstance.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to list instances for scale-in: %w", err)
+	}
+
+	var activeReplicas []*domain.Instance
+	for _, inst := range instances {
+		if (inst.Status == domain.StatusRunning || inst.Status == domain.StatusPending) && inst.ID != baseInstance.ID {
+			if inst.VPCID == baseInstance.VPCID && inst.Image == baseInstance.Image {
+				activeReplicas = append(activeReplicas, inst)
+			}
+		}
+	}
+
+	totalActive := len(activeReplicas) + 1 // including the base instance itself
+	if totalActive <= 1 {
+		log.Printf("[SCALER] [WARNING] Scale-in blocked. Fleet is already at minimum capacity (1 instance).")
+		return nil
+	}
+
+	// Pick a replica to terminate. We'll simply pick the last one found in the slice.
+	// You might typically want to pick the youngest or oldest instance.
+	targetToTerminate := activeReplicas[len(activeReplicas)-1]
+
+	log.Printf("[SCALER] Terminating replica %s to reduce fleet size for %s", targetToTerminate.ID, baseInstance.ID)
+	
+	err = s.DeleteInstance(targetToTerminate.ID, targetToTerminate.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to terminate replica %s during scale-in: %w", targetToTerminate.ID, err)
+	}
+
+	log.Printf("[SCALER] Successfully terminated replica %s", targetToTerminate.ID)
+	return nil
+}

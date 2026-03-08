@@ -643,6 +643,7 @@ func (p *NATSPublisher) GetScalingPolicies(tenantID string) ([]domain.ScalingPol
 	}
 
 	log.Printf("[NATS] [SUCCESS] Retrieved %d policies: correlation_id=%s", len(response.Policies), correlationID)
+	log.Printf("[NATS] [SUCCESS] Policies: %v", response.Policies)
 	return response.Policies, nil
 }
 
@@ -709,4 +710,4 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 
 	log.Printf("[NATS] [SUCCESS] Published delete policy event: correlation_id=%s policy_id=%s", correlationID, policyID)
 	return nil
-}
+}
