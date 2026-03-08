@@ -222,7 +222,7 @@ func (h *NetworkingHandler) ListForInstance(c *gin.Context) {
 		sgs = []*domain.SecurityGroup{}
 	}
 
-	SendSuccess(c, http.StatusOK, "Security groups for instance retrieved successfully", sgs)
+	SendSuccess(c, http.StatusOK, "Security groups for instance retrieved successfully!!", sgs)
 }
 
 func (h *NetworkingHandler) ListVPCs(c *gin.Context) {
