@@ -60,6 +60,12 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/instances/:id/stop", instanceHandler.StopInstance)
 		api.POST("/instances/:id/restart", instanceHandler.RestartInstance)
 
+		// Scaling Policy
+		api.POST("/scaling-policies", instanceHandler.CreateScalingPolicy)
+		api.GET("/scaling-policies", instanceHandler.GetScalingPolicies)
+		api.PUT("/scaling-policies/:id", instanceHandler.UpdateScalingPolicy)
+		api.DELETE("/scaling-policies/:id", instanceHandler.DeleteScalingPolicy)
+
 		// Snapshots
 		api.POST("/instances/:id/snapshot", snapshotHandler.CreateSnapshot)
 		api.GET("/snapshots", snapshotHandler.ListSnapshots)

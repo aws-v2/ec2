@@ -27,7 +27,12 @@ type Publisher interface {
 
 
 	PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
-ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
+	ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
+	RequestInstanceToken(userID, instanceID string) (string, error)
+	PublishScalingPolicy(tenantID string, policy domain.ScalingPolicyRequest) error
+	GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error)
+	UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
+	DeleteScalingPolicy(tenantID, policyID string) error
 }
 
 type NATSPublisher struct {
@@ -503,4 +508,206 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 	}
 
 	return nil
-}
+}
+
+// ── IAM Token Request ────────────────────────────────────────────────────────
+
+type InstanceTokenRequest struct {
+	InstanceID string `json:"instance_id"`
+	UserID     string `json:"user_id"`
+}
+
+type InstanceTokenResponse struct {
+	Token string `json:"token"`
+	Error string `json:"error,omitempty"`
+}
+
+// RequestInstanceToken asks the IAM service for a scoped JWT token that will be
+// injected into the VM via cloud-init so the metrics agent can authenticate.
+func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.iam.v1.token.generate"
+
+	req := InstanceTokenRequest{
+		InstanceID: instanceID,
+		UserID:     userID,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal instance token request: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
+		subject, correlationID, userID, instanceID)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		log.Printf("[NATS] [ERROR] RequestInstanceToken failed: correlation_id=%s error=%v", correlationID, err)
+		return "", fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var resp InstanceTokenResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal instance token response: %w", err)
+	}
+
+	if resp.Error != "" {
+		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=%s", correlationID, resp.Error)
+		return "", fmt.Errorf("IAM service error: %s", resp.Error)
+	}
+
+	if resp.Token == "" {
+		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=empty_token", correlationID)
+		return "", fmt.Errorf("IAM service returned an empty token")
+	}
+
+	log.Printf("[NATS] [SUCCESS] Instance token received: correlation_id=%s instance_id=%s", correlationID, instanceID)
+	return resp.Token, nil
+}
+
+// PublishScalingPolicy publishes a scaling policy creation event to the metrics service.
+func (p *NATSPublisher) PublishScalingPolicy(tenantID string, policy domain.ScalingPolicyRequest) error {
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.metrics.v1.scaling_policy.create"
+
+	event := map[string]interface{}{
+		"correlation_id": correlationID,
+		"tenant_id":      tenantID,
+		"policy":         policy,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scaling policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s tenant_id=%s target_id=%s",
+		subject, correlationID, tenantID, policy.TargetID)
+
+	if err := p.nc.Publish(subject, data); err != nil {
+		log.Printf("[NATS] [ERROR] Failed to publish scaling policy event: correlation_id=%s error=%v", correlationID, err)
+		return fmt.Errorf("failed to publish scaling policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [SUCCESS] Published scaling policy event: correlation_id=%s target_id=%s", correlationID, policy.TargetID)
+	return nil
+}
+
+// GetScalingPolicies requests the scaling policies for a tenant from the metrics service.
+func (p *NATSPublisher) GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error) {
+	if p == nil || p.nc == nil {
+		return nil, fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.metrics.v1.scaling_policy.list"
+
+	req := map[string]string{
+		"correlation_id": correlationID,
+		"tenant_id":      tenantID,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal get policies request: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s tenant_id=%s", subject, correlationID, tenantID)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		log.Printf("[NATS] [ERROR] GetScalingPolicies failed: correlation_id=%s error=%v", correlationID, err)
+		return nil, fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var response struct {
+		Policies []domain.ScalingPolicy `json:"policies"`
+		Error    string                 `json:"error"`
+	}
+	if err := json.Unmarshal(msg.Data, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal policies response: %w", err)
+	}
+
+	if response.Error != "" {
+		log.Printf("[NATS] [FAILURE] GetScalingPolicies: correlation_id=%s error=%s", correlationID, response.Error)
+		return nil, fmt.Errorf("metrics service error: %s", response.Error)
+	}
+
+	log.Printf("[NATS] [SUCCESS] Retrieved %d policies: correlation_id=%s", len(response.Policies), correlationID)
+	log.Printf("[NATS] [SUCCESS] Policies: %v", response.Policies)
+	return response.Policies, nil
+}
+
+// UpdateScalingPolicy publishes an update event for a scaling policy.
+func (p *NATSPublisher) UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error {
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.metrics.v1.scaling_policy.update"
+
+	event := map[string]interface{}{
+		"correlation_id": correlationID,
+		"tenant_id":      tenantID,
+		"policy_id":      policyID,
+		"update":         req,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal update policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s tenant_id=%s policy_id=%s",
+		subject, correlationID, tenantID, policyID)
+
+	if err := p.nc.Publish(subject, data); err != nil {
+		log.Printf("[NATS] [ERROR] Failed to publish update policy event: correlation_id=%s error=%v", correlationID, err)
+		return fmt.Errorf("failed to publish update scaling policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [SUCCESS] Published update policy event: correlation_id=%s policy_id=%s", correlationID, policyID)
+	return nil
+}
+
+// DeleteScalingPolicy publishes a delete event for a scaling policy.
+func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	correlationID := uuid.New().String()
+	subject := "dev.metrics.v1.scaling_policy.delete"
+
+	event := map[string]interface{}{
+		"correlation_id": correlationID,
+		"tenant_id":      tenantID,
+		"policy_id":      policyID,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delete policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s tenant_id=%s policy_id=%s",
+		subject, correlationID, tenantID, policyID)
+
+	if err := p.nc.Publish(subject, data); err != nil {
+		log.Printf("[NATS] [ERROR] Failed to publish delete policy event: correlation_id=%s error=%v", correlationID, err)
+		return fmt.Errorf("failed to publish delete scaling policy event: %w", err)
+	}
+
+	log.Printf("[NATS] [SUCCESS] Published delete policy event: correlation_id=%s policy_id=%s", correlationID, policyID)
+	return nil
+}
