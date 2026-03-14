@@ -18,8 +18,8 @@ func TestConfigDefaults(t *testing.T) {
 	}
 
 	// Test some defaults from internal/config/config.go
-	if cfg.Server.Port != "8085" {
-		t.Errorf("Expected default server port 8085, got %s", cfg.Server.Port)
+	if cfg.Server.Port != "8088" {
+		t.Errorf("Expected default server port 8088, got %s", cfg.Server.Port)
 	}
 
 	if cfg.DB.Port != 5432 {

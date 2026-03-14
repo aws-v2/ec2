@@ -29,7 +29,7 @@ RUN apk add --no-cache ca-certificates libvirt-libs qemu-img
 COPY --from=builder /app/ec2-api .
 
 # Expose the application port
-EXPOSE 8085
+EXPOSE 8088
 
 # Run the application
 CMD ["./ec2-api"]

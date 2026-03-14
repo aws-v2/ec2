@@ -1,6 +1,6 @@
 ### Networking and Security Group Rules Tests
 
-@baseUrl = http://localhost:8085/api/v1/ec2
+@baseUrl = http://localhost:8088/api/v1/ec2
 
 ### 1. Create a Security Group
 # @name createSG
