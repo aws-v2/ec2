@@ -1,0 +1,56 @@
+name: CD - Build and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.3'
+
+    - name: Run Tests
+      run: go test ./... -v
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: qarani/ec2:latest
+
+    - name: Wait for Docker Hub propagation
+      run: sleep 5
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        passphrase: ${{ secrets.EC2_SSH_PASSPHRASE }}
+        script: |
+          docker pull qarani/s3-server:latest
+          docker stop s3-server || true
+          docker rm s3-server || true
+          docker run -d --name s3-server -p 8099:8099 qarani/s3-server:latest
