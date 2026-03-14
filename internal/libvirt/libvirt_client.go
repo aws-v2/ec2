@@ -1,3 +1,5 @@
+//go:build !windows
+
 package libvirt
 
 import (
@@ -8,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"libvirt.org/go/libvirt"
+	libvirt "libvirt.org/go/libvirt"
 )
 
 type LibvirtClient struct {
