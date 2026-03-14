@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
 	"github.com/Qarani-m/ec2-api/internal/application"
 	"github.com/Qarani-m/ec2-api/internal/config"
 	"github.com/Qarani-m/ec2-api/internal/domain"
@@ -37,7 +38,7 @@ func main() {
 
 	postgresConn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		cfg.DB.User, cfg.DB.Password, cfg.DB.Host, cfg.DB.Port, cfg.DB.Database, cfg.DB.SSLMode)
-	
+
 	libvirtURI := cfg.Libvirt.URI
 	imagesDir := cfg.Libvirt.ImagesDir
 	natsSubject := getEnv("NATS_LIFECYCLE_SUBJECT", "dev.compute.v1.instance.lifecycle")
@@ -264,19 +265,19 @@ type EurekaConfig struct {
 func getEurekaConfig() *EurekaConfig {
 	// Windows host IP for Eureka server
 	// windowsHostIP := getEnv("WINDOWS_HOST_IP", "192.168.1.2")
-	
+
 	// Get WSL's IP address that Windows can reach
 	wslIP := getWSLIPAddress()
-	
+
 	return &EurekaConfig{
-		ServerURL:          getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),
+		ServerURL: getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),
 		// ServerURL:         getEnv("EUREKA_SERVER_URL", fmt.Sprintf("http://%s:8761/eureka", windowsHostIP)),
 		AppName:           getEnv("EUREKA_APP_NAME", "ec2-service"),
-		HostName:          getEnv("EUREKA_HOSTNAME", wslIP),  // Use WSL IP
-		IPAddr:            getEnv("EUREKA_IP_ADDR", wslIP),   // Use WSL IP
-		Port:              getEnvInt("SERVER_PORT", 8085),
+		HostName:          getEnv("EUREKA_HOSTNAME", wslIP), // Use WSL IP
+		IPAddr:            getEnv("EUREKA_IP_ADDR", wslIP),  // Use WSL IP
+		Port:              getEnvInt("SERVER_PORT", 8088),
 		VipAddress:        getEnv("EUREKA_VIP_ADDRESS", "ec2-service"),
-		InstanceID:        getEnv("EUREKA_INSTANCE_ID", "ec2-service:8085"),
+		InstanceID:        getEnv("EUREKA_INSTANCE_ID", "ec2-service:8088"),
 		HeartbeatInterval: getEnvDuration("EUREKA_HEARTBEAT_INTERVAL", 30*time.Second),
 	}
 }
@@ -287,7 +288,7 @@ func getWSLIPAddress() string {
 	if ip := os.Getenv("WSL_IP_ADDR"); ip != "" {
 		return ip
 	}
-	
+
 	// Try to get WSL IP programmatically
 	cmd := exec.Command("hostname", "-I")
 	output, err := cmd.Output()
@@ -297,11 +298,12 @@ func getWSLIPAddress() string {
 			return ips[0]
 		}
 	}
-	
+
 	// Fallback to localhost (won't work from Windows but better than nothing)
 	log.Println("⚠️  Could not determine WSL IP, falling back to 127.0.0.1")
 	return "127.0.0.1"
 }
+
 // registerWithEureka registers the service instance with Eureka server
 func registerWithEureka(config *EurekaConfig) error {
 	instance := map[string]interface{}{

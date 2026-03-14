@@ -77,9 +77,9 @@ func Load() (*Config, error) {
 			Password: getEnv("NATS_PASSWORD", ""),
 		},
 		Server: ServerConfig{
-			Port:        getEnv("PORT", "8085"),
+			Port:        getEnv("PORT", "8088"),
 			ServiceName: getEnv("SERVICE_NAME", "ec2-service"),
-			HTTPPort:    getEnvInt("HTTP_PORT", 8085),
+			HTTPPort:    getEnvInt("HTTP_PORT", 8088),
 		},
 		Libvirt: LibvirtConfig{
 			URI:       getEnv("LIBVIRT_URI", "qemu:///system"),
