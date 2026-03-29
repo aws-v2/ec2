@@ -5,6 +5,9 @@ import _ "embed"
 //go:embed migrations/001_initial_schema.sql
 var schema1 string
 
+//go:embed migrations/002_add_user_id.sql
+var schema_userid string
+
 //go:embed migrations/002_fleet_console.sql
 var schema2 string
 
@@ -33,4 +36,4 @@ var schema11 string
 //go:embed migrations/012_add_vpc_id_to_instances.sql
 var schema12 string
 
-var Schema = schema1 + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12
+var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12
