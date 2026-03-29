@@ -331,6 +331,8 @@ func (s *InstanceService) createVMAsync(
 	req *domain.CreateInstanceRequest,
 	baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken string,
 ) {
+	storageARN := req.StorageARN
+	headlessBin := req.HeadlessBin
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
@@ -363,6 +365,7 @@ func (s *InstanceService) createVMAsync(
 	// waitForVMIP is no longer needed since the IP is statically configured.
 	vmID, err := s.libvirtClient.CreateAndStartVM(
 		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway, instanceToken,
+		storageARN, headlessBin,
 	)
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
@@ -718,6 +721,8 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 		privateIP,
 		gateway,
 		"", // no metrics token needed for VPC-hop
+		"", // no storage ARN for VPC-hop
+		"", // no headless bin for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
@@ -799,15 +804,9 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 			return fmt.Errorf("failed to list instances to enforce scale limit: %w", err)
 		}
 
-		// Count instances derived from this baseInstance's ID, or all in same tenant?
-		// For now, count all active instances for this user that share the same image/specs as a proxy for the pool,
-		// or simplest: all running/pending instances for the User.
-		// A more robust ASG implementation would use a specific ASG ID tag.
 		currentCount := 0
 		for _, inst := range instances {
 			if inst.Status == domain.StatusRunning || inst.Status == domain.StatusPending {
-				// Only count instances in the same VPC doing the same workload
-				// For this simplified logic we count everything in the same VPC with the same image
 				if inst.VPCID == baseInstance.VPCID && inst.Image == baseInstance.Image {
 					currentCount++
 				}
@@ -815,32 +814,21 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 		}
 
 		if currentCount >= maxInstances {
-			log.Printf("[SCALER] [WARNING] Scale-out blocked. Current instances (%d) reached or exceeded max limit (%d) for user %s", currentCount, maxInstances, baseInstance.UserID)
-			return nil // Ignore alarm gracefully
+			log.Printf("[SCALER] [WARNING] Scale-out blocked. Current instances (%d) reached or exceeded max limit (%d)", currentCount, maxInstances)
+			return nil
 		}
 	}
 
-	// We create a new CreateInstanceRequest using the base instance as a exact template
 	req := &domain.CreateInstanceRequest{
 		Image:  baseInstance.Image,
 		CPU:    baseInstance.CPU,
 		RAM:    baseInstance.RAM,
 		SSHKey: baseInstance.SSHKey,
-		VPCID:  baseInstance.VPCID, // The critical part: place the replica in the SAME VPC
+		VPCID:  baseInstance.VPCID,
 	}
 
-	// We use the normal CreateInstance flow which will:
-	// 1. Ask Network Service for an IP on the base instance's VPC subnet
-	// 2. Provision the VM in libvirt
-	// 3. Register it with the Network Service (publishes INSTANCE_STARTED)
-	newInst, err := s.CreateInstance(req, baseInstance.UserID)
-	if err != nil {
-		return fmt.Errorf("failed to spawn scale-out instance: %w", err)
-	}
-
-	log.Printf("[SCALER] Successfully spawned replica %s for scale-out of %s", newInst.ID, baseInstance.ID)
-	// TODO: Eventually register this newInst as a child of the baseInstance in an AutoScalingGroup table
-	return nil
+	_, err := s.CreateInstance(req, baseInstance.UserID)
+	return err
 }
 
 func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
@@ -860,23 +848,34 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 		}
 	}
 
-	totalActive := len(activeReplicas) + 1 // including the base instance itself
-	if totalActive <= 1 {
-		log.Printf("[SCALER] [WARNING] Scale-in blocked. Fleet is already at minimum capacity (1 instance).")
+	if len(activeReplicas) == 0 {
+		log.Printf("[SCALER] [WARNING] Scale-in blocked. No replicas to terminate.")
 		return nil
 	}
 
-	// Pick a replica to terminate. We'll simply pick the last one found in the slice.
-	// You might typically want to pick the youngest or oldest instance.
 	targetToTerminate := activeReplicas[len(activeReplicas)-1]
+	return s.DeleteInstance(targetToTerminate.ID, targetToTerminate.UserID)
+}
 
-	log.Printf("[SCALER] Terminating replica %s to reduce fleet size for %s", targetToTerminate.ID, baseInstance.ID)
-	
-	err = s.DeleteInstance(targetToTerminate.ID, targetToTerminate.UserID)
-	if err != nil {
-		return fmt.Errorf("failed to terminate replica %s during scale-in: %w", targetToTerminate.ID, err)
+// HandleVMProvision handles a request to provision a new VM for a game.
+func (s *InstanceService) HandleVMProvision(ctx context.Context, event *domain.GameVMProvisionEvent) error {
+	log.Printf("[PROVISIONER] Provisioning VM for game: %s (ID: %d)", event.GameName, event.GameID)
+
+	// Create a provision request
+	req := &domain.CreateInstanceRequest{
+		Image:       "ubuntu-22.04", // Default image for Godot games
+		CPU:         2,              // Standard specs
+		RAM:         4096,           // 4GB RAM
+		SSHKey:      "",             // System key will be added automatically
+		StorageARN:  event.StorageARN,
+		HeadlessBin: event.HeadlessBin,
 	}
 
-	log.Printf("[SCALER] Successfully terminated replica %s", targetToTerminate.ID)
+	// Use a system user for game VMs.
+	_, err := s.CreateInstance(req, "system")
+	if err != nil {
+		return fmt.Errorf("failed to create game instance: %w", err)
+	}
+
 	return nil
 }

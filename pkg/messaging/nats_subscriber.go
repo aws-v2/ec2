@@ -10,17 +10,18 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// ScalingEnforcer is the interface the subscriber expects to call when a scale event occurs.
-type ScalingEnforcer interface {
+// EC2EventHandler is the interface the subscriber expects to call when events occur.
+type EC2EventHandler interface {
 	EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error
+	HandleVMProvision(ctx context.Context, event *domain.GameVMProvisionEvent) error
 }
 
 type NATSSubscriber struct {
 	nc       *nats.Conn
-	enforcer ScalingEnforcer
+	handler  EC2EventHandler
 }
 
-func NewNATSSubscriber(url, user, password string, enforcer ScalingEnforcer) (*NATSSubscriber, error) {
+func NewNATSSubscriber(url, user, password string, handler EC2EventHandler) (*NATSSubscriber, error) {
 	opts := []nats.Option{
 		nats.Name("EC2-Subscriber"),
 	}
@@ -34,16 +35,17 @@ func NewNATSSubscriber(url, user, password string, enforcer ScalingEnforcer) (*N
 	}
 
 	return &NATSSubscriber{
-		nc:       nc,
-		enforcer: enforcer,
+		nc:      nc,
+		handler: handler,
 	}, nil
 }
 
 func (s *NATSSubscriber) Start() error {
-	subject := "dev.ec2.v1.scale.*"
+	// 1. Subscribe to Scaling Events
+	scaleSubject := "dev.ec2.v1.scale.*"
 	queueGroup := "ec2-enforcers"
 
-	_, err := s.nc.QueueSubscribe(subject, queueGroup, func(msg *nats.Msg) {
+	_, err := s.nc.QueueSubscribe(scaleSubject, queueGroup, func(msg *nats.Msg) {
 		var event domain.ScaleEvent
 		if err := json.Unmarshal(msg.Data, &event); err != nil {
 			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal scale event: %v", err)
@@ -52,21 +54,38 @@ func (s *NATSSubscriber) Start() error {
 
 		log.Printf("[NATS-SUB] [INFO] Received scale event: action=%s target=%s", event.Action, event.Policy.TargetID)
 
-		// Process the event in a background goroutine so we don't block the NATS message loop
 		go func() {
-			if err := s.enforcer.EnforceScaling(context.Background(), &event); err != nil {
+			if err := s.handler.EnforceScaling(context.Background(), &event); err != nil {
 				log.Printf("[NATS-SUB] [ERROR] Scaling enforcement failed for %s: %v", event.Policy.TargetID, err)
-			} else {
-				log.Printf("[NATS-SUB] [SUCCESS] Scaling enforcement successful for %s", event.Policy.TargetID)
 			}
 		}()
 	})
-
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to %s: %w", subject, err)
+		return fmt.Errorf("failed to subscribe to %s: %w", scaleSubject, err)
 	}
 
-	log.Printf("[NATS-SUB] Successfully subscribed to %s (queue: %s)", subject, queueGroup)
+	// 2. Subscribe to VM Provision Events
+	provisionSubject := "dev.ec2.v1.vm.provision"
+	_, err = s.nc.QueueSubscribe(provisionSubject, queueGroup, func(msg *nats.Msg) {
+		var event domain.GameVMProvisionEvent
+		if err := json.Unmarshal(msg.Data, &event); err != nil {
+			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal provision event: %v", err)
+			return
+		}
+
+		log.Printf("[NATS-SUB] [INFO] Received provision event for game: %s (ID: %d)", event.GameName, event.GameID)
+
+		go func() {
+			if err := s.handler.HandleVMProvision(context.Background(), &event); err != nil {
+				log.Printf("[NATS-SUB] [ERROR] VM provision failed for game %d: %v", event.GameID, err)
+			}
+		}()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to %s: %w", provisionSubject, err)
+	}
+
+	log.Printf("[NATS-SUB] Successfully subscribed to %s and %s", scaleSubject, provisionSubject)
 	return nil
 }
 

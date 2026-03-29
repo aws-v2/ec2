@@ -39,7 +39,7 @@ func (l *LibvirtClient) GetImagesDir() string {
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
 // via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken string) (int, error) {
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken, storageARN, headlessBin string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
@@ -49,7 +49,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 	}
 
 	// Create cloud-init ISO with static network config and metrics agent token baked in
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken)
+	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, storageARN, headlessBin)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
@@ -87,7 +87,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken string) (string, func(), error) {
+func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, storageARN, headlessBin string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
@@ -172,16 +172,47 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+  - path: /opt/game/provision.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      echo "Starting Godot game provisioner..."
+      apt-get update && apt-get install -y unzip awscli
+      mkdir -p /opt/game/run
+      cd /opt/game/run
+      aws s3 cp "__STORAGE_ARN__" game.zip
+      unzip -o game.zip
+      chmod +x "__HEADLESS_BIN__"
+      echo "Launching game binary: __HEADLESS_BIN__"
+      ./"__HEADLESS_BIN__" --headless --env-port 8080
+
+  - path: /etc/systemd/system/game-server.service
+    content: |
+      [Unit]
+      Description=Godot Game Server
+      After=network-online.target
+      [Service]
+      Type=simple
+      ExecStart=/opt/game/provision.sh
+      Restart=always
+      RestartSec=10
+      [Install]
+      WantedBy=multi-user.target
+
 runcmd:
   - systemctl daemon-reload
   - systemctl enable metrics-agent
   - systemctl start metrics-agent
+  - if [ -n "__STORAGE_ARN__" ]; then systemctl enable game-server && systemctl start game-server; fi
 `, keysYaml)
 
 	// ── Replace placeholders with actual values ──────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
 	userData = strings.ReplaceAll(userData, "__IAM_TOKEN__", instanceToken)
 	userData = strings.ReplaceAll(userData, "__GATEWAY_IP__", gateway)
+	userData = strings.ReplaceAll(userData, "__STORAGE_ARN__", storageARN)
+	userData = strings.ReplaceAll(userData, "__HEADLESS_BIN__", headlessBin)
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
 		cleanup()

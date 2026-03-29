@@ -14,7 +14,7 @@ type Volume struct {
 	Format           string    `json:"format" db:"format"`
 	Type             string    `json:"type" db:"type"`
 	AvailabilityZone string    `json:"availability_zone" db:"availability_zone"`
-	Status           string    `json:"status" json:"Lifecycle_State" db:"status"`
+	Status           string    `json:"status" db:"status"`
 	AttachedTo       string    `json:"attached_to" db:"attached_to"`
 	DevicePath       string    `json:"device_path" db:"device_path"`
 	CreatedAt  time.Time `json:"created_at" db:"created_at"`
