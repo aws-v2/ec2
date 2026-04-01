@@ -39,7 +39,7 @@ func (l *LibvirtClient) GetImagesDir() string {
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
 // via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken, storageARN, headlessBin string) (int, error) {
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
@@ -49,7 +49,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 	}
 
 	// Create cloud-init ISO with static network config and metrics agent token baked in
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, storageARN, headlessBin)
+	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, profile, params)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
@@ -87,7 +87,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, storageARN, headlessBin string) (string, func(), error) {
+func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
@@ -115,18 +115,7 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
 		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
 	}
 
-	userData := fmt.Sprintf(`#cloud-config
-ssh_pwauth: true
-users:
-  - name: ubuntu
-    plain_text_passwd: "ubuntu"
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']
-    shell: /bin/bash
-    lock_passwd: false
-    ssh-authorized-keys:
-%s
-write_files:
-  - path: /opt/metrics-agent/config
+	writeFiles := `  - path: /opt/metrics-agent/config
     permissions: '0600'
     content: |
       INSTANCE_ID="__INSTANCE_ID__"
@@ -142,8 +131,8 @@ write_files:
         CPU=$(top -bn2 -d 1 | grep "Cpu(s)" | tail -n 1 | awk '{print 100 - $8}')
         if [ -z "$CPU" ]; then CPU="0.0"; fi
         MEM_TOTAL=$(free -m | awk '/Mem:/{print $2}')
-        MEM_USED=$(free -m | awk '/Mem:/{print $3}')
-        MEM_PCT=$(awk -v used="$MEM_USED" -v total="$MEM_TOTAL" 'BEGIN{printf "%%.1f", (used/total)*100}')
+        MEM_USED=$(free -m | awk '/Mem:/{print $2}')
+        MEM_PCT=$(awk -v used="$MEM_USED" -v total="$MEM_TOTAL" 'BEGIN{printf "%.1f", (used/total)*100}')
         curl -s -X POST "${METRICS_ENDPOINT}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${IAM_TOKEN}" \
@@ -170,22 +159,32 @@ write_files:
       Restart=always
       RestartSec=5
       [Install]
-      WantedBy=multi-user.target
+      WantedBy=multi-user.target`
 
+	runCmd := `  - systemctl daemon-reload
+  - systemctl enable metrics-agent
+  - systemctl start metrics-agent`
+
+	// ── Select Profile Template ──────────────────────────────────────────────
+	profileContent := ""
+	switch profile {
+	case "gamelift":
+		profileContent = `
   - path: /opt/game/provision.sh
     permissions: '0755'
     content: |
       #!/bin/bash
       set -e
       echo "Starting Godot game provisioner..."
-      apt-get update && apt-get install -y unzip awscli
+      apt-get update && apt-get install -y unzip curl
       mkdir -p /opt/game/run
       cd /opt/game/run
-      aws s3 cp "__STORAGE_ARN__" game.zip
+      curl -L -o game.zip "{{DOWNLOAD_URL}}"
       unzip -o game.zip
-      chmod +x "__HEADLESS_BIN__"
-      echo "Launching game binary: __HEADLESS_BIN__"
-      ./"__HEADLESS_BIN__" --headless --env-port 8080
+      chmod +x "{{HEADLESS_BIN}}"
+      echo "Launching game binary: {{HEADLESS_BIN}}"
+      export BACKEND_URL="{{BACKEND_URL}}"
+      ./"{{HEADLESS_BIN}}" --headless --env-port 8080
 
   - path: /etc/systemd/system/game-server.service
     content: |
@@ -194,25 +193,47 @@ write_files:
       After=network-online.target
       [Service]
       Type=simple
+      Environment="BACKEND_URL={{BACKEND_URL}}"
       ExecStart=/opt/game/provision.sh
       Restart=always
       RestartSec=10
       [Install]
       WantedBy=multi-user.target
+`
+		runCmd += "\n  - systemctl enable game-server && systemctl start game-server"
+	default:
+		// Vanilla profile has no extra files or commands
+		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n", vmName)
+	}
+
+	userData := fmt.Sprintf(`#cloud-config
+ssh_pwauth: true
+users:
+  - name: ubuntu
+    plain_text_passwd: "ubuntu"
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    lock_passwd: false
+    ssh-authorized-keys:
+%s
+write_files:
+%s
+%s
 
 runcmd:
-  - systemctl daemon-reload
-  - systemctl enable metrics-agent
-  - systemctl start metrics-agent
-  - if [ -n "__STORAGE_ARN__" ]; then systemctl enable game-server && systemctl start game-server; fi
-`, keysYaml)
+%s
+`, keysYaml, writeFiles, profileContent, runCmd)
 
-	// ── Replace placeholders with actual values ──────────────────────────────
+	// ── Replace basic placeholders ───────────────────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
 	userData = strings.ReplaceAll(userData, "__IAM_TOKEN__", instanceToken)
 	userData = strings.ReplaceAll(userData, "__GATEWAY_IP__", gateway)
-	userData = strings.ReplaceAll(userData, "__STORAGE_ARN__", storageARN)
-	userData = strings.ReplaceAll(userData, "__HEADLESS_BIN__", headlessBin)
+
+	// ── Replace Dynamic Parameters ───────────────────────────────────────────
+	for key, value := range params {
+		placeholder := fmt.Sprintf("{{%s}}", strings.ToUpper(key))
+		userData = strings.ReplaceAll(userData, placeholder, value)
+	}
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
 		cleanup()

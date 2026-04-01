@@ -331,8 +331,8 @@ func (s *InstanceService) createVMAsync(
 	req *domain.CreateInstanceRequest,
 	baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken string,
 ) {
-	storageARN := req.StorageARN
-	headlessBin := req.HeadlessBin
+	profile := req.Profile
+	params := req.Parameters
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
@@ -365,7 +365,7 @@ func (s *InstanceService) createVMAsync(
 	// waitForVMIP is no longer needed since the IP is statically configured.
 	vmID, err := s.libvirtClient.CreateAndStartVM(
 		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway, instanceToken,
-		storageARN, headlessBin,
+		profile, params,
 	)
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
@@ -721,8 +721,8 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 		privateIP,
 		gateway,
 		"", // no metrics token needed for VPC-hop
-		"", // no storage ARN for VPC-hop
-		"", // no headless bin for VPC-hop
+		"", // no profile for VPC-hop
+		nil, // no parameters for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
@@ -857,24 +857,31 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 	return s.DeleteInstance(targetToTerminate.ID, targetToTerminate.UserID)
 }
 
-// HandleVMProvision handles a request to provision a new VM for a game.
-func (s *InstanceService) HandleVMProvision(ctx context.Context, event *domain.GameVMProvisionEvent) error {
-	log.Printf("[PROVISIONER] Provisioning VM for game: %s (ID: %d)", event.GameName, event.GameID)
+// HandleProvision handles a request to provision a new VM based on a profile.
+func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
+	log.Printf("[PROVISIONER] Provisioning VM for profile: %s", event.Profile)
 
 	// Create a provision request
 	req := &domain.CreateInstanceRequest{
-		Image:       "ubuntu-22.04", // Default image for Godot games
-		CPU:         2,              // Standard specs
-		RAM:         4096,           // 4GB RAM
-		SSHKey:      "",             // System key will be added automatically
-		StorageARN:  event.StorageARN,
-		HeadlessBin: event.HeadlessBin,
+		Image:      "ubuntu-22.04", // Default base image
+		CPU:        event.Specs.CPU,
+		RAM:        event.Specs.RAM,
+		SSHKey:     "", // System key will be added automatically
+		Profile:    event.Profile,
+		Parameters: event.Parameters,
 	}
 
-	// Use a system user for game VMs.
-	_, err := s.CreateInstance(req, "system")
+	// Ensure sensible defaults if specs are empty
+	if req.CPU == 0 { req.CPU = 2 }
+	if req.RAM == 0 { req.RAM = 4096 }
+
+	// Use the provided user ID or "system"
+	userID := event.UserID
+	if userID == "" { userID = "system" }
+
+	_, err := s.CreateInstance(req, userID)
 	if err != nil {
-		return fmt.Errorf("failed to create game instance: %w", err)
+		return fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
 	}
 
 	return nil
