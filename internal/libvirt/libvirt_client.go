@@ -170,6 +170,13 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
 	switch profile {
 	case "gamelift":
 		profileContent = `
+  - path: /opt/game/start.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      cd "/opt/game/run/$(dirname "{{HEADLESS_BIN}}")"
+      ./"$(basename "{{HEADLESS_BIN}}")" --headless --env-port 8080
+
   - path: /etc/systemd/system/game-server.service
     content: |
       [Unit]
@@ -179,12 +186,14 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
       Type=simple
       Environment="BACKEND_URL={{BACKEND_URL}}"
       WorkingDirectory=/opt/game/run
-      ExecStart=/bin/bash -c "cd /opt/game/run/$(dirname '{{HEADLESS_BIN}}') && ./'$(basename '{{HEADLESS_BIN}}')' --headless --env-port 8080"
+      ExecStart=/opt/game/start.sh
       Restart=always
       RestartSec=10
       [Install]
       WantedBy=multi-user.target
 `
+		runCmd += "\n  - apt-get update && apt-get install -y libfontconfig1"
+		runCmd += "\n  - chmod +x /opt/game/start.sh"
 		runCmd += "\n  - systemctl enable game-server && systemctl start game-server"
 	default:
 		// Vanilla profile has no extra files or commands
