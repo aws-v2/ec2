@@ -33,6 +33,7 @@ type Publisher interface {
 	GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error)
 	UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(tenantID, policyID string) error
+	PublishProvisioningProgress(instanceID, stage, message string) error
 }
 
 type NATSPublisher struct {
@@ -710,4 +711,30 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 
 	log.Printf("[NATS] [SUCCESS] Published delete policy event: correlation_id=%s policy_id=%s", correlationID, policyID)
 	return nil
+}
+
+func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message string) error {
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+
+	event := domain.ProvisioningProgressEvent{
+		InstanceID: instanceID,
+		EventType:  domain.EventProvisioningProgress,
+		Stage:      stage,
+		Message:    message,
+		Timestamp:  time.Now().Format(time.RFC3339),
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal progress event: %w", err)
+	}
+
+	// Use the same subject for now, as the backend will filter by event_type
+	if err := p.nc.Publish(p.subject, data); err != nil {
+		return fmt.Errorf("failed to publish progress event: %w", err)
+	}
+
+	return p.nc.Flush()
 }

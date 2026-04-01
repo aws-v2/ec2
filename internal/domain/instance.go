@@ -38,7 +38,16 @@ const (
 	EventInstanceStarted = "INSTANCE_STARTED"
 	EventInstanceStopped = "INSTANCE_STOPPED"
 	EventHealthUpdate    = "HEALTH_UPDATE"
+	EventProvisioningProgress = "PROVISIONING_PROGRESS"
 )
+
+type ProvisioningProgressEvent struct {
+	InstanceID string `json:"instance_id"`
+	EventType  string `json:"event_type"`
+	Stage      string `json:"stage"`
+	Message    string `json:"message"`
+	Timestamp  string `json:"timestamp"`
+}
 
 type Instance struct {
 	ID           string         `json:"id" db:"id"`

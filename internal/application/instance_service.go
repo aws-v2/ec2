@@ -15,6 +15,9 @@ import (
 	"github.com/Qarani-m/ec2-api/internal/libvirt"
 	"github.com/Qarani-m/ec2-api/pkg/messaging"
 	"github.com/google/uuid"
+	"archive/zip"
+	"strings"
+	"github.com/Qarani-m/ec2-api/internal/infrastructure/storage"
 )
 
 type InstanceService struct {
@@ -24,6 +27,7 @@ type InstanceService struct {
 	systemPubKey  string
 	imagesDir     string
 	publisher     messaging.Publisher
+	minioAdapter  *storage.MinIOAdapter
 }
 
 var imageMap = map[string]string{
@@ -73,8 +77,8 @@ var imageURLMap = map[string]string{
 	"centos-stream-9": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
 }
 
-func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher) *InstanceService {
-	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher}
+func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher, minioAdapter *storage.MinIOAdapter) *InstanceService {
+	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher, minioAdapter: minioAdapter}
 
 	// Start background health update loop
 	if publisher != nil {
@@ -83,6 +87,16 @@ func NewInstanceService(repo domain.InstanceRepository, sgService domain.Securit
 
 	return s
 }
+
+const (
+	StageCloningDisk     = "CLONING_DISK"
+	StageDownloadingGame = "DOWNLOADING_GAME"
+	StageUnzippingGame   = "UNZIPPING_GAME"
+	StageInjectingGame   = "INJECTING_GAME"
+	StageStartingVM      = "STARTING_VM"
+	StageCompleted       = "COMPLETED"
+	StageFailed          = "FAILED"
+)
 
 // startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
 // Why this is being implemented: The purpose is to allow the Network Service to learn
@@ -337,12 +351,24 @@ func (s *InstanceService) createVMAsync(
 	absNew, _ := filepath.Abs(newDiskPath)
 
 	// ── Step 1: Clone base disk ───────────────────────────────────────────────
+	s.publishProgress(instance.ID, StageCloningDisk, "Cloning base image to new instance disk...")
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2",
 		"-F", "qcow2", "-b", absBase, absNew)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[VM] Failed to clone disk for %s: %v\nOutput: %s", instance.VMName, err, string(output))
+		s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to clone disk: %v", err))
 		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return
+	}
+
+	// ── Step 1.5: Hijack for Gamelift (Pre-mounted disk modification) ────────
+	if profile == "gamelift" {
+		if err := s.injectGameIntoDisk(instance, params, absNew); err != nil {
+			log.Printf("[VM] [Gamelift] Injection failed for %s: %v", instance.VMName, err)
+			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject game: %v", err))
+			s.markTerminatedAndReleaseNetwork(instance, absNew)
+			return
+		}
 	}
 
 	// ── Step 2: Validate libvirt is available ─────────────────────────────────
@@ -363,6 +389,7 @@ func (s *InstanceService) createVMAsync(
 	// privateIP and gateway are passed into CreateAndStartVM which writes them
 	// into the cloud-init network-config. The VM boots already knowing its IP.
 	// waitForVMIP is no longer needed since the IP is statically configured.
+	s.publishProgress(instance.ID, StageStartingVM, "Defining and starting the virtual machine...")
 	vmID, err := s.libvirtClient.CreateAndStartVM(
 		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway, instanceToken,
 		profile, params,
@@ -411,8 +438,169 @@ func (s *InstanceService) createVMAsync(
 		}
 	}()
 
+	s.publishProgress(instance.ID, StageCompleted, "Instance is now running and reachable.")
 	log.Printf("✓ VM %s created successfully (ID: %s, IP: %s, bridge: %s)",
 		instance.VMName, instance.ID, privateIP, bridgeName)
+}
+
+func (s *InstanceService) publishProgress(instanceID, stage, message string) {
+	if s.publisher != nil {
+		_ = s.publisher.PublishProvisioningProgress(instanceID, stage, message)
+	}
+}
+
+func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params map[string]string, diskPath string) error {
+	// Case-insensitive lookup with STORAGE_ARN as fallback for DOWNLOAD_URL
+	var downloadURL, headlessBin string
+	for k, v := range params {
+		switch strings.ToUpper(k) {
+		case "DOWNLOAD_URL", "STORAGE_ARN":
+			if downloadURL == "" || strings.ToUpper(k) == "DOWNLOAD_URL" {
+				downloadURL = v
+			}
+		case "HEADLESS_BIN":
+			headlessBin = v
+		}
+	}
+
+	if downloadURL == "" || headlessBin == "" {
+		return fmt.Errorf("missing DOWNLOAD_URL or HEADLESS_BIN in parameters (keys found: %v)", getMapKeys(params))
+	}
+
+	// 1. Create a workspace on host
+	workdir := filepath.Join(os.TempDir(), fmt.Sprintf("inject-%s", instance.ID))
+	if err := os.MkdirAll(workdir, 0755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(workdir)
+
+	// 2. Download game zip to host
+	zipPath := filepath.Join(workdir, "game.zip")
+	s.publishProgress(instance.ID, StageDownloadingGame, "Downloading game package to host...")
+
+	if strings.HasPrefix(downloadURL, "arn:aws:s3:::") {
+		// Parse ARN: arn:aws:s3:::bucket/key/path/file.zip
+		path := strings.TrimPrefix(downloadURL, "arn:aws:s3:::")
+		parts := strings.SplitN(path, "/", 2)
+		if len(parts) < 2 {
+			return fmt.Errorf("invalid S3 ARN format: %s", downloadURL)
+		}
+		bucket := parts[0]
+		key := parts[1]
+
+		if s.minioAdapter == nil {
+			return fmt.Errorf("MinIO adapter not initialized, cannot handle S3 ARN")
+		}
+
+		log.Printf("[Gamelift] Downloading from MinIO: bucket=%s, key=%s", bucket, key)
+		if err := s.minioAdapter.DownloadFile(context.Background(), bucket, key, zipPath); err != nil {
+			return fmt.Errorf("failed to download from MinIO: %w", err)
+		}
+	} else {
+		if err := s.downloadImage(downloadURL, zipPath); err != nil {
+			return fmt.Errorf("failed to download game zip: %w", err)
+		}
+	}
+
+	// 3. Unzip on host
+	s.publishProgress(instance.ID, StageUnzippingGame, "Extracting game package...")
+	extractDir := filepath.Join(workdir, "game")
+	if err := s.unzip(zipPath, extractDir); err != nil {
+		return fmt.Errorf("failed to unzip: %w", err)
+	}
+
+	// 4. Multi-stage guestmount injection
+	s.publishProgress(instance.ID, StageInjectingGame, "Injecting game files into instance disk...")
+	mountDir := filepath.Join(workdir, "mount")
+	if err := os.MkdirAll(mountDir, 0755); err != nil {
+		return err
+	}
+
+	// Wait for disk to be settled
+	time.Sleep(1 * time.Second)
+
+	// Mount
+	log.Printf("[Gamelift] Mounting %s to %s", diskPath, mountDir)
+	cmd := exec.Command("guestmount", "-a", diskPath, "-i", mountDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("guestmount failed: %w\nOutput: %s", err, string(out))
+	}
+	// 5. Create directory structure inside mount
+	targetDir := filepath.Join(mountDir, "opt", "game", "run")
+	if err := exec.Command("mkdir", "-p", targetDir).Run(); err != nil {
+		return fmt.Errorf("failed to create target dir: %w", err)
+	}
+
+	// 6. Copy files
+	log.Printf("[Gamelift] Copying files to %s", targetDir)
+	cpCmd := exec.Command("cp", "-r", extractDir+"/.", targetDir)
+	if out, err := cpCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("copy failed: %w\nOutput: %s", err, string(out))
+	}
+
+	// 7. Ensure binary is executable inside the mount
+	binPath := filepath.Join(targetDir, headlessBin)
+	_ = exec.Command("chmod", "+x", binPath).Run()
+
+	// 8. Unmount and cleanup
+	log.Printf("[Gamelift] Unmounting %s...", mountDir)
+	var lastUnmountErr error
+	for i := 0; i < 5; i++ {
+		unmountCmd := exec.Command("guestunmount", mountDir)
+		if err := unmountCmd.Run(); err == nil {
+			lastUnmountErr = nil
+			break
+		} else {
+			lastUnmountErr = err
+			log.Printf("[Gamelift] Unmount attempt %d failed, retrying...", i+1)
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	if lastUnmountErr != nil {
+		log.Printf("[Gamelift] Persistent unmount failure for %s: %v", mountDir, lastUnmountErr)
+	}
+
+	// Final rest to ensure FUSE/QEMU releases the file handle
+	time.Sleep(2 * time.Second)
+
+	log.Printf("[Gamelift] Injection successful for %s", instance.VMName)
+	return nil
+}
+
+func (s *InstanceService) unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(dest, f.Name)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
+		}
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // markTerminatedAndReleaseNetwork marks the instance as terminated and releases
@@ -885,4 +1073,12 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 	}
 
 	return nil
+}
+
+func getMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
