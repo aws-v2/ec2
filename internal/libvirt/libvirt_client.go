@@ -55,7 +55,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 	}
 	defer cleanupFn()
 
-	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName)
+	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName, profile)
 
 	domain, err := l.conn.DomainDefineXML(xmlConfig)
 	if err != nil {
@@ -384,7 +384,11 @@ func (l *LibvirtClient) GetPublicIP(vmID int) string {
 	// Return NAT port mapping for SSH access
 	return fmt.Sprintf("localhost:%d", 2200+vmID)
 }
-func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int, bridgeName string) string {
+func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int, bridgeName, profile string) string {
+	cpuXML := ""
+	if profile == "gamelift" {
+		cpuXML = "<cpu mode='host-passthrough' check='none'/>"
+	}
 	networkXML := ""
 	if bridgeName != "" {
 		networkXML = fmt.Sprintf(`
@@ -411,6 +415,7 @@ func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int,
     <type arch='x86_64'>hvm</type>
     <boot dev='hd'/>
   </os>
+  %s
   <features>
     <acpi/>
     <apic/>
@@ -467,7 +472,7 @@ func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int,
     </memballoon>
   </devices>
 </domain>
-`, name, ram, cpu, diskPath, isoPath, networkXML)
+`, name, ram, cpu, cpuXML, diskPath, isoPath, networkXML)
 }
 
 // EnsureDefaultNetwork ensures the default network is active and has DHCP
