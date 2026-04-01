@@ -13,7 +13,7 @@ import (
 // EC2EventHandler is the interface the subscriber expects to call when events occur.
 type EC2EventHandler interface {
 	EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error
-	HandleVMProvision(ctx context.Context, event *domain.GameVMProvisionEvent) error
+	HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error
 }
 
 type NATSSubscriber struct {
@@ -67,17 +67,17 @@ func (s *NATSSubscriber) Start() error {
 	// 2. Subscribe to VM Provision Events
 	provisionSubject := "dev.ec2.v1.vm.provision"
 	_, err = s.nc.QueueSubscribe(provisionSubject, queueGroup, func(msg *nats.Msg) {
-		var event domain.GameVMProvisionEvent
+		var event domain.ProvisionInstanceEvent
 		if err := json.Unmarshal(msg.Data, &event); err != nil {
 			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal provision event: %v", err)
 			return
 		}
 
-		log.Printf("[NATS-SUB] [INFO] Received provision event for game: %s (ID: %d)", event.GameName, event.GameID)
+		log.Printf("[NATS-SUB] [INFO] Received provision event for profile: %s", event.Profile)
 
 		go func() {
-			if err := s.handler.HandleVMProvision(context.Background(), &event); err != nil {
-				log.Printf("[NATS-SUB] [ERROR] VM provision failed for game %d: %v", event.GameID, err)
+			if err := s.handler.HandleProvision(context.Background(), &event); err != nil {
+				log.Printf("[NATS-SUB] [ERROR] VM provision failed for profile %s: %v", event.Profile, err)
 			}
 		}()
 	})

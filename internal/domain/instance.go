@@ -60,21 +60,26 @@ type Instance struct {
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
 }
 
-type GameVMProvisionEvent struct {
-	GameID      int    `json:"game_id"`
-	GameName    string `json:"game_name"`
-	StorageARN  string `json:"storage_arn"`
-	HeadlessBin string `json:"headless_bin"`
+type ProvisionInstanceEvent struct {
+	Profile    string            `json:"profile"`
+	Specs      InstanceSpecs     `json:"specs"`
+	Parameters map[string]string `json:"parameters"`
+	UserID     string            `json:"user_id"`
+}
+
+type InstanceSpecs struct {
+	CPU int `json:"cpu"`
+	RAM int `json:"ram"`
 }
 
 type CreateInstanceRequest struct {
-	Image       string `json:"image" binding:"required"`
-	CPU         int    `json:"cpu" binding:"required"`
-	RAM         int    `json:"ram" binding:"required"`
-	SSHKey      string `json:"ssh_key" binding:"required"`
-	VPCID       string `json:"vpc_id"`
-	StorageARN  string `json:"storage_arn"`
-	HeadlessBin string `json:"headless_bin"`
+	Image      string            `json:"image" binding:"required"`
+	CPU        int               `json:"cpu" binding:"required"`
+	RAM        int               `json:"ram" binding:"required"`
+	SSHKey     string            `json:"ssh_key" binding:"required"`
+	VPCID      string            `json:"vpc_id"`
+	Profile    string            `json:"profile"`
+	Parameters map[string]string `json:"parameters"`
 }
 
 type InstanceStatusCheck struct {
