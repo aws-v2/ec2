@@ -23,6 +23,9 @@ type Config struct {
 
 	// Profiles
 	Profile string
+
+	// MinIO
+	MinIO MinIOConfig
 }
 
 type LibvirtConfig struct {
@@ -53,6 +56,13 @@ type ServerConfig struct {
 	Port        string
 	ServiceName string
 	HTTPPort    int
+}
+
+type MinIOConfig struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	UseSSL    bool
 }
 
 func Load() (*Config, error) {
@@ -86,6 +96,12 @@ func Load() (*Config, error) {
 			ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images"),
 		},
 		Profile: getEnv("APP_PROFILE", "DEV"),
+		MinIO: MinIOConfig{
+			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
+			AccessKey: getEnv("MINIO_ACCESS_KEY", "minioadmin"),
+			SecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin123"),
+			UseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
+		},
 	}
 
 	return cfg, nil

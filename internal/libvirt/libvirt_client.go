@@ -170,22 +170,6 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
 	switch profile {
 	case "gamelift":
 		profileContent = `
-  - path: /opt/game/provision.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      set -e
-      echo "Starting Godot game provisioner..."
-      apt-get update && apt-get install -y unzip curl
-      mkdir -p /opt/game/run
-      cd /opt/game/run
-      curl -L -o game.zip "{{DOWNLOAD_URL}}"
-      unzip -o game.zip
-      chmod +x "{{HEADLESS_BIN}}"
-      echo "Launching game binary: {{HEADLESS_BIN}}"
-      export BACKEND_URL="{{BACKEND_URL}}"
-      ./"{{HEADLESS_BIN}}" --headless --env-port 8080
-
   - path: /etc/systemd/system/game-server.service
     content: |
       [Unit]
@@ -194,7 +178,8 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
       [Service]
       Type=simple
       Environment="BACKEND_URL={{BACKEND_URL}}"
-      ExecStart=/opt/game/provision.sh
+      WorkingDirectory=/opt/game/run
+      ExecStart=/bin/bash -c "cd /opt/game/run/$(dirname '{{HEADLESS_BIN}}') && ./'$(basename '{{HEADLESS_BIN}}')' --headless --env-port 8080"
       Restart=always
       RestartSec=10
       [Install]

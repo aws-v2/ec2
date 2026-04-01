@@ -26,6 +26,7 @@ import (
 	transport "github.com/Qarani-m/ec2-api/internal/transport/http"
 	"github.com/Qarani-m/ec2-api/pkg/database"
 	"github.com/Qarani-m/ec2-api/pkg/messaging"
+	"github.com/Qarani-m/ec2-api/internal/infrastructure/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -81,6 +82,16 @@ func main() {
 		log.Println("NATS publisher initialized successfully")
 	}
 
+	// 1.6 Initialize Storage Layer (MinIO)
+	log.Println("Initializing MinIO adapter...")
+	minioAdapter, err := storage.NewMinIOAdapter(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.UseSSL)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize MinIO adapter: %v", err)
+		minioAdapter = nil
+	} else {
+		log.Println("MinIO adapter initialized successfully")
+	}
+
 	log.Println(postgresConn)
 
 	// // 2. Initialize Repository Layer
@@ -121,7 +132,7 @@ func main() {
 		log.Printf("Warning: Failed to create keys directory: %v", err)
 	}
 
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher)
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
