@@ -74,6 +74,9 @@ type ProvisionInstanceEvent struct {
 	Specs      InstanceSpecs     `json:"specs"`
 	Parameters map[string]string `json:"parameters"`
 	UserID     string            `json:"user_id"`
+	// Flat fields for compatibility with simpler orchestrators
+	StorageARN  string `json:"storage_arn"`
+	HeadlessBin string `json:"headless_bin"`
 }
 
 type InstanceSpecs struct {

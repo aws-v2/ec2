@@ -14,16 +14,29 @@ import (
 )
 
 type LibvirtClient struct {
-	conn      *libvirt.Connect
-	imagesDir string
+	conn          *libvirt.Connect
+	imagesDir     string
+	minioEndpoint string
+	minioAK       string
+	minioSK       string
+	natsURL       string
+	natsSubject   string
 }
 
-func NewLibvirtClient(uri string, imagesDir string) (*LibvirtClient, error) {
+func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, natsURL, natsSubject string) (*LibvirtClient, error) {
 	conn, err := libvirt.NewConnect(uri)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
-	return &LibvirtClient{conn: conn, imagesDir: imagesDir}, nil
+	return &LibvirtClient{
+		conn:          conn,
+		imagesDir:     imagesDir,
+		minioEndpoint: minioEndpoint,
+		minioAK:       minioAK,
+		minioSK:       minioSK,
+		natsURL:       natsURL,
+		natsSubject:   natsSubject,
+	}, nil
 }
 
 func (l *LibvirtClient) Close() error {
@@ -195,6 +208,101 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
 		runCmd += "\n  - apt-get update && apt-get install -y libfontconfig1"
 		runCmd += "\n  - chmod +x /opt/game/start.sh"
 		runCmd += "\n  - systemctl enable game-server && systemctl start game-server"
+
+	case "ai-worker":
+		profileContent = fmt.Sprintf(`
+  - path: /opt/ml/config/minio
+    content: |
+      MINIO_ENDPOINT="%s"
+      MINIO_ACCESS_KEY="%s"
+      MINIO_SECRET_KEY="%s"
+
+  - path: /opt/ml/config/nats
+    content: |
+      NATS_URL="%s"
+      NATS_SUBJECT="%s"
+
+  - path: /opt/ml/start.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      source /opt/ml/config/minio
+      source /opt/ml/config/nats
+      
+      # Setup directories
+      mkdir -p /opt/ml/input/data /opt/ml/output /opt/ml/model /opt/ml/code
+      
+      # Configure mc (MinIO Client)
+      mc alias set local "http://${MINIO_ENDPOINT}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}"
+      
+      # 1. Download Script
+      echo "[SageMaker] Downloading script from {{STORAGE_ARN}}..."
+      ARN="{{STORAGE_ARN}}"
+      PATH_PART=${ARN#arn:aws:s3:::}
+      BUCKET=${PATH_PART%%%%/*}
+      KEY=${PATH_PART#*/}
+      
+      mc cp "local/${BUCKET}/${KEY}" /opt/ml/code/script.zip
+      unzip -o /opt/ml/code/script.zip -d /opt/ml/code/
+      
+      # 2. Download Input Data
+      INPUT_URI="{{INPUT_DATA_URI}}"
+      if [ ! -z "$INPUT_URI" ] && [ "$INPUT_URI" != "<nil>" ]; then
+        echo "[SageMaker] Downloading input data from ${INPUT_URI}..."
+        IPATH=${INPUT_URI#arn:aws:s3:::}
+        IBUCKET=${IPATH%%%%/*}
+        IKEY=${IPATH#*/}
+        mc cp -r "local/${IBUCKET}/${IKEY}" /opt/ml/input/data/
+      fi
+      
+      # 3. Export Hyperparameters and Env Vars
+      echo "[SageMaker] Setting environment variables..."
+      export HYPERPARAMETERS='{{HYPERPARAMETERS}}'
+      export BACKEND_URL="{{BACKEND_URL}}"
+      export SM_CHANNEL_TRAIN=/opt/ml/input/data
+      export SM_MODEL_DIR=/opt/ml/model
+      export SM_OUTPUT_DATA_DIR=/opt/ml/output
+      
+      # 4. Execute Script
+      cd /opt/ml/code
+      STATUS="COMPLETED"
+      if [ -z "{{HEADLESS_BIN}}" ] || [ "{{HEADLESS_BIN}}" == "<nil>" ]; then
+        echo "[SageMaker] No HEADLESS_BIN specified. Looking for train.py..."
+        if [ -f "train.py" ]; then
+          python3 train.py || STATUS="FAILED"
+        else
+          echo "[SageMaker] ERROR: No executable specified and no train.py found."
+          STATUS="FAILED"
+        fi
+      else
+        echo "[SageMaker] Running {{HEADLESS_BIN}}..."
+        chmod +x "{{HEADLESS_BIN}}"
+        ./"{{HEADLESS_BIN}}" || STATUS="FAILED"
+      fi
+      
+      # 5. Upload Output
+      OUTPUT_URI="{{OUTPUT_DATA_URI}}"
+      if [ ! -z "$OUTPUT_URI" ] && [ "$OUTPUT_URI" != "<nil>" ]; then
+        echo "[SageMaker] Uploading output to ${OUTPUT_URI}..."
+        OPATH=${OUTPUT_URI#arn:aws:s3:::}
+        OBUCKET=${OPATH%%%%/*}
+        OKEY=${OPATH#*/}
+        mc cp -r /opt/ml/output/. "local/${OBUCKET}/${OKEY}/"
+      fi
+
+      # 6. Notify Completion via NATS
+      echo "[SageMaker] Job ${STATUS}. Notifying Orchestrator..."
+      JOB_ID="{{JOB_ID}}"
+      INSTANCE_ID="__INSTANCE_ID__"
+      PAYLOAD="{\"job_id\": ${JOB_ID:-0}, \"instance_id\": \"${INSTANCE_ID}\", \"status\": \"${STATUS}\"}"
+      nats -s "${NATS_URL}" pub "${NATS_SUBJECT}" "${PAYLOAD}"
+`, l.minioEndpoint, l.minioAK, l.minioSK, l.natsURL, l.natsSubject)
+		
+		runCmd += "\n  - apt-get update && apt-get install -y unzip python3-pip"
+		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
+		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
+		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
 	default:
 		// Vanilla profile has no extra files or commands
 		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n", vmName)
@@ -395,7 +503,7 @@ func (l *LibvirtClient) GetPublicIP(vmID int) string {
 }
 func (l *LibvirtClient) buildVMXML(name, diskPath, isoPath string, cpu, ram int, bridgeName, profile string) string {
 	cpuXML := ""
-	if profile == "gamelift" {
+	if profile == "gamelift" || profile == "ai-worker" {
 		cpuXML = "<cpu mode='host-passthrough' check='none'/>"
 	}
 	networkXML := ""
