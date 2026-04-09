@@ -41,7 +41,7 @@ RUN mkdir -p /app/logs && \
 USER appuser
 
 # Expose port
-EXPOSE 8081
+EXPOSE 8088
 
 # Accept Spring profile as build argument (defaults to dev)
 ARG SPRING_PROFILES_ACTIVE=prod
