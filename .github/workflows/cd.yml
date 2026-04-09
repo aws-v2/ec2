@@ -59,5 +59,6 @@ jobs:
             docker run -d --name auth-server \
               --network mini-aws-network \
               --env-file /home/${{ secrets.EC2_USERNAME }}/.auth-server-prod.env \
-              -p 8081:8081 \
+              -p 8088:8088 \
               qarani/auth-server:latest
+

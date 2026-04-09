@@ -39,7 +39,7 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey ${{ secrets.TAILSCALE_AUTH_KEY }}
 
-      - name: Deploy to Staging via SSH over Tailscale
+      - name: Deploy to Staging via SSH over Tailscale.
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAGING_HOST }}
@@ -52,5 +52,5 @@ jobs:
             docker rm auth-server-staging || true
             docker run -d --name auth-server-staging \
               --network mini-aws-network \
-              -p 8081:8081 \
+              -p 8088:8088 \
               qarani/auth-server:staging
