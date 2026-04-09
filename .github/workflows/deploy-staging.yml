@@ -46,11 +46,11 @@ jobs:
           username: ${{ secrets.STAGING_USERNAME }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            docker network create mini-aws-network || true
+            docker network create aws_backend || true
             docker pull qarani/auth-server:staging
             docker stop auth-server-staging || true
             docker rm auth-server-staging || true
             docker run -d --name auth-server-staging \
-              --network mini-aws-network \
+              --network aws_backend \
               -p 8088:8088 \
               qarani/auth-server:staging
