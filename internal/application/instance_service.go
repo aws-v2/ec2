@@ -89,13 +89,14 @@ func NewInstanceService(repo domain.InstanceRepository, sgService domain.Securit
 }
 
 const (
-	StageCloningDisk     = "CLONING_DISK"
-	StageDownloadingGame = "DOWNLOADING_GAME"
-	StageUnzippingGame   = "UNZIPPING_GAME"
-	StageInjectingGame   = "INJECTING_GAME"
-	StageStartingVM      = "STARTING_VM"
-	StageCompleted       = "COMPLETED"
-	StageFailed          = "FAILED"
+	StageCloningDisk       = "CLONING_DISK"
+	StageProvisioned       = "PROVISIONED"
+	StageDownloadingPayload = "DOWNLOADING_PAYLOAD"
+	StageUnzippingPayload   = "UNZIPPING_PAYLOAD"
+	StageInjectingPayload   = "INJECTING_PAYLOAD"
+	StageStartingVM        = "STARTING_VM"
+	StageCompleted         = "COMPLETED"
+	StageFailed            = "FAILED"
 )
 
 // startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
@@ -361,11 +362,13 @@ func (s *InstanceService) createVMAsync(
 		return
 	}
 
-	// ── Step 1.5: Hijack for Gamelift (Pre-mounted disk modification) ────────
+	// ── Step 1.5: Payload Injection (Pre-mounted disk modification) ──────────
+	// For gamelift, we still use host-side injection for legacy compatibility.
+	// For ai-worker, we now use SageMaker-like simulation where the VM handles its own preparation.
 	if profile == "gamelift" {
-		if err := s.injectGameIntoDisk(instance, params, absNew); err != nil {
-			log.Printf("[VM] [Gamelift] Injection failed for %s: %v", instance.VMName, err)
-			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject game: %v", err))
+		if err := s.injectPayloadIntoDisk(instance, profile, params, absNew); err != nil {
+			log.Printf("[VM] [%s] Injection failed for %s: %v", profile, instance.VMName, err)
+			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject payload: %v", err))
 			s.markTerminatedAndReleaseNetwork(instance, absNew)
 			return
 		}
@@ -438,7 +441,7 @@ func (s *InstanceService) createVMAsync(
 		}
 	}()
 
-	s.publishProgress(instance.ID, StageCompleted, "Instance is now running and reachable.")
+	s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.")
 	log.Printf("✓ VM %s created successfully (ID: %s, IP: %s, bridge: %s)",
 		instance.VMName, instance.ID, privateIP, bridgeName)
 }
@@ -449,7 +452,7 @@ func (s *InstanceService) publishProgress(instanceID, stage, message string) {
 	}
 }
 
-func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params map[string]string, diskPath string) error {
+func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profile string, params map[string]string, diskPath string) error {
 	// Case-insensitive lookup with STORAGE_ARN as fallback for DOWNLOAD_URL
 	var downloadURL, headlessBin string
 	for k, v := range params {
@@ -463,8 +466,15 @@ func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params m
 		}
 	}
 
-	if downloadURL == "" || headlessBin == "" {
-		return fmt.Errorf("missing DOWNLOAD_URL or HEADLESS_BIN in parameters (keys found: %v)", getMapKeys(params))
+	if downloadURL == "" {
+		return fmt.Errorf("missing DOWNLOAD_URL or STORAGE_ARN in parameters (keys found: %v)", getMapKeys(params))
+	}
+
+	// For gamelift, headlessBin is mandatory. For others (like ai-worker), it's optional.
+	if headlessBin == "" && instance.Image == "" { // Use a better check if needed, but for now let's just use profile if we had it here
+		// We don't have profile here directly easily without changing signature, 
+		// but we can check if it's required based on some heuristic or just allow it to be empty.
+		log.Printf("[VM] No HEADLESS_BIN provided, skipping automated execution setup")
 	}
 
 	// 1. Create a workspace on host
@@ -474,9 +484,9 @@ func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params m
 	}
 	defer os.RemoveAll(workdir)
 
-	// 2. Download game zip to host
-	zipPath := filepath.Join(workdir, "game.zip")
-	s.publishProgress(instance.ID, StageDownloadingGame, "Downloading game package to host...")
+	// 2. Download payload to host
+	zipPath := filepath.Join(workdir, "payload.zip")
+	s.publishProgress(instance.ID, StageDownloadingPayload, "Downloading payload package to host...")
 
 	if strings.HasPrefix(downloadURL, "arn:aws:s3:::") {
 		// Parse ARN: arn:aws:s3:::bucket/key/path/file.zip
@@ -492,25 +502,25 @@ func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params m
 			return fmt.Errorf("MinIO adapter not initialized, cannot handle S3 ARN")
 		}
 
-		log.Printf("[Gamelift] Downloading from MinIO: bucket=%s, key=%s", bucket, key)
+		log.Printf("[VM] Downloading from MinIO: bucket=%s, key=%s", bucket, key)
 		if err := s.minioAdapter.DownloadFile(context.Background(), bucket, key, zipPath); err != nil {
 			return fmt.Errorf("failed to download from MinIO: %w", err)
 		}
 	} else {
 		if err := s.downloadImage(downloadURL, zipPath); err != nil {
-			return fmt.Errorf("failed to download game zip: %w", err)
+			return fmt.Errorf("failed to download payload: %w", err)
 		}
 	}
 
 	// 3. Unzip on host
-	s.publishProgress(instance.ID, StageUnzippingGame, "Extracting game package...")
-	extractDir := filepath.Join(workdir, "game")
+	s.publishProgress(instance.ID, StageUnzippingPayload, "Extracting payload...")
+	extractDir := filepath.Join(workdir, "payload")
 	if err := s.unzip(zipPath, extractDir); err != nil {
 		return fmt.Errorf("failed to unzip: %w", err)
 	}
 
 	// 4. Multi-stage guestmount injection
-	s.publishProgress(instance.ID, StageInjectingGame, "Injecting game files into instance disk...")
+	s.publishProgress(instance.ID, StageInjectingPayload, "Injecting payload files into instance disk...")
 	mountDir := filepath.Join(workdir, "mount")
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
 		return err
@@ -520,30 +530,36 @@ func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params m
 	time.Sleep(1 * time.Second)
 
 	// Mount
-	log.Printf("[Gamelift] Mounting %s to %s", diskPath, mountDir)
+	log.Printf("[VM] Mounting %s to %s", diskPath, mountDir)
 	cmd := exec.Command("guestmount", "-a", diskPath, "-i", mountDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("guestmount failed: %w\nOutput: %s", err, string(out))
 	}
 	// 5. Create directory structure inside mount
 	targetDir := filepath.Join(mountDir, "opt", "game", "run")
+	if profile == "ai-worker" {
+		targetDir = filepath.Join(mountDir, "opt", "inference", "run")
+	}
+
 	if err := exec.Command("mkdir", "-p", targetDir).Run(); err != nil {
 		return fmt.Errorf("failed to create target dir: %w", err)
 	}
 
 	// 6. Copy files
-	log.Printf("[Gamelift] Copying files to %s", targetDir)
+	log.Printf("[VM] Copying files to %s", targetDir)
 	cpCmd := exec.Command("cp", "-r", extractDir+"/.", targetDir)
 	if out, err := cpCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("copy failed: %w\nOutput: %s", err, string(out))
 	}
 
-	// 7. Ensure binary is executable inside the mount
-	binPath := filepath.Join(targetDir, headlessBin)
-	_ = exec.Command("chmod", "+x", binPath).Run()
+	// 7. Ensure binary is executable inside the mount (if provided)
+	if headlessBin != "" {
+		binPath := filepath.Join(targetDir, headlessBin)
+		_ = exec.Command("chmod", "+x", binPath).Run()
+	}
 
 	// 8. Unmount and cleanup
-	log.Printf("[Gamelift] Unmounting %s...", mountDir)
+	log.Printf("[VM] Unmounting %s...", mountDir)
 	var lastUnmountErr error
 	for i := 0; i < 5; i++ {
 		unmountCmd := exec.Command("guestunmount", mountDir)
@@ -564,7 +580,7 @@ func (s *InstanceService) injectGameIntoDisk(instance *domain.Instance, params m
 	// Final rest to ensure FUSE/QEMU releases the file handle
 	time.Sleep(2 * time.Second)
 
-	log.Printf("[Gamelift] Injection successful for %s", instance.VMName)
+	log.Printf("[VM] Injection successful for %s", instance.VMName)
 	return nil
 }
 
@@ -1048,6 +1064,17 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 // HandleProvision handles a request to provision a new VM based on a profile.
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
 	log.Printf("[PROVISIONER] Provisioning VM for profile: %s", event.Profile)
+
+	// Merge flat fields into Parameters for backward compatibility
+	if event.Parameters == nil {
+		event.Parameters = make(map[string]string)
+	}
+	if event.StorageARN != "" && event.Parameters["STORAGE_ARN"] == "" {
+		event.Parameters["STORAGE_ARN"] = event.StorageARN
+	}
+	if event.HeadlessBin != "" && event.Parameters["HEADLESS_BIN"] == "" {
+		event.Parameters["HEADLESS_BIN"] = event.HeadlessBin
+	}
 
 	// Create a provision request
 	req := &domain.CreateInstanceRequest{

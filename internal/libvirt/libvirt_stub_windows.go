@@ -10,7 +10,7 @@ type LibvirtClient struct {
 	imagesDir string
 }
 
-func NewLibvirtClient(uri string, imagesDir string) (*LibvirtClient, error) {
+func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK string) (*LibvirtClient, error) {
 	fmt.Printf("[Libvirt-Stub] Initialized in mock mode for Windows (ImagesDir: %s)\n", imagesDir)
 	return &LibvirtClient{imagesDir: imagesDir}, nil
 }

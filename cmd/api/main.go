@@ -60,7 +60,7 @@ func main() {
 	log.Println("Database migration completed successfully")
 
 	log.Println("Initializing Libvirt client...")
-	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir)
+	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to libvirt: %v", err)
 		log.Println("Continuing without libvirt support...")
