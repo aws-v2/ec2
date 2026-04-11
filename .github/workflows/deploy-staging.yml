@@ -44,20 +44,28 @@ jobs:
           username: ${{ secrets.STAGING_USERNAME }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            docker network create aws_backend || true
+            docker network create aws-staging-network || true
             docker pull qarani/ec2-api:staging
             docker stop ec2-service-staging || true
             docker rm ec2-service-staging || true
             docker run -d --name ec2-service-staging \
-              --network aws_backend \
+              --network aws-staging-network \
               -p 8088:8088 \
               -e APP_PROFILE=staging \
+              -e SERVICE_NAME=ec2-service \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
               -e DB_USER=root \
-              -e DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }} \
+              -e DB_PASSWORD=root \
               -e DB_NAME=ec2_db \
+              -e DB_SSLMODE=disable \
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USER=auth-server \
               -e NATS_PASSWORD=auth-secret \
+              -e LIBVIRT_URI=qemu:///system \
+              -e IMAGES_DIR=/var/lib/libvirt/images \
+              -e MINIO_ENDPOINT=minio-staging:9000 \
+              -e MINIO_ACCESS_KEY=minioadmin \
+              -e MINIO_SECRET_KEY=minioadmin123 \
+              -e MINIO_USE_SSL=false \
               qarani/ec2-api:staging
