@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	httpd "net/http"
 	"os"
 	"os/signal"
@@ -27,72 +26,103 @@ import (
 	"github.com/Qarani-m/ec2-api/pkg/database"
 	"github.com/Qarani-m/ec2-api/pkg/messaging"
 	"github.com/Qarani-m/ec2-api/internal/infrastructure/storage"
+	"github.com/Qarani-m/ec2-api/pkg/netutil"
 	"github.com/gin-gonic/gin"
+	"log/slog"
 )
 
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		fmt.Printf("Failed to load configuration: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Initialize structured logging
+	var handler slog.Handler
+	if cfg.Profile == "prod" {
+		handler = slog.NewJSONHandler(os.Stdout, nil)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, nil)
+	}
+	logger := slog.New(handler.WithAttrs([]slog.Attr{
+		slog.String("profile", cfg.Profile),
+		slog.String("service", "ec2-service"),
+	}))
+	slog.SetDefault(logger)
+
+	slog.Info("Starting EC2 service", "profile", cfg.Profile)
 
 	postgresConn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		cfg.DB.User, cfg.DB.Password, cfg.DB.Host, cfg.DB.Port, cfg.DB.Database, cfg.DB.SSLMode)
 
 	libvirtURI := cfg.Libvirt.URI
 	imagesDir := cfg.Libvirt.ImagesDir
-	natsSubject := getEnv("NATS_LIFECYCLE_SUBJECT", "dev.compute.v1.instance.lifecycle")
-	// libvirtURI := getEnv("LIBVIRT_URI", "qemu:///session")
 
-	// 1. Initialize Infrastructure Layer
-	log.Println("Initializing PostgreSQL repository...")
-	db, err := database.NewPostgresDB(postgresConn)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
+	// 1. Perform TCP Reachability Checks
+	slog.Info("Performing pre-startup reachability checks...")
 
-	log.Println("Running database migrations...")
-	if err := database.Migrate(db, postgres.Schema); err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
-	}
-	log.Println("Database migration completed successfully")
-
-	log.Println("Initializing Libvirt client...")
-	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
-	if err != nil {
-		log.Printf("Warning: Failed to connect to libvirt: %v", err)
-		log.Println("Continuing without libvirt support...")
-		libvirtClient = nil
-	} else {
-		defer libvirtClient.Close()
-		log.Println("Libvirt connected successfully")
+	// NATS Check
+	if err := netutil.CheckReachabilityURL("NATS", cfg.NATS.URL, 5, 2*time.Second); err != nil {
+		slog.Error("FATAL: NATS unreachable", "url", cfg.NATS.URL, "error", err)
+		os.Exit(1)
 	}
 
-	// 1.5 Initialize Messaging Layer
-	log.Println("Initializing NATS publisher...")
-	natsPublisher, err := messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, natsSubject)
+	// Database Check
+	if err := netutil.CheckReachability("PostgreSQL", cfg.DB.Host, cfg.DB.Port, 5, 2*time.Second); err != nil {
+		slog.Error("FATAL: Database unreachable", "host", cfg.DB.Host, "port", cfg.DB.Port, "error", err)
+		os.Exit(1)
+	}
+
+	// 2. Initialize Messaging Layer (Priority)
+	slog.Info("Initializing NATS publisher...")
+	natsPublisher, err := messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.Profile)
 	if err != nil {
-		log.Printf("Warning: Failed to connect to NATS at %s: %v", cfg.NATS.URL, err)
-		log.Println("Continuing without NATS publishing support...")
+		slog.Warn("Failed to connect to NATS", "url", cfg.NATS.URL, "error", err)
 		natsPublisher = nil
 	} else {
 		defer natsPublisher.Close()
-		log.Println("NATS publisher initialized successfully")
+		slog.Info("NATS publisher initialized successfully")
+	}
+
+	// 3. Initialize Infrastructure Layer
+	slog.Info("Initializing PostgreSQL repository...")
+	db, err := database.NewPostgresDB(postgresConn)
+	if err != nil {
+		slog.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	slog.Info("Running database migrations...")
+	if err := database.Migrate(db, postgres.Schema); err != nil {
+		slog.Error("Failed to migrate database", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Database migration completed successfully")
+
+	slog.Info("Initializing Libvirt client...")
+	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
+	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
+	if err != nil {
+		slog.Warn("Failed to connect to libvirt", "error", err)
+		libvirtClient = nil
+	} else {
+		defer libvirtClient.Close()
+		slog.Info("Libvirt connected successfully")
 	}
 
 	// 1.6 Initialize Storage Layer (MinIO)
-	log.Println("Initializing MinIO adapter...")
+	slog.Info("Initializing MinIO adapter...")
 	minioAdapter, err := storage.NewMinIOAdapter(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.UseSSL)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize MinIO adapter: %v", err)
+		slog.Warn("Failed to initialize MinIO adapter", "error", err)
 		minioAdapter = nil
 	} else {
-		log.Println("MinIO adapter initialized successfully")
+		slog.Info("MinIO adapter initialized successfully")
 	}
 
-	log.Println(postgresConn)
 
 	// // 2. Initialize Repository Layer
 	var instanceRepo domain.InstanceRepository
@@ -116,20 +146,20 @@ func main() {
 	// Initialize System Key Service
 	systemKeyService := application.NewSystemKeyService(imagesDir) // Store keys near images
 	if err := systemKeyService.EnsureKeys(); err != nil {
-		log.Printf("Warning: Failed to ensure system keys: %v", err)
+		slog.Warn("Failed to ensure system keys", "error", err)
 	}
 	systemPubKey, _ := systemKeyService.GetPublicKeyString()
 
 	// 3. Initialize Application Layer (Services)
-	log.Println("Initializing services...")
+	slog.Info("Initializing services...")
 	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher)
 	if err := networkingService.SeedDefaultSecurityGroup(); err != nil {
-		log.Printf("Warning: Failed to seed default security group: %v", err)
+		slog.Warn("Failed to seed default security group", "error", err)
 	}
 
 	keysDir := getEnv("KEYS_DIR", filepath.Join(imagesDir, "keys"))
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
-		log.Printf("Warning: Failed to create keys directory: %v", err)
+		slog.Warn("Failed to create keys directory", "error", err)
 	}
 
 	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter)
@@ -142,12 +172,12 @@ func main() {
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
-		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, instanceService)
+		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.Profile, instanceService)
 		if err != nil {
-			log.Printf("Warning: Failed to initialize NATS subscriber: %v", err)
+			slog.Warn("Failed to initialize NATS subscriber", "error", err)
 		} else {
 			if err := natsSubscriber.Start(); err != nil {
-				log.Printf("Warning: Failed to start NATS subscriber: %v", err)
+				slog.Warn("Failed to start NATS subscriber", "error", err)
 			} else {
 				defer natsSubscriber.Close()
 			}
@@ -155,7 +185,7 @@ func main() {
 	}
 
 	// 4. Initialize Transport Layer (HTTP Handlers)
-	log.Println("Initializing HTTP handlers...")
+	slog.Info("Initializing HTTP handlers...")
 	instanceHandler := transport.NewInstanceHandler(instanceService)
 	volumeHandler := transport.NewVolumeHandler(volumeService, snapshotService)
 	snapshotHandler := transport.NewSnapshotHandler(snapshotService)
@@ -184,7 +214,7 @@ func main() {
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()
 	if err := registerWithEureka(eurekaConfig); err != nil {
-		log.Printf("⚠️  Eureka registration failed: %v", err)
+		slog.Warn("Eureka registration failed", "error", err)
 	} else {
 		go sendHeartbeat(eurekaConfig)
 	}
@@ -202,9 +232,10 @@ func main() {
 
 	// Initializing the server in a goroutine so that it won't block the graceful shutdown handling below
 	go func() {
-		log.Printf("🚀 Server starting on port %s...", cfg.Server.Port)
+		slog.Info("Server starting", "port", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != httpd.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -212,20 +243,21 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	slog.Info("Shutting down server...")
 
 	// Deregister from Eureka
 	if err := deregisterFromEureka(eurekaConfig); err != nil {
-		log.Printf("⚠️  Eureka deregistration failed: %v", err)
+		slog.Warn("Eureka deregistration failed", "error", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
+		slog.Error("Server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Server exiting")
+	slog.Info("Server exiting")
 }
 
 func getEnv(key, defaultValue string) string {
@@ -311,7 +343,7 @@ func getWSLIPAddress() string {
 	}
 
 	// Fallback to localhost (won't work from Windows but better than nothing)
-	log.Println("⚠️  Could not determine WSL IP, falling back to 127.0.0.1")
+	slog.Warn("Could not determine WSL IP, falling back to 127.0.0.1")
 	return "127.0.0.1"
 }
 
@@ -366,7 +398,7 @@ func registerWithEureka(config *EurekaConfig) error {
 		return fmt.Errorf("eureka registration failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("✅ Successfully registered with Eureka server at %s", url)
+	slog.Info("Successfully registered with Eureka server", "url", url)
 	return nil
 }
 
@@ -381,21 +413,21 @@ func sendHeartbeat(config *EurekaConfig) {
 	for range ticker.C {
 		req, err := httpd.NewRequest("PUT", url, nil)
 		if err != nil {
-			log.Printf("❌ Failed to create heartbeat request: %v", err)
+			slog.Error("Failed to create heartbeat request", "error", err)
 			continue
 		}
 
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("❌ Failed to send heartbeat to Eureka: %v", err)
+			slog.Error("Failed to send heartbeat to Eureka", "error", err)
 			continue
 		}
 
 		if resp.StatusCode != httpd.StatusOK && resp.StatusCode != httpd.StatusNoContent {
 			body, _ := io.ReadAll(resp.Body)
-			log.Printf("⚠️  Heartbeat failed with status %d: %s", resp.StatusCode, string(body))
+			slog.Warn("Heartbeat failed", "status", resp.StatusCode, "body", string(body))
 		} else {
-			log.Printf("💓 Heartbeat sent successfully to Eureka")
+			slog.Debug("Heartbeat sent successfully to Eureka")
 		}
 
 		resp.Body.Close()
@@ -422,6 +454,6 @@ func deregisterFromEureka(config *EurekaConfig) error {
 		return fmt.Errorf("deregistration failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("✅ Successfully deregistered from Eureka server")
+	slog.Info("Successfully deregistered from Eureka server")
 	return nil
 }

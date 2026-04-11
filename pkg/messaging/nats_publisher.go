@@ -38,10 +38,17 @@ type Publisher interface {
 
 type NATSPublisher struct {
 	nc      *nats.Conn
-	subject string
+	profile string
+	subject string // default/base subject
 }
 
-func NewNATSPublisher(url string, user string, password string, subject string) (*NATSPublisher, error) {
+// BuildSubject constructs a NATS subject following the pattern:
+// <profile>.<service>.<version>.<domain>.<action>
+func BuildSubject(profile, domain, action string) string {
+	return fmt.Sprintf("%s.ec2.v1.%s.%s", profile, domain, action)
+}
+
+func NewNATSPublisher(url string, user string, password string, profile string) (*NATSPublisher, error) {
 	opts := []nats.Option{
 		nats.Name("EC2-Service"),
 		nats.Timeout(5 * time.Second),
@@ -58,7 +65,8 @@ func NewNATSPublisher(url string, user string, password string, subject string) 
 
 	return &NATSPublisher{
 		nc:      nc,
-		subject: subject,
+		profile: profile,
+		subject: BuildSubject(profile, "instance", "lifecycle"),
 	}, nil
 }
 
@@ -161,7 +169,7 @@ func (p *NATSPublisher) PrepareInstanceNetwork(tenantID, instanceID, vpcID strin
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.instance.prepare"
+	subject := fmt.Sprintf("%s.network.v1.instance.prepare", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -212,7 +220,7 @@ func (p *NATSPublisher) ReleaseInstanceNetwork(tenantID, instanceID, vpcID strin
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.instance.release"
+	subject := fmt.Sprintf("%s.network.v1.instance.release", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -260,7 +268,7 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.vpc.default.get"
+	subject := fmt.Sprintf("%s.network.v1.vpc.default.get", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -305,7 +313,7 @@ func (p *NATSPublisher) ValidateVPC(tenantID, vpcID string) (bool, error) {
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.vpc.validate"
+	subject := fmt.Sprintf("%s.network.v1.vpc.validate", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -344,7 +352,7 @@ func (p *NATSPublisher) AttachResource(tenantID, instanceID, vpcID string) (stri
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.resource.attach"
+	subject := fmt.Sprintf("%s.network.v1.resource.attach", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -392,7 +400,7 @@ func (p *NATSPublisher) DetachResource(tenantID, instanceID, vpcID string) error
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.network.v1.resource.detach"
+	subject := fmt.Sprintf("%s.network.v1.resource.detach", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -466,7 +474,8 @@ func (p *NATSPublisher) ListVPCs(tenantID string) ([]domain.VPC, error) {
 	}
 	log.Printf("[RDS-NATS] Sending ListVPCs request for tenant %s (correlation_id=%s)", tenantID, correlationID)
 
-	msg, err := p.nc.Request("dev.network.v1.vpc.list", reqData, 5*time.Second)
+	subject := fmt.Sprintf("%s.network.v1.vpc.list", p.profile)
+	msg, err := p.nc.Request(subject, reqData, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -504,7 +513,8 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 	}
 
 	log.Printf("[RDS-NATS] Publishing CreateVPC event for tenant %s, vpc %s (correlation_id=%s)", tenantID, vpcName, correlationID)
-	if err := p.nc.Publish("dev.network.v1.vpc.create", eventData); err != nil {
+	subject := fmt.Sprintf("%s.network.v1.vpc.create", p.profile)
+	if err := p.nc.Publish(subject, eventData); err != nil {
 		return fmt.Errorf("failed to publish create VPC event: %w", err)
 	}
 
@@ -531,7 +541,7 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.iam.v1.token.generate"
+	subject := fmt.Sprintf("%s.iam.v1.token.generate", p.profile)
 
 	req := InstanceTokenRequest{
 		InstanceID: instanceID,
@@ -578,7 +588,7 @@ func (p *NATSPublisher) PublishScalingPolicy(tenantID string, policy domain.Scal
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.create"
+	subject := fmt.Sprintf("%s.metrics.v1.scaling_policy.create", p.profile)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,
@@ -610,7 +620,7 @@ func (p *NATSPublisher) GetScalingPolicies(tenantID string) ([]domain.ScalingPol
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.list"
+	subject := fmt.Sprintf("%s.metrics.v1.scaling_policy.list", p.profile)
 
 	req := map[string]string{
 		"correlation_id": correlationID,
@@ -655,7 +665,7 @@ func (p *NATSPublisher) UpdateScalingPolicy(tenantID, policyID string, req domai
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.update"
+	subject := fmt.Sprintf("%s.metrics.v1.scaling_policy.update", p.profile)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,
@@ -688,7 +698,7 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 	}
 
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.delete"
+	subject := fmt.Sprintf("%s.metrics.v1.scaling_policy.delete", p.profile)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,

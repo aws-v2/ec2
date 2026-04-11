@@ -24,9 +24,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: qarani/auth-server:staging
-        build-args: |
-          SPRING_PROFILES_ACTIVE=staging
+        tags: qarani/ec2-api:staging
 
   deploy:
     needs: build-and-push
@@ -47,10 +45,19 @@ jobs:
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
             docker network create aws_backend || true
-            docker pull qarani/auth-server:staging
-            docker stop auth-server-staging || true
-            docker rm auth-server-staging || true
-            docker run -d --name auth-server-staging \
+            docker pull qarani/ec2-api:staging
+            docker stop ec2-service-staging || true
+            docker rm ec2-service-staging || true
+            docker run -d --name ec2-service-staging \
               --network aws_backend \
               -p 8088:8088 \
-              qarani/auth-server:staging
+              -e APP_PROFILE=staging \
+              -e DB_HOST=postgres-staging \
+              -e DB_PORT=5432 \
+              -e DB_USER=root \
+              -e DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }} \
+              -e DB_NAME=ec2_db \
+              -e NATS_URL=nats://nats-staging:4222 \
+              -e NATS_USER=auth-server \
+              -e NATS_PASSWORD=auth-secret \
+              qarani/ec2-api:staging
