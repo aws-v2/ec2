@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -82,9 +83,9 @@ func Load() (*Config, error) {
 			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
 		},
 		NATS: NATSConfig{
-			URL:      getEnv("NATS_URL", getEnv("DEV_NATS_URL", "nats://auth-server:auth-secret@localhost:4222")),
-			User:     getEnv("NATS_USER", ""),
-			Password: getEnv("NATS_PASSWORD", ""),
+			URL:      getEnv("NATS_URL", "nats://localhost:4222"),
+			User:     getEnv("NATS_USER", "auth-server"),
+			Password: getEnv("NATS_PASSWORD", "auth-secret"),
 		},
 		Server: ServerConfig{
 			Port:        getEnv("PORT", "8088"),
@@ -95,7 +96,7 @@ func Load() (*Config, error) {
 			URI:       getEnv("LIBVIRT_URI", "qemu:///system"),
 			ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images"),
 		},
-		Profile: getEnv("APP_PROFILE", "DEV"),
+		Profile: strings.ToLower(getEnv("APP_PROFILE", "dev")),
 		MinIO: MinIOConfig{
 			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
 			AccessKey: getEnv("MINIO_ACCESS_KEY", "minioadmin"),
