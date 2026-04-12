@@ -58,6 +58,7 @@ jobs:
               -e DB_USER=root \
               -e DB_PASSWORD=root \
               -e DB_NAME=ec2_db \
+              -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e DB_SSLMODE=disable \
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USER=auth-server \
