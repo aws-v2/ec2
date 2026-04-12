@@ -54,6 +54,8 @@ jobs:
               -e APP_PROFILE=staging \
               -e SERVICE_NAME=ec2-service \
               -e DB_HOST=postgres-staging \
+              -e EUREKA_HOSTNAME=ec2-service-staging \
+              -e EUREKA_IP_ADDR=8761 \
               -e DB_PORT=5432 \
               -e DB_USER=root \
               -e DB_PASSWORD=root \
