@@ -27,6 +27,7 @@ RUN apk add --no-cache ca-certificates libvirt-libs qemu-img
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/ec2-api .
+COPY --from=builder /app/docs ./docs
 
 # Expose the application port
 EXPOSE 8088
