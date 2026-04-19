@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
-	"github.com/Qarani-m/ec2-api/internal/libvirt"
-	"github.com/Qarani-m/ec2-api/pkg/messaging"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/libvirt"
+	"ec2-api/pkg/messaging"
 )
 
 type NetworkingService struct {
@@ -279,8 +279,8 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		bridgeName,
 		privateIP,
 		gateway,
-		"", // no metrics token needed for VPC migration
-		"", // no profile for VPC migration
+		"",  // no metrics token needed for VPC migration
+		"",  // no profile for VPC migration
 		nil, // no parameters for VPC migration
 	)
 	if err != nil {

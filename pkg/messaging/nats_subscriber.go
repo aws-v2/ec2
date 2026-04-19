@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"github.com/nats-io/nats.go"
 )
 
@@ -17,9 +18,9 @@ type EC2EventHandler interface {
 }
 
 type NATSSubscriber struct {
-	nc       *nats.Conn
-	profile  string
-	handler  EC2EventHandler
+	nc      *nats.Conn
+	profile string
+	handler EC2EventHandler
 }
 
 func NewNATSSubscriber(url, user, password string, profile string, handler EC2EventHandler) (*NATSSubscriber, error) {

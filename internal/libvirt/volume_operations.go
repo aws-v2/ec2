@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	libvirtgo "libvirt.org/go/libvirt"
 )
 
@@ -20,7 +21,6 @@ func (l *LibvirtClient) CreateVolume(volumePath string, sizeGB int) error {
 	}
 	return nil
 }
-
 
 func (l *LibvirtClient) GetUsedDeviceNames(vmName string) (map[string]bool, error) {
 	domain, err := l.conn.LookupDomainByName(vmName)
@@ -54,6 +54,7 @@ func (l *LibvirtClient) GetUsedDeviceNames(vmName string) (map[string]bool, erro
 	}
 	return used, nil
 }
+
 // devicePath=/dev/vde
 
 func (l *LibvirtClient) AttachVolume(vmName, volumePath, devicePath, format string) error {
@@ -80,7 +81,7 @@ func (l *LibvirtClient) AttachVolume(vmName, volumePath, devicePath, format stri
       <source file='%s'/>
       <target dev='%s' bus='virtio'/>
     </disk>`, format, volumePath, deviceName)
-	
+
 	fmt.Printf("diskXML:\n%s\n", diskXML)
 
 	// Attach disk persistently (survives reboot)
@@ -100,7 +101,6 @@ func (l *LibvirtClient) DetachVolume(vmName, devicePath string) error {
 	}
 	defer domain.Free()
 
- 
 	// Extract device name from path
 	deviceName := devicePath[5:]
 
@@ -138,10 +138,6 @@ func (l *LibvirtClient) ResizeVolume(volumePath string, newSizeGB int) error {
 	return nil
 }
 
-
-
-
-
 func (l *LibvirtClient) ListAttachedDevicePaths(vmName string) ([]string, error) {
 	dom, err := l.conn.LookupDomainByName(vmName)
 	if err != nil {
@@ -168,12 +164,6 @@ func (l *LibvirtClient) ListAttachedDevicePaths(vmName string) ([]string, error)
 
 	return devices, nil
 }
-
-
-
-
-
- 
 
 // Disk XML snippet (simplified)
 type diskXML struct {

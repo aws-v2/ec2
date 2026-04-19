@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -46,9 +47,9 @@ func (r *fleetRepository) GetOverview(userID string) (*domain.FleetOverview, err
 
 	overview.TotalInstances = stats.Total
 	overview.ActiveInstances = stats.Active
-	// For telemetry load, we might need a separate metrics table. 
+	// For telemetry load, we might need a separate metrics table.
 	// For now, we use configured averages or placeholders.
-	overview.AvgCpuLoad = stats.AvgCPU // Placeholder for actual load
+	overview.AvgCpuLoad = stats.AvgCPU  // Placeholder for actual load
 	overview.AvgRamUsage = stats.AvgRAM // Placeholder for actual usage
 
 	// Count lambda functions

@@ -27,8 +27,8 @@ func SetupRoutes(r *gin.Engine,
 	// Documentation Endpoints (public, no auth)
 	computeDocs := r.Group("/api/v1/compute/docs")
 	{
-		computeDocs.GET("", docsHandler.GetManifest)
-		computeDocs.GET("/:slug", docsHandler.GetDocBySlug)
+		computeDocs.GET("", docsHandler.GetPublicManifest)
+		computeDocs.GET("/:slug", docsHandler.GetPublicDoc)
 	}
 	
 	// Compute API
@@ -126,6 +126,21 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/volumes/:id/tags", volumeHandler.AddTag)               // Add/Update volume tag
 		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)    // Delete volume tag
 		api.DELETE("/volumes/:id", volumeHandler.DeleteVolume)      // Delete volume
+	}
+
+
+
+	// Docs
+	docs := api.Group("/docs")
+	{
+		docs.GET("", docsHandler.GetPublicManifest)
+		docs.GET("/:slug", docsHandler.GetPublicDoc)
+	}
+
+	internalDocs := api.Group("/internal/docs")
+	{
+		internalDocs.GET("", docsHandler.GetInternalManifest)
+		internalDocs.GET("/:slug", docsHandler.GetInternalDoc)
 	}
 
  

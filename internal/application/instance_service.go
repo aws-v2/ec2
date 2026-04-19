@@ -11,13 +11,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
-	"github.com/Qarani-m/ec2-api/internal/libvirt"
-	"github.com/Qarani-m/ec2-api/pkg/messaging"
-	"github.com/google/uuid"
 	"archive/zip"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/infrastructure/storage"
+	"ec2-api/internal/libvirt"
+	"ec2-api/pkg/messaging"
 	"strings"
-	"github.com/Qarani-m/ec2-api/internal/infrastructure/storage"
+
+	"github.com/google/uuid"
 )
 
 type InstanceService struct {
@@ -89,14 +90,14 @@ func NewInstanceService(repo domain.InstanceRepository, sgService domain.Securit
 }
 
 const (
-	StageCloningDisk       = "CLONING_DISK"
-	StageProvisioned       = "PROVISIONED"
+	StageCloningDisk        = "CLONING_DISK"
+	StageProvisioned        = "PROVISIONED"
 	StageDownloadingPayload = "DOWNLOADING_PAYLOAD"
 	StageUnzippingPayload   = "UNZIPPING_PAYLOAD"
 	StageInjectingPayload   = "INJECTING_PAYLOAD"
-	StageStartingVM        = "STARTING_VM"
-	StageCompleted         = "COMPLETED"
-	StageFailed            = "FAILED"
+	StageStartingVM         = "STARTING_VM"
+	StageCompleted          = "COMPLETED"
+	StageFailed             = "FAILED"
 )
 
 // startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
@@ -200,12 +201,6 @@ func (s *InstanceService) downloadImage(url string, destPath string) error {
 	return nil
 }
 
-
-
-
-
-
-
 func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
 	// ── Step 1: Validate image ────────────────────────────────────────────────
@@ -226,7 +221,6 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	instanceID := fmt.Sprintf("i-%s", uuid.New().String()[:8])
 	vmName := fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
-
 
 	// ── Step 1b: Request IAM token for the metrics agent ──────────────────────
 	var instanceToken string
@@ -251,13 +245,11 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		bridgeName string
 	)
 
-fmt.Println("---------Preparing network for instance", instanceID)
-
-
+	fmt.Println("---------Preparing network for instance", instanceID)
 
 	if s.publisher != nil {
 		if req.VPCID != "" {
-fmt.Println("--------->>>1")
+			fmt.Println("--------->>>1")
 
 			// User specified a VPC — validate it first
 			valid, err := s.publisher.ValidateVPC(userID, req.VPCID)
@@ -272,7 +264,7 @@ fmt.Println("--------->>>1")
 			vpcID = req.VPCID
 			log.Printf("[VPC] [OK] Validated VPC %s for instance %s", vpcID, instanceID)
 		} else {
-fmt.Println("--------->>>2")
+			fmt.Println("--------->>>2")
 
 			// No VPC specified — get the default VPC
 			var err error
@@ -283,7 +275,7 @@ fmt.Println("--------->>>2")
 			}
 			log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", vpcID, bridgeName, instanceID)
 		}
-fmt.Println("--------->>>3")
+		fmt.Println("--------->>>3")
 
 		// Ask network service to allocate an IP from the VPC subnet.
 		// This returns the private IP, gateway, and confirms the bridge name.
@@ -295,14 +287,12 @@ fmt.Println("--------->>>3")
 			log.Printf("[NETWORK] [ERROR] Failed to prepare network for instance %s in VPC %s: %v", instanceID, vpcID, err)
 			return nil, fmt.Errorf("failed to prepare instance network: %w", err)
 		}
-fmt.Println("--------->>>4")
+		fmt.Println("--------->>>4")
 		log.Printf("[NETWORK] [OK] Network ready for instance %s — IP: %s, gateway: %s, bridge: %s",
 			instanceID, privateIP, gateway, bridgeName)
 	}
 
-
-fmt.Println("---+++++------Preparing network for instance", instanceID)
-
+	fmt.Println("---+++++------Preparing network for instance", instanceID)
 
 	// ── Step 3: Save instance record with pending status and the known IP ─────
 	// We save the IP now because we already know it — the network service
@@ -315,7 +305,7 @@ fmt.Println("---+++++------Preparing network for instance", instanceID)
 		RAM:       req.RAM,
 		SSHKey:    req.SSHKey,
 		Status:    domain.StatusPending,
-		IP:        privateIP,  // ← known before VM creation
+		IP:        privateIP, // ← known before VM creation
 		PublicIP:  "",
 		ProxmoxID: 0,
 		CreatedAt: time.Now(),
@@ -472,7 +462,7 @@ func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profi
 
 	// For gamelift, headlessBin is mandatory. For others (like ai-worker), it's optional.
 	if headlessBin == "" && instance.Image == "" { // Use a better check if needed, but for now let's just use profile if we had it here
-		// We don't have profile here directly easily without changing signature, 
+		// We don't have profile here directly easily without changing signature,
 		// but we can check if it's required based on some heuristic or just allow it to be empty.
 		log.Printf("[VM] No HEADLESS_BIN provided, skipping automated execution setup")
 	}
@@ -636,12 +626,6 @@ func (s *InstanceService) markTerminatedAndReleaseNetwork(instance *domain.Insta
 		}
 	}
 }
-
-
-
-
-
-
 
 // markTerminated is a helper to set instance status to terminated and persist it.
 func (s *InstanceService) markTerminated(instance *domain.Instance, diskPath string) {
@@ -909,7 +893,7 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	}
 
 	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
-	
+
 	combinedKeys := instance.SSHKey
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
@@ -924,8 +908,8 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 		bridgeName,
 		privateIP,
 		gateway,
-		"", // no metrics token needed for VPC-hop
-		"", // no profile for VPC-hop
+		"",  // no metrics token needed for VPC-hop
+		"",  // no profile for VPC-hop
 		nil, // no parameters for VPC-hop
 	)
 	if err != nil {
@@ -1087,12 +1071,18 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 	}
 
 	// Ensure sensible defaults if specs are empty
-	if req.CPU == 0 { req.CPU = 2 }
-	if req.RAM == 0 { req.RAM = 4096 }
+	if req.CPU == 0 {
+		req.CPU = 2
+	}
+	if req.RAM == 0 {
+		req.RAM = 4096
+	}
 
 	// Use the provided user ID or "system"
 	userID := event.UserID
-	if userID == "" { userID = "system" }
+	if userID == "" {
+		userID = "system"
+	}
 
 	_, err := s.CreateInstance(req, userID)
 	if err != nil {

@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -35,7 +36,7 @@ func (r *VolumeRepository) Create(volume *domain.Volume) error {
 		nullString(volume.AttachedTo),
 		volume.UserID,
 	).Scan(&volume.ID, &volume.CreatedAt, &volume.UpdatedAt)
-	
+
 	return err
 }
 
@@ -44,7 +45,7 @@ func (r *VolumeRepository) FindByID(id int) (*domain.Volume, error) {
 
 	fmt.Println(id)
 
-query := `
+	query := `
 	SELECT id, volume_name, name, size, format, type, availability_zone, status,
 	       COALESCE(device_path, '') as device_path,
 	       COALESCE(attached_to, '') as attached_to,
@@ -52,7 +53,6 @@ query := `
 	FROM volumes WHERE id = $1
 `
 
-	
 	err := r.db.Get(&volume, query, id)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -72,7 +72,7 @@ func (r *VolumeRepository) FindAll() ([]*domain.Volume, error) {
 		FROM volumes 
 		ORDER BY created_at DESC
 	`
-	
+
 	err := r.db.Select(&volumes, query)
 	if err != nil {
 		return nil, err
@@ -88,18 +88,18 @@ func (r *VolumeRepository) FindByInstanceID(instanceID string) ([]*domain.Volume
 		       created_at, updated_at 
 		FROM volumes WHERE attached_to = $1
 	`
-	
+
 	err := r.db.Select(&volumes, query, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Printf("Query: SELECT ... WHERE attached_to = '%s'\n", instanceID)
-fmt.Printf("Returned %d volumes\n", len(volumes))
+	fmt.Printf("Returned %d volumes\n", len(volumes))
 	return volumes, nil
 }
 
 func (r *VolumeRepository) Update(volume *domain.Volume) error {
- 
+
 	query := `
 		UPDATE volumes 
 		SET volume_name = $2, name = $3, size = $4, format = $5, type = $6, 
@@ -120,7 +120,7 @@ func (r *VolumeRepository) Update(volume *domain.Volume) error {
 		nullString(volume.AttachedTo),
 		nullString(volume.DevicePath),
 	).Scan(&volume.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("volume not found: %d", volume.ID)
 	}
@@ -139,7 +139,7 @@ func (r *VolumeRepository) Delete(volume *domain.Volume) error {
 	if err != nil {
 		return err
 	}
-	
+
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return err
@@ -179,6 +179,3 @@ func nullString(s string) interface{} {
 	}
 	return s
 }
-
-
-

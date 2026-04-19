@@ -1,111 +1,56 @@
 package transport
 
 import (
-	"encoding/json"
-	"net/http"
-	"os"
-	"path/filepath"
+	"ec2-api/internal/application"
 
 	"github.com/gin-gonic/gin"
 )
 
-// DocsHandler serves the static documentation API.
 type DocsHandler struct {
-	docsDir string
+	service *application.DocsService
 }
 
-// NewDocsHandler creates a new DocsHandler.
-// docsDir is the absolute path to the docs/compute directory.
-func NewDocsHandler(docsDir string) *DocsHandler {
-	return &DocsHandler{docsDir: docsDir}
+func NewDocsHandler(service *application.DocsService) *DocsHandler {
+	return &DocsHandler{service: service}
 }
-
-// manifestResponse is the shape of GET /api/v1/compute/docs
-type manifestResponse struct {
-	Service    string             `json:"service"`
-	Version    string             `json:"version"`
-	Categories []manifestCategory `json:"categories"`
-}
-
-type manifestCategory struct {
-	Title string         `json:"title"`
-	Items []manifestItem `json:"items"`
-}
-
-type manifestItem struct {
-	Title string `json:"title"`
-	Slug  string `json:"slug"`
-}
-
-// GetManifest returns the docs table of contents.
-func (h *DocsHandler) GetManifest(c *gin.Context) {
-	manifestPath := filepath.Join(h.docsDir, "manifest.json")
-	data, err := os.ReadFile(manifestPath)
+func (h *DocsHandler) GetPublicManifest(c *gin.Context) {
+	data, err := h.service.GetManifest(false)
 	if err != nil {
-		SendError(c, http.StatusInternalServerError, "Failed to load docs manifest")
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	c.JSON(200, gin.H{"data": data})
+}
 
-	var manifest manifestResponse
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		SendError(c, http.StatusInternalServerError, "Failed to parse docs manifest")
+func (h *DocsHandler) GetInternalManifest(c *gin.Context) {
+	data, err := h.service.GetManifest(true)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-
-	SendSuccess(c, http.StatusOK, "Docs manifest retrieved successfully", manifest)
+	c.JSON(200, gin.H{"data": data})
 }
 
-// docMetadata is the per-doc metadata stored in metadata.json
-type docMetadata struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Icon        string   `json:"icon"`
-	LastUpdated string   `json:"lastUpdated"`
-	Tags        []string `json:"tags"`
-}
-
-// docResponse is the shape of GET /api/v1/compute/docs/:slug
-type docResponse struct {
-	Metadata docMetadata `json:"metadata"`
-	Content  string      `json:"content"`
-}
-
-// GetDocBySlug returns the full documentation page for a given slug.
-func (h *DocsHandler) GetDocBySlug(c *gin.Context) {
+func (h *DocsHandler) GetPublicDoc(c *gin.Context) {
 	slug := c.Param("slug")
 
-	// Load metadata
-	metadataPath := filepath.Join(h.docsDir, "metadata.json")
-	metadataBytes, err := os.ReadFile(metadataPath)
+	doc, err := h.service.GetDoc(slug, false)
 	if err != nil {
-		SendError(c, http.StatusInternalServerError, "Failed to load docs metadata")
+		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
 
-	var allMetadata map[string]docMetadata
-	if err := json.Unmarshal(metadataBytes, &allMetadata); err != nil {
-		SendError(c, http.StatusInternalServerError, "Failed to parse docs metadata")
-		return
-	}
+	c.JSON(200, gin.H{"data": doc})
+}
 
-	meta, ok := allMetadata[slug]
-	if !ok {
-		SendError(c, http.StatusNotFound, "Documentation page not found")
-		return
-	}
+func (h *DocsHandler) GetInternalDoc(c *gin.Context) {
+	slug := c.Param("slug")
 
-	// Load markdown content
-	mdPath := filepath.Join(h.docsDir, slug+".md")
-	contentBytes, err := os.ReadFile(mdPath)
+	doc, err := h.service.GetDoc(slug, true)
 	if err != nil {
-		SendError(c, http.StatusNotFound, "Documentation content not found")
+		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
 
-	resp := docResponse{
-		Metadata: meta,
-		Content:  string(contentBytes),
-	}
-
-	SendSuccess(c, http.StatusOK, "Documentation retrieved successfully", resp)
+	c.JSON(200, gin.H{"data": doc})
 }

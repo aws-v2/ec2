@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
 )
 
 type FleetService struct {
-	fleetRepo  domain.FleetRepository
+	fleetRepo    domain.FleetRepository
 	instanceRepo domain.InstanceRepository
 }
 
 func NewFleetService(fleetRepo domain.FleetRepository, instanceRepo domain.InstanceRepository) *FleetService {
 	return &FleetService{
-		fleetRepo:  fleetRepo,
+		fleetRepo:    fleetRepo,
 		instanceRepo: instanceRepo,
 	}
 }
@@ -34,12 +34,12 @@ func (s *FleetService) GetEvents(userID string) ([]*domain.FleetEvent, error) {
 
 func (s *FleetService) LogEvent(userID, eventType, message, resource string) error {
 	event := &domain.FleetEvent{
-		ID:       fmt.Sprintf("evt_%d", SystemTimeNow().UnixNano()),
+		ID:        fmt.Sprintf("evt_%d", SystemTimeNow().UnixNano()),
 		Timestamp: SystemTimeNow(),
-		Type:     domain.FleetEventType(eventType),
-		Message:  message,
-		Resource: resource,
-		UserID:   userID,
+		Type:      domain.FleetEventType(eventType),
+		Message:   message,
+		Resource:  resource,
+		UserID:    userID,
 	}
 	return s.fleetRepo.LogEvent(event)
 }

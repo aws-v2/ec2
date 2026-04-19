@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
-	"github.com/Qarani-m/ec2-api/internal/libvirt"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/libvirt"
 )
 
 type SnapshotService struct {
@@ -59,7 +59,7 @@ func (s *SnapshotService) CreateVolumeSnapshot(volumeID int, req *domain.CreateS
 	}
 
 	s.repo.UpdateStatus(snapshot.ID, domain.SnapshotStatusReady)
-	
+
 	return &domain.VolumeSnapshot{
 		ID:          snapshot.ID,
 		VolumeID:    &volumeID,
@@ -154,7 +154,7 @@ func (s *SnapshotService) DeleteVolumeSnapshot(id int) error {
 
 	// Future enhancement: if volume snapshots map directly to libvirt snapshots when attached,
 	// or specific disk files, cleanup logic would go here.
-	
+
 	// For now, we simply remove the record from the database.
 	return s.repo.Delete(id)
 }
