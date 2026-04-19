@@ -1,0 +1,46 @@
+{
+  "service": "ec2-service",
+  "version": "V1",
+  "type": "public-docs",
+  "description": "Public engineering documentation for the ec2 service. Covers serverless function execution, event sources, triggers, runtime environments, monitoring, and deployment constraints.",
+  "audience": "developers",
+  "visibility": "public",
+
+  "categories": [
+    {
+      "title": "Getting Started",
+      "items": [
+        { "title": "Lambda Overview", "slug": "lambda-overview" },
+        { "title": "Quickstart Guide", "slug": "lambda-quickstart" }
+      ]
+    },
+    {
+      "title": "Core Execution Model",
+      "items": [
+        { "title": "Lambda Lifecycle", "slug": "lambda-lifecycle" },
+        { "title": "Runtime Environments", "slug": "lambda-runtimes" },
+        { "title": "Environment Variables", "slug": "lambda-env-vars" }
+      ]
+    },
+    {
+      "title": "Event & Trigger System",
+      "items": [
+        { "title": "Event Sources", "slug": "lambda-event-sources" },
+        { "title": "Triggers & Invocation Model", "slug": "lambda-triggers" }
+      ]
+    },
+    {
+      "title": "Performance & Limits",
+      "items": [
+        { "title": "Execution Limits", "slug": "lambda-limits" },
+        { "title": "Lambda Layers", "slug": "lambda-layers" }
+      ]
+    },
+    {
+      "title": "Observability",
+      "items": [
+        { "title": "Monitoring & Logs", "slug": "lambda-monitoring" }
+      ]
+    }
+  ]
+}

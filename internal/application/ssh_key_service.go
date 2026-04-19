@@ -9,7 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"golang.org/x/crypto/ssh"
 )
 

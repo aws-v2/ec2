@@ -4,8 +4,9 @@ package application
 import (
 	"fmt"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
-	"github.com/Qarani-m/ec2-api/internal/libvirt"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/libvirt"
+
 	"github.com/google/uuid"
 )
 

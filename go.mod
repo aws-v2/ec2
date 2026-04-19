@@ -1,4 +1,4 @@
-module github.com/Qarani-m/ec2-api
+module ec2-api
 
 go 1.25
 

@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Qarani-m/ec2-api/internal/application"
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/application"
+	"ec2-api/internal/domain"
+
 	"github.com/gin-gonic/gin"
 )
 

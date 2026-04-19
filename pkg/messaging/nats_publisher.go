@@ -6,7 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
@@ -24,7 +25,6 @@ type Publisher interface {
 	DetachResource(tenantID, instanceID, vpcID string) error
 	ListVPCs(tenantID string) ([]domain.VPC, error)
 	CreateVPC(tenantID, vpcName, requestedBy string) error
-
 
 	PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
 	ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
@@ -79,11 +79,13 @@ func (p *NATSPublisher) Close() {
 // PublishInstanceEvent publishes an instance lifecycle event to NATS.
 //
 // FIX 1: Guard against publishing INSTANCE_STARTED with an empty IP.
-//         The network service rejects payloads with no IPAddress, which was
-//         causing instances to never get registered and remain unreachable.
+//
+//	The network service rejects payloads with no IPAddress, which was
+//	causing instances to never get registered and remain unreachable.
 //
 // FIX 2: Retry with backoff instead of a single fire-and-forget Publish call.
-//         A single failed publish silently dropped the registration event.
+//
+//	A single failed publish silently dropped the registration event.
 func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance) error {
 	if p == nil || p.nc == nil {
 		return fmt.Errorf("NATS publisher or connection not initialized")
@@ -160,8 +162,6 @@ func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.
 	return fmt.Errorf("failed to publish %s event for %s after %d attempts: %w",
 		eventType, instance.ID, maxPublishRetries, lastErr)
 }
-
-
 
 func (p *NATSPublisher) PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (string, string, string, error) {
 	if p == nil || p.nc == nil {
@@ -259,7 +259,6 @@ func (p *NATSPublisher) ReleaseInstanceNetwork(tenantID, instanceID, vpcID strin
 	log.Printf("[NATS] [SUCCESS] Network released: correlation_id=%s instance_id=%s", correlationID, instanceID)
 	return nil
 }
-
 
 // GetDefaultVPC queries the Network Service for the tenant's default VPC ID and bridge name.
 func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {

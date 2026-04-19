@@ -4,7 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Qarani-m/ec2-api/internal/domain"
+	"ec2-api/internal/domain"
+
 	"github.com/jmoiron/sqlx"
 )
 

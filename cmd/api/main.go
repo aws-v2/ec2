@@ -17,18 +17,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Qarani-m/ec2-api/internal/application"
-	"github.com/Qarani-m/ec2-api/internal/config"
-	"github.com/Qarani-m/ec2-api/internal/domain"
-	"github.com/Qarani-m/ec2-api/internal/libvirt"
-	"github.com/Qarani-m/ec2-api/internal/repository/postgres"
-	transport "github.com/Qarani-m/ec2-api/internal/transport/http"
-	"github.com/Qarani-m/ec2-api/pkg/database"
-	"github.com/Qarani-m/ec2-api/pkg/messaging"
-	"github.com/Qarani-m/ec2-api/internal/infrastructure/storage"
-	"github.com/Qarani-m/ec2-api/pkg/netutil"
-	"github.com/gin-gonic/gin"
+	"ec2-api/internal/application"
+	"ec2-api/internal/config"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/infrastructure/storage"
+	"ec2-api/internal/libvirt"
+	"ec2-api/internal/repository/postgres"
+	transport "ec2-api/internal/transport/http"
+	"ec2-api/pkg/database"
+	"ec2-api/pkg/messaging"
+	"ec2-api/pkg/netutil"
 	"log/slog"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -123,7 +124,6 @@ func main() {
 		slog.Info("MinIO adapter initialized successfully")
 	}
 
-
 	// // 2. Initialize Repository Layer
 	var instanceRepo domain.InstanceRepository
 	var volumeRepo domain.VolumeRepository
@@ -169,6 +169,7 @@ func main() {
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
 	terminalService := application.NewTerminalService(instanceService, systemKeyService)
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
+	docsService := application.NewDocsService("docs")
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
@@ -194,11 +195,7 @@ func main() {
 	templateHandler := transport.NewTemplateHandler(templateService)
 	terminalHandler := transport.NewTerminalHandler(terminalService)
 	fleetHandler := transport.NewFleetHandler(fleetService)
-
-	// Docs handler — docs are stored in <workdir>/docs/compute
-	workDir, _ := os.Getwd()
-	computeDocsDir := filepath.Join(workDir, "docs", "compute")
-	docsHandler := transport.NewDocsHandler(computeDocsDir)
+	docsHandler := transport.NewDocsHandler(docsService)
 
 	// 5. Setup Router
 	router := gin.Default()

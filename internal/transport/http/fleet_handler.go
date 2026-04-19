@@ -3,7 +3,8 @@ package transport
 import (
 	"net/http"
 
-	"github.com/Qarani-m/ec2-api/internal/application"
+	"ec2-api/internal/application"
+
 	"github.com/gin-gonic/gin"
 )
 
