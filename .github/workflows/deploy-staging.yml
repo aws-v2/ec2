@@ -51,6 +51,7 @@ jobs:
             docker run -d --name ec2-service-staging \
               --network aws-staging-network \
               -p 8088:8088 \
+              -v /var/lib/libvirt/images:/var/lib/libvirt/images \
               -e APP_PROFILE=staging \
               -e SERVICE_NAME=ec2-service \
               -e DB_HOST=postgres-staging \
@@ -71,4 +72,5 @@ jobs:
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
               -e MINIO_USE_SSL=false \
+              -e IMAGES_DIR=/var/lib/libvirt/images \
               qarani/ec2-api:staging
