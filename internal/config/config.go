@@ -48,9 +48,10 @@ type DBConfig struct {
 }
 
 type NATSConfig struct {
-	URL      string
-	User     string
-	Password string
+	URL           string
+	User          string
+	Password      string
+	SubjectPrefix string
 }
 
 type ServerConfig struct {
@@ -86,6 +87,7 @@ func Load() (*Config, error) {
 			URL:      getEnv("NATS_URL", "nats://localhost:4222"),
 			User:     getEnv("NATS_USER", "auth-server"),
 			Password: getEnv("NATS_PASSWORD", "auth-secret"),
+			SubjectPrefix: getEnv("NATS_SUBJECT_PREFIX", "dev.v1"),
 		},
 		Server: ServerConfig{
 			Port:        getEnv("PORT", "8088"),

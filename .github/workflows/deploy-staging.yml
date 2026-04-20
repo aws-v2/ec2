@@ -73,4 +73,5 @@ jobs:
               -e MINIO_SECRET_KEY=minio-staging-password \
               -e MINIO_USE_SSL=false \
               -e IMAGES_DIR=/var/lib/libvirt/images \
+              -e NATS_SUBJECT_PREFIX=staging.v1 \
               qarani/ec2-api:staging

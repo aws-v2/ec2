@@ -229,7 +229,7 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 		instanceToken, err = s.publisher.RequestInstanceToken(userID, instanceID)
 		if err != nil {
 			log.Printf("[IAM] [ERROR] Failed to get instance token for %s: %v", instanceID, err)
-			return nil, fmt.Errorf("failed to get instance token: %w", err)
+			return nil, fmt.Errorf("failed to get instance token: %w %s", err,s.publisher)
 		}
 		log.Printf("[IAM] [OK] Received instance token for %s", instanceID)
 	}
