@@ -78,7 +78,7 @@ func main() {
 
 	// 2. Initialize Messaging Layer (Priority)
 	slog.Info("Initializing NATS publisher...")
-	natsPublisher, err := messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.Profile)
+	natsPublisher, err := messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.SubjectPrefix)
 	if err != nil {
 		slog.Warn("Failed to connect to NATS", "url", cfg.NATS.URL, "error", err)
 		natsPublisher = nil

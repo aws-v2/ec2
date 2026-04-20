@@ -169,7 +169,7 @@ func (p *NATSPublisher) PrepareInstanceNetwork(tenantID, instanceID, vpcID strin
 	}
 
 	correlationID := uuid.New().String()
-	subject := fmt.Sprintf("%s.network.v1.instance.prepare", p.profile)
+	subject := fmt.Sprintf("%s.network.instance.prepare", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -265,9 +265,9 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	if p == nil || p.nc == nil {
 		return "", "", fmt.Errorf("NATS publisher or connection not initialized")
 	}
-
 	correlationID := uuid.New().String()
-	subject := fmt.Sprintf("%s.network.v1.vpc.default.get", p.profile)
+	subject := fmt.Sprintf("%s.network.vpc.default.get", p.profile)
+	fmt.Println("Getting default VPC for for subject", subject)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -540,12 +540,14 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	}
 
 	correlationID := uuid.New().String()
-	subject := fmt.Sprintf("%s.iam.v1.token.generate", p.profile)
+	subject := fmt.Sprintf("%s.iam.token.generate", p.profile)
 
 	req := InstanceTokenRequest{
 		InstanceID: instanceID,
 		UserID:     userID,
 	}
+
+	fmt.Println("Requesting instance token for instance %s and user %s subject %s", instanceID, userID, subject)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -572,7 +574,7 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	}
 
 	if resp.Token == "" {
-		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=empty_token", correlationID)
+		log.Printf("[NATS] [FAILURE] RequestInstanceToken: correlation_id=%s error=empty_token for subject %s", correlationID, subject)
 		return "", fmt.Errorf("IAM service returned an empty token")
 	}
 
