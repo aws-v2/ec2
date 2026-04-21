@@ -95,7 +95,7 @@ func Load() (*Config, error) {
 			HTTPPort:    getEnvInt("HTTP_PORT", 8088),
 		},
 		Libvirt: LibvirtConfig{
-			URI:       getEnv("LIBVIRT_URI", "qemu:///system"),  //this url works indev but not in staging 
+			URI:       getEnv("LIBVIRT_URI", "qemu:///system"),  //this particular url works indev but not in staging 
 			ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images"),
 		},
 		Profile: strings.ToLower(getEnv("APP_PROFILE", "dev")),
