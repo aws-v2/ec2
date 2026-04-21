@@ -267,7 +267,6 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	}
 	correlationID := uuid.New().String()
 	subject := fmt.Sprintf("%s.network.vpc.default.get", p.profile)
-	fmt.Println("Getting default VPC for for subject", subject)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
@@ -547,7 +546,7 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 		UserID:     userID,
 	}
 
-	fmt.Println("Requesting instance token for instance %s and user %s subject %s", instanceID, userID, subject)
+	fmt.Printf("Requesting instance token for instance %s and user %s subject %s\n", instanceID, userID, subject)
 
 	data, err := json.Marshal(req)
 	if err != nil {
