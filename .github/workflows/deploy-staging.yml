@@ -66,7 +66,6 @@ jobs:
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USER=nats-staging-user \
               -e NATS_PASSWORD=nats-staging-password \
-              -e LIBVIRT_URI=qemu:///system \
               -e IMAGES_DIR=/var/lib/libvirt/images \
               -e MINIO_ENDPOINT=minio-staging:9000 \
               -e MINIO_ACCESS_KEY=minio-staging-user \
@@ -74,4 +73,5 @@ jobs:
               -e MINIO_USE_SSL=false \
               -e IMAGES_DIR=/var/lib/libvirt/images \
               -e NATS_SUBJECT_PREFIX=staging.v1 \
+              -e "LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock" \
               qarani/ec2-api:staging

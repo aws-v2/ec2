@@ -106,6 +106,9 @@ func main() {
 	slog.Info("Initializing Libvirt client...")
 	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
 	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
+	
+	
+	
 	if err != nil {
 		slog.Warn("Failed to connect to libvirt", "error", err)
 		libvirtClient = nil
