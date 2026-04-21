@@ -45,7 +45,7 @@ func NewNATSSubscriber(url, user, password string, profile string, handler EC2Ev
 
 func (s *NATSSubscriber) Start() error {
 	// 1. Subscribe to Scaling Events
-	scaleSubject := fmt.Sprintf("%s.ec2.v1.scale.*", s.profile)
+	scaleSubject := fmt.Sprintf("%s.ec2.scale.*", s.profile)
 	queueGroup := "ec2-enforcers"
 
 	_, err := s.nc.QueueSubscribe(scaleSubject, queueGroup, func(msg *nats.Msg) {
@@ -68,7 +68,7 @@ func (s *NATSSubscriber) Start() error {
 	}
 
 	// 2. Subscribe to VM Provision Events
-	provisionSubject := fmt.Sprintf("%s.ec2.v1.vm.provision", s.profile)
+	provisionSubject := fmt.Sprintf("%s.ec2.vm.provision", s.profile)
 	_, err = s.nc.QueueSubscribe(provisionSubject, queueGroup, func(msg *nats.Msg) {
 		var event domain.ProvisionInstanceEvent
 		if err := json.Unmarshal(msg.Data, &event); err != nil {
