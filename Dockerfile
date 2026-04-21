@@ -23,7 +23,7 @@ FROM alpine:latest
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates libvirt-libs qemu-img
+RUN apk add --no-cache ca-certificates libvirt-libs qemu-img cdrkit
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/ec2-api .
