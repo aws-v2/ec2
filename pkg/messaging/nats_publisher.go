@@ -220,7 +220,7 @@ func (p *NATSPublisher) ReleaseInstanceNetwork(tenantID, instanceID, vpcID strin
 	}
 
 	correlationID := uuid.New().String()
-	subject := fmt.Sprintf("%s.network.v1.instance.release", p.profile)
+	subject := fmt.Sprintf("%s.network.instance.release", p.profile)
 
 	request := map[string]string{
 		"correlation_id": correlationID,
