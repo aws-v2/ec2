@@ -47,7 +47,7 @@ func (h *TerminalHandler) HandleTerminal(c *gin.Context) {
 	userID := c.GetString("userID")
 	sshSession, err := h.service.CreateSSHSession(instanceID, userID)
 	if err != nil {
-		log.Printf("[TERMINAL] SSH connection failed: %v", err)
+		log.Printf("[TERMINAL] SSH connection failed.: %v", err)
 		errorMessage := fmt.Sprintf("\r\n[ERROR] Failed to connect: %v\r\n", err)
 		ws.WriteJSON(TerminalMessage{
 			Type: "error",
