@@ -73,7 +73,7 @@ jobs:
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
               -e MINIO_USE_SSL=false \
-              -e NATS_SUBJECT_PREFIX=staging.v1 \
+              -e NATS_PREFIX=staging.v1 \
               -e "LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock" \
               qarani/ec2-api:staging
 
