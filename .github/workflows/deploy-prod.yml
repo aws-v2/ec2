@@ -85,6 +85,7 @@ jobs:
               -e MINIO_ACCESS_KEY=minio-prod-user \
               -e MINIO_SECRET_KEY=minio-prod-password \
               -e MINIO_USE_SSL=false \
+              -e NATS_PREFIX=prod.v1 \
               -e LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
               -e IMAGES_DIR=/var/lib/libvirt/images \
               qarani/ec2-api:prod
