@@ -176,7 +176,7 @@ func main() {
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
-		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.Profile, instanceService)
+		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.SubjectPrefix, instanceService)
 		if err != nil {
 			slog.Warn("Failed to initialize NATS subscriber", "error", err)
 		} else {
