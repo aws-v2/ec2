@@ -740,8 +740,8 @@ func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message s
 	if err != nil {
 		return fmt.Errorf("failed to marshal progress event: %w", err)
 	}
-
-	fmt.Printf("[NATS] [REQUEST] subjeect=%s correlation_id=%s instance_id=%s event_type=%s ip=%s status=published\n", p.subject, instanceID, stage, message)
+	fmt.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s instance_id=%s event_type=%s ip=%s status=published\n",
+		p.subject, instanceID, stage, message, message)
 
 	// Use the same subject for now, as the backend will filter by event_type
 	if err := p.nc.Publish(p.subject, data); err != nil {
