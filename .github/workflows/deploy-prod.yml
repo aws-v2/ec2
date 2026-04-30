@@ -75,84 +75,41 @@ jobs:
           username: ${{ secrets.PROD_USERNAME }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
-            docker network create aws-prod-network || true
+            docker network create --driver overlay aws-prod-network || true
+
             docker pull qarani/ec2-api:prod
-            docker stop ec2-service-prod || true
-            docker rm ec2-service-prod || true
-            docker run -d \
-              --name ec2-service-prod \
-              --network aws-prod-network \            docker network create aws-prod-network || true
-            docker pull qarani/ec2-api:prod
-            docker stop ec2-service-prod || true
-            docker rm ec2-service-prod || true
-            docker run -d \
+
+            docker service rm ec2-service-prod || true
+
+            docker service create \
               --name ec2-service-prod \
               --network aws-prod-network \
-              -p 8088:8088 \
-              -v /var/lib/libvirt/images:/var/lib/libvirt/images \
-              -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
-              --group-add 120 \
-              -e APP_PROFILE=prod \
-              -e SERVICE_NAME=ec2-service \
-              -e DB_HOST=postgres-prod \
-              -e DB_PORT=5432 \
-              -e DB_USER=postgres-prod-user \
-              -e DB_PASSWORD=postgres-prod-password \
-              -e DB_NAME=ec2_db \
-              -e DB_SSLMODE=disable \
-              -e NATS_URL=nats://nats-prod:4222 \
-              -e NATS_USER=nats-prod-user \
-              -e NATS_PASSWORD=nats-prod-password \
-              -e NATS_SUBJECT_PREFIX=prod.v1 \
-              -e EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
-              -e EUREKA_APP_NAME=EC2-SERVICE \
-              -e EUREKA_HOSTNAME=ec2-service-prod \
-              -e EUREKA_IP_ADDR=127.0.0.1 \
-              -e EUREKA_VIP_ADDRESS=ec2-service \
-              -e EUREKA_INSTANCE_ID=ec2-service:8088 \
-              -e MINIO_ENDPOINT=minio-prod:9000 \
-              -e MINIO_ACCESS_KEY=minio-prod-user \
-              -e MINIO_SECRET_KEY=minio-prod-password \
-              -e MINIO_USE_SSL=false \
-              -e NATS_PREFIX=prod.v1 \
-              -e LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
-              -e IMAGES_DIR=/var/lib/libvirt/images \
+              --publish published=8088,target=8088 \
+              --mount type=bind,source=/var/lib/libvirt/images,target=/var/lib/libvirt/images \
+              --mount type=bind,source=/var/run/libvirt/libvirt-sock,target=/var/run/libvirt/libvirt-sock \
+              --env APP_PROFILE=prod \
+              --env SERVICE_NAME=ec2-service \
+              --env DB_HOST=postgres-prod \
+              --env DB_PORT=5432 \
+              --env DB_USER=postgres-prod-user \
+              --env DB_PASSWORD=postgres-prod-password \
+              --env DB_NAME=ec2_db \
+              --env DB_SSLMODE=disable \
+              --env NATS_URL=nats://nats-prod:4222 \
+              --env NATS_USER=nats-prod-user \
+              --env NATS_PASSWORD=nats-prod-password \
+              --env NATS_SUBJECT_PREFIX=prod.v1 \
+              --env EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
+              --env EUREKA_APP_NAME=EC2-SERVICE \
+              --env EUREKA_HOSTNAME=ec2-service-prod \
+              --env EUREKA_IP_ADDR=127.0.0.1 \
+              --env EUREKA_VIP_ADDRESS=ec2-service \
+              --env EUREKA_INSTANCE_ID=ec2-service:8088 \
+              --env MINIO_ENDPOINT=minio-prod:9000 \
+              --env MINIO_ACCESS_KEY=minio-prod-user \
+              --env MINIO_SECRET_KEY=minio-prod-password \
+              --env MINIO_USE_SSL=false \
+              --env NATS_PREFIX=prod.v1 \
+              --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
+              --env IMAGES_DIR=/var/lib/libvirt/images \
               qarani/ec2-api:prod
-
-
-
-
-
-              -p 8088:8088 \
-              -v /var/lib/libvirt/images:/var/lib/libvirt/images \
-              -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
-              --group-add 120 \
-              -e APP_PROFILE=prod \
-              -e SERVICE_NAME=ec2-service \
-              -e DB_HOST=postgres-prod \
-              -e DB_PORT=5432 \
-              -e DB_USER=postgres-prod-user \
-              -e DB_PASSWORD=postgres-prod-password \
-              -e DB_NAME=ec2_db \
-              -e DB_SSLMODE=disable \
-              -e NATS_URL=nats://nats-prod:4222 \
-              -e NATS_USER=nats-prod-user \
-              -e NATS_PASSWORD=nats-prod-password \
-              -e NATS_SUBJECT_PREFIX=prod.v1 \
-              -e EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
-              -e EUREKA_APP_NAME=EC2-SERVICE \
-              -e EUREKA_HOSTNAME=ec2-service-prod \
-              -e EUREKA_IP_ADDR=127.0.0.1 \
-              -e EUREKA_VIP_ADDRESS=ec2-service \
-              -e EUREKA_INSTANCE_ID=ec2-service:8088 \
-              -e MINIO_ENDPOINT=minio-prod:9000 \
-              -e MINIO_ACCESS_KEY=minio-prod-user \
-              -e MINIO_SECRET_KEY=minio-prod-password \
-              -e MINIO_USE_SSL=false \
-              -e LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
-              -e IMAGES_DIR=/var/lib/libvirt/images \
-              qarani/ec2-api:prod
-
-
-
-
