@@ -31,15 +31,3 @@ type FleetEvent struct {
 	Resource  string         `json:"resource" db:"resource"`
 	UserID    string         `json:"user_id" db:"user_id"`
 }
-
-// FleetRepository defines methods for fetching fleet-wide data
-type FleetRepository interface {
-	GetOverview(userID string) (*FleetOverview, error)
-	GetEvents(userID string, limit int) ([]*FleetEvent, error)
-	LogEvent(event *FleetEvent) error
-}
-
-// LambdaRepository placeholder for future implementation
-type LambdaRepository interface {
-	CountActive(userID string) (int, error)
-}

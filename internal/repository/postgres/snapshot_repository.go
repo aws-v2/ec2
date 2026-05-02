@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,7 +14,7 @@ type snapshotRepository struct {
 	db *sqlx.DB
 }
 
-func NewSnapshotRepository(db *sqlx.DB) domain.SnapshotRepository {
+func NewSnapshotRepository(db *sqlx.DB) interfaces.SnapshotRepository {
 	return &snapshotRepository{db: db}
 }
 

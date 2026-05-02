@@ -5,20 +5,21 @@ import (
 	"fmt"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 
 	"github.com/google/uuid"
 )
 
 type VolumeService struct {
-	repo          domain.VolumeRepository
-	instanceRepo  domain.InstanceRepository
+	repo          interfaces.VolumeRepository
+	instanceRepo  interfaces.InstanceRepository
 	libvirtClient *libvirt.LibvirtClient
 }
 
 func NewVolumeService(
-	repo domain.VolumeRepository,
-	instanceRepo domain.InstanceRepository,
+	repo interfaces.VolumeRepository,
+	instanceRepo interfaces.InstanceRepository,
 	libvirtClient *libvirt.LibvirtClient,
 ) *VolumeService {
 	return &VolumeService{

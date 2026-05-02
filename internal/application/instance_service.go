@@ -1,7 +1,13 @@
 package application
 
 import (
+	"archive/zip"
 	"context"
+	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
+	"ec2-api/internal/libvirt"
+	"ec2-api/internal/storage"
+	"ec2-api/pkg/messaging"
 	"fmt"
 	"io"
 	"log"
@@ -9,21 +15,35 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
-
-	"archive/zip"
-	"ec2-api/internal/domain"
-	"ec2-api/internal/infrastructure/storage"
-	"ec2-api/internal/libvirt"
-	"ec2-api/pkg/messaging"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
 
+// "context"
+// "fmt"
+// "io"
+// "log"
+// "net/http"
+// "os"
+// "os/exec"
+// "path/filepath"
+// "time"
+
+// "archive/zip"
+// "ec2-api/internal/domain"
+// "ec2-api/internal/infrastructure/storage"
+// "ec2-api/internal/interfaces"
+// "ec2-api/internal/libvirt"
+// "ec2-api/pkg/messaging"
+// "strings"
+
+// "github.com/google/uuid"
+
 type InstanceService struct {
-	repo          domain.InstanceRepository
-	sgService     domain.SecurityGroupService
+	repo          interfaces.InstanceRepository
+	sgService     interfaces.SecurityGroupService
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
 	imagesDir     string
@@ -78,7 +98,7 @@ var imageURLMap = map[string]string{
 	"centos-stream-9": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
 }
 
-func NewInstanceService(repo domain.InstanceRepository, sgService domain.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher, minioAdapter *storage.MinIOAdapter) *InstanceService {
+func NewInstanceService(repo interfaces.InstanceRepository, sgService interfaces.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher, minioAdapter *storage.MinIOAdapter) *InstanceService {
 	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher, minioAdapter: minioAdapter}
 
 	// Start background health update loop
@@ -923,58 +943,41 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	return nil
 }
 
-// CreateScalingPolicy publishes a scaling policy event via NATS.
 func (s *InstanceService) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
-	if s.publisher == nil {
-		return fmt.Errorf("NATS publisher is not configured")
-	}
-	return s.publisher.PublishScalingPolicy(userID, *req)
+	return s.repo.CreateScalingPolicy(ctx, userID, req)
 }
 
-// GetScalingPolicies returns all scaling policies for the user.
 func (s *InstanceService) GetScalingPolicies(ctx context.Context, userID string) ([]domain.ScalingPolicy, error) {
-	if s.publisher == nil {
-		return nil, fmt.Errorf("NATS publisher is not configured")
-	}
-	return s.publisher.GetScalingPolicies(userID)
+	return s.repo.GetScalingPolicies(ctx, userID)
 }
 
-// UpdateScalingPolicy publishes an update event via NATS.
 func (s *InstanceService) UpdateScalingPolicy(ctx context.Context, userID, policyID string, req *domain.UpdateScalingPolicyRequest) error {
-	if s.publisher == nil {
-		return fmt.Errorf("NATS publisher is not configured")
-	}
-	return s.publisher.UpdateScalingPolicy(userID, policyID, *req)
+	return s.repo.UpdateScalingPolicy(ctx, userID, policyID, req)
 }
 
-// DeleteScalingPolicy publishes a delete event via NATS.
 func (s *InstanceService) DeleteScalingPolicy(ctx context.Context, userID, policyID string) error {
-	if s.publisher == nil {
-		return fmt.Errorf("NATS publisher is not configured")
-	}
-	return s.publisher.DeleteScalingPolicy(userID, policyID)
+	return s.repo.DeleteScalingPolicy(ctx, userID, policyID)
 }
-
 // ── Scaling Enforcement ──────────────────────────────────────────────────
 
 // EnforceScaling receives a requested scale action from the Metrics Service and attempts to execute it.
 func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error {
-	log.Printf("[SCALER] Enforcing scale action: %s for target: %s (tenant: %s)", event.Action, event.Policy.TargetID, event.TenantID)
+	log.Printf("[SCALER] Enforcing scale action: %s for target: %s (tenant: %s)", event.Action, event.Policy.TargetID, event.Policy.UserID)
 
 	// In the future, target_type could be "asg", and we'd look up the ASG details here.
 	// For now, if the target is an individual instance, we act on that instance directly.
-	if event.Policy.TargetType != "instance" {
-		return fmt.Errorf("unsupported target_type: %s", event.Policy.TargetType)
+	if event.Policy.PolicyType != "instance" {
+		return fmt.Errorf("unsupported target_type: %s", event.Policy.PolicyType)
 	}
 
-	targetInstance, err := s.GetInstance(event.Policy.TargetID, event.TenantID)
+	targetInstance, err := s.GetInstance(event.Policy.TargetID, event.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch target instance %s: %w", event.Policy.TargetID, err)
 	}
 
 	switch event.Action {
 	case domain.ScaleOutAction:
-		return s.handleScaleOut(targetInstance, event.Policy.MaxInstances)
+		return s.handleScaleOut(targetInstance, event.Policy.MaxCapacity)
 	case domain.ScaleInAction:
 		return s.handleScaleIn(targetInstance)
 	default:

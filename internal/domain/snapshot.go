@@ -45,23 +45,3 @@ type CreateSnapshotRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
-
-type SnapshotRepository interface {
-	Create(snapshot *Snapshot) error
-	FindByID(id int) (*Snapshot, error)
-	FindAll() ([]*Snapshot, error)
-	FindByInstanceID(instanceID string) ([]*Snapshot, error)
-	FindByVolumeID(volumeID int) ([]*VolumeSnapshot, error)
-	UpdateStatus(id int, status SnapshotStatus) error
-	Delete(id int) error
-}
-
-type SnapshotService interface {
-	CreateSnapshot(instanceID string, req *CreateSnapshotRequest) (*Snapshot, error)
-	CreateVolumeSnapshot(volumeID int, req *CreateSnapshotRequest) (*VolumeSnapshot, error)
-	GetSnapshot(id int) (*Snapshot, error)
-	ListSnapshots() ([]*Snapshot, error)
-	ListSnapshotsByInstance(instanceID string) ([]*Snapshot, error)
-	ListSnapshotsByVolume(volumeID int) ([]*VolumeSnapshot, error)
-	DeleteSnapshot(id int) error
-}

@@ -5,17 +5,18 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 )
 
 type SnapshotService struct {
-	repo          domain.SnapshotRepository
-	instanceRepo  domain.InstanceRepository
-	volumeRepo    domain.VolumeRepository
+	repo          interfaces.SnapshotRepository
+	instanceRepo  interfaces.InstanceRepository
+	volumeRepo    interfaces.VolumeRepository
 	libvirtClient *libvirt.LibvirtClient
 }
 
-func NewSnapshotService(repo domain.SnapshotRepository, instanceRepo domain.InstanceRepository, volumeRepo domain.VolumeRepository, libvirt *libvirt.LibvirtClient) *SnapshotService {
+func NewSnapshotService(repo interfaces.SnapshotRepository, instanceRepo interfaces.InstanceRepository, volumeRepo interfaces.VolumeRepository, libvirt *libvirt.LibvirtClient) *SnapshotService {
 	return &SnapshotService{
 		repo:          repo,
 		instanceRepo:  instanceRepo,
