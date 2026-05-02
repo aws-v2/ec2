@@ -28,13 +28,7 @@ const TEST_SSH_USER = "martin"    // ← replace with your Linux username on tha
 
 // Paste the FULL output of: cat ~/.ssh/serwin_test
 // Keep the backtick string exactly as-is, including newlines
-const TEST_SSH_KEY = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACAMKLNcnw96DfFhlK/nuHQjAZNnGGmOZcLD4B6bUCybwwAAAJjIDjzcyA48
-3AAAAAtzc2gtZWQyNTUxOQAAACAMKLNcnw96DfFhlK/nuHQjAZNnGGmOZcLD4B6bUCybww
-AAAEBUwkL/d2bDvhDNlqI10t40wEuVOfvJZpZkQQt9/Jf1WAwos1yfD3oN8WGUr+e4dCMB
-k2cYaY5lwsPgHptQLJvDAAAAEXNlcndpbi1hZ2VudC10ZXN0AQIDBA==
------END OPENSSH PRIVATE KEY-----`
+const TEST_SSH_KEY = ``
 
 // ─────────────────────────────────────────────────────────────────────────────
 
