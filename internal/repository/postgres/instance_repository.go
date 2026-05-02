@@ -161,7 +161,7 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 
 	instance.CreatedAt = time.Now()
 	_, err := r.db.Exec(query, instance.ID, instance.VMName, instance.Image, instance.CPU, instance.RAM,
-		instance.SSHKey, instance.Status, instance.IP, instance.PublicIP, instance.ProxmoxID, instance.CreatedAt, instance.UserID,
+		instance.PublicSSHKey, instance.Status, instance.IP, instance.PublicIP, instance.ProxmoxID, instance.CreatedAt, instance.UserID,
 		instance.RootVolumeID, instance.StorageSize, instance.StorageType, instance.DeviceName, instance.VPCID)
 	return err
 }

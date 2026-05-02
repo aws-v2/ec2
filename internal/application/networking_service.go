@@ -276,7 +276,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		diskPath,
 		instance.CPU,
 		instance.RAM,
-		instance.SSHKey,
+		instance.PublicSSHKey,
 		bridgeName,
 		privateIP,
 		gateway,

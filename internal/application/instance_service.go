@@ -3,11 +3,14 @@ package application
 import (
 	"archive/zip"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"ec2-api/internal/domain"
 	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 	"ec2-api/internal/storage"
 	"ec2-api/pkg/messaging"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -19,27 +22,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh"
 )
 
-// "context"
-// "fmt"
-// "io"
-// "log"
-// "net/http"
-// "os"
-// "os/exec"
-// "path/filepath"
-// "time"
-
-// "archive/zip"
-// "ec2-api/internal/domain"
-// "ec2-api/internal/infrastructure/storage"
-// "ec2-api/internal/interfaces"
-// "ec2-api/internal/libvirt"
-// "ec2-api/pkg/messaging"
-// "strings"
-
-// "github.com/google/uuid"
 
 type InstanceService struct {
 	repo          interfaces.InstanceRepository
@@ -221,6 +206,44 @@ func (s *InstanceService) downloadImage(url string, destPath string) error {
 	return nil
 }
 
+
+// ─── SSH Key Pair ─────────────────────────────────────────────────────────────
+
+type SSHKeyPair struct {
+	PrivateKeyPEM string // stored in DB → fed to agent at terminal time
+	PublicKeyAuth string // "ssh-ed25519 AAAA..." → fed to cloud-init authorized_keys
+}
+
+// GenerateSSHKeyPair creates an ed25519 key pair.
+// Call this once at instance creation time and persist both keys to the DB.
+func GenerateSSHKeyPair() (*SSHKeyPair, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate ed25519 key: %w", err)
+	}
+
+	// Marshal private key to OpenSSH PEM format
+	privPEM, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		return nil, fmt.Errorf("marshal private key: %w", err)
+	}
+	privPEMStr := string(pem.EncodeToMemory(privPEM))
+
+	// Marshal public key to authorized_keys format ("ssh-ed25519 AAAA...")
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("derive public key: %w", err)
+	}
+	pubAuthStr := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+
+	return &SSHKeyPair{
+		PrivateKeyPEM: privPEMStr,
+		PublicKeyAuth: pubAuthStr,
+	}, nil
+}
+
+
+
 func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
 	// ── Step 1: Validate image ────────────────────────────────────────────────
@@ -317,13 +340,22 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	// ── Step 3: Save instance record with pending status and the known IP ─────
 	// We save the IP now because we already know it — the network service
 	// allocated it above. No need to update it again after VM creation.
+
+	keyPair, err := GenerateSSHKeyPair()
+	if err != nil {
+		log.Printf("[SSH] [ERROR] Failed to generate SSH key pair for instance %s: %v", instanceID, err)
+		return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
+	}
+
+	
 	instance := &domain.Instance{
 		ID:        instanceID,
 		VMName:    vmName,
 		Image:     req.Image,
 		CPU:       req.CPU,
 		RAM:       req.RAM,
-		SSHKey:    req.SSHKey,
+		PublicSSHKey:    keyPair.PublicKeyAuth,
+		PrivateSshKey:   keyPair.PrivateKeyPEM,
 		Status:    domain.StatusPending,
 		IP:        privateIP, // ← known before VM creation
 		PublicIP:  "",
@@ -347,7 +379,7 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	// privateIP and gateway are passed in — libvirt will bake them into
 	// cloud-init so the VM boots with a static IP. No DHCP polling.
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken)
-
+	instance.PrivateSshKey = keyPair.PrivateKeyPEM // overwrite PrivateSshKey with the private key PEM for terminal access
 	return instance, nil
 }
 
@@ -914,7 +946,7 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 
 	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
 
-	combinedKeys := instance.SSHKey
+	combinedKeys := instance.PublicSSHKey
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
@@ -1001,7 +1033,7 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 				if inst.VPCID == baseInstance.VPCID && inst.Image == baseInstance.Image {
 					currentCount++
 				}
-			}
+			} 
 		}
 
 		if currentCount >= maxInstances {
@@ -1014,7 +1046,7 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 		Image:  baseInstance.Image,
 		CPU:    baseInstance.CPU,
 		RAM:    baseInstance.RAM,
-		SSHKey: baseInstance.SSHKey,
+		SSHKey: baseInstance.PublicSSHKey,
 		VPCID:  baseInstance.VPCID,
 	}
 

@@ -15,9 +15,30 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// ─── TEST INTERCEPT ───────────────────────────────────────────────────────────
+// Toggle this to true to bypass whatever the control plane sends
+// and force all open_terminal requests to hit your real test machine.
+// Set back to false when you're ready to use real VMs.
+const TEST_MODE = true
+
+// ── Plug your values in here ──────────────────────────────────────────────────
+const TEST_VM_IP = "10.239.188.253" // ← replace with: hostname -I | awk '{print $1}'
+const TEST_VM_SSH_PORT = 22       // ← usually 22, change if your machine uses another port
+const TEST_SSH_USER = "martin"    // ← replace with your Linux username on that machine
+
+// Paste the FULL output of: cat ~/.ssh/serwin_test
+// Keep the backtick string exactly as-is, including newlines
+const TEST_SSH_KEY = `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACAMKLNcnw96DfFhlK/nuHQjAZNnGGmOZcLD4B6bUCybwwAAAJjIDjzcyA48
+3AAAAAtzc2gtZWQyNTUxOQAAACAMKLNcnw96DfFhlK/nuHQjAZNnGGmOZcLD4B6bUCybww
+AAAEBUwkL/d2bDvhDNlqI10t40wEuVOfvJZpZkQQt9/Jf1WAwos1yfD3oN8WGUr+e4dCMB
+k2cYaY5lwsPgHptQLJvDAAAAEXNlcndpbi1hZ2VudC10ZXN0AQIDBA==
+-----END OPENSSH PRIVATE KEY-----`
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── Config ───────────────────────────────────────────────────────────────────
-// Agent only needs to know where to listen.
-// All SSH details come from the control plane per request.
 
 type Config struct {
 	NodeID     string
@@ -45,10 +66,10 @@ type Message struct {
 	SessionID string `json:"session_id,omitempty"`
 
 	// open_terminal — all SSH details provided by control plane
-	VMIP       string `json:"vm_ip,omitempty"`
-	VMSSHPort  int    `json:"vm_ssh_port,omitempty"`
-	SSHUser    string `json:"ssh_user,omitempty"`
-	SSHKey     string `json:"ssh_key,omitempty"` // private key PEM content
+	VMIP      string `json:"vm_ip,omitempty"`
+	VMSSHPort int    `json:"vm_ssh_port,omitempty"`
+	SSHUser   string `json:"ssh_user,omitempty"`
+	SSHKey    string `json:"ssh_key,omitempty"` // private key PEM content
 
 	// terminal_data (both directions)
 	Data string `json:"data,omitempty"`
@@ -67,6 +88,8 @@ type Session struct {
 	sshConn *ssh.Client
 	sshSess *ssh.Session
 	stdin   io.WriteCloser
+	stdout  io.Reader // grabbed before Shell() — must be stored here
+	stderr  io.Reader // grabbed before Shell() — must be stored here
 }
 
 func (s *Session) Close() {
@@ -150,6 +173,19 @@ func (a *Agent) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 
 		case "open_terminal":
+			// ── TEST INTERCEPT ────────────────────────────────────────────────
+			// When TEST_MODE is true, ignore whatever the control plane sent
+			// and replace with your real machine's SSH details.
+			if TEST_MODE {
+				log.Printf("[agent] TEST_MODE: overriding VM details for session=%s", TEST_SSH_KEY)
+				log.Printf("[agent] TEST_MODE: original target was vm=%s user=%s", msg.VMIP, msg.SSHUser)
+				msg.VMIP = TEST_VM_IP
+				msg.VMSSHPort = TEST_VM_SSH_PORT
+				msg.SSHUser = TEST_SSH_USER
+				msg.SSHKey = TEST_SSH_KEY
+			}
+			// ─────────────────────────────────────────────────────────────────
+
 			log.Printf("[agent] open_terminal session=%s vm=%s user=%s", msg.SessionID, msg.VMIP, msg.SSHUser)
 			go func(msg Message) {
 				sess, err := dialSSH(msg.VMIP, msg.VMSSHPort, msg.SSHUser, msg.SSHKey)
@@ -159,9 +195,8 @@ func (a *Agent) HandleConnection(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				stdout, _ := sess.sshSess.StdoutPipe()
-				stderr, _ := sess.sshSess.StderrPipe()
-
+				// Pipes are already stored on sess — grabbed before Shell() in dialSSH.
+				// Do NOT call StdoutPipe/StderrPipe again here; they return nil after Shell starts.
 				mu.Lock()
 				sessions[msg.SessionID] = sess
 				mu.Unlock()
@@ -169,7 +204,7 @@ func (a *Agent) HandleConnection(w http.ResponseWriter, r *http.Request) {
 				// Forward SSH output → control plane
 				go func() {
 					buf := make([]byte, 4096)
-					combined := io.MultiReader(stdout, stderr)
+					combined := io.MultiReader(sess.stdout, sess.stderr)
 					for {
 						n, err := combined.Read(buf)
 						if n > 0 {
@@ -257,11 +292,27 @@ func dialSSH(vmIP string, vmPort int, sshUser, sshKeyPEM string) (*Session, erro
 		return nil, fmt.Errorf("pty: %w", err)
 	}
 
+	// All three pipes MUST be obtained before Shell() is called.
+	// After Shell() starts, StdoutPipe/StderrPipe return nil → panic.
 	stdin, err := sshSess.StdinPipe()
 	if err != nil {
 		sshSess.Close()
 		client.Close()
-		return nil, err
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	stdout, err := sshSess.StdoutPipe()
+	if err != nil {
+		sshSess.Close()
+		client.Close()
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	stderr, err := sshSess.StderrPipe()
+	if err != nil {
+		sshSess.Close()
+		client.Close()
+		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
 	if err := sshSess.Shell(); err != nil {
@@ -271,7 +322,7 @@ func dialSSH(vmIP string, vmPort int, sshUser, sshKeyPEM string) (*Session, erro
 	}
 
 	log.Printf("[agent] ssh connected → %s@%s", sshUser, addr)
-	return &Session{sshConn: client, sshSess: sshSess, stdin: stdin}, nil
+	return &Session{sshConn: client, sshSess: sshSess, stdin: stdin, stdout: stdout, stderr: stderr}, nil
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -279,21 +330,23 @@ func dialSSH(vmIP string, vmPort int, sshUser, sshKeyPEM string) (*Session, erro
 func main() {
 	cfg := configFromEnv()
 
+	// Print TEST_MODE status on startup so it's obvious
+	if TEST_MODE {
+		log.Printf("[agent] ⚠️  TEST_MODE=true — all SSH sessions → %s@%s:%d", TEST_SSH_USER, TEST_VM_IP, TEST_VM_SSH_PORT)
+	}
+
 	agent := NewAgent(cfg)
 
 	http.HandleFunc("/terminal", agent.HandleConnection)
-http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{
-        "status":  "ok",
-        "node_id": cfg.NodeID,
-    })
-    log.Printf("[agent] health check from %s", r.RemoteAddr)
-})
-
-
-
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"node_id": cfg.NodeID,
+		})
+		log.Printf("[agent] health check from %s", r.RemoteAddr)
+	})
 
 	log.Printf("[agent] node=%s listening on %s", cfg.NodeID, cfg.ListenAddr)
 	log.Fatal(http.ListenAndServe(cfg.ListenAddr, nil))
