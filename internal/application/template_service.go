@@ -3,9 +3,10 @@ package application
 import (
 	"fmt"
 
-	"ec2-api/internal/domain"
-	"ec2-api/internal/interfaces"
-	"ec2-api/internal/libvirt"
+		domain "ec2-api/internal/domain/instance"
+
+	interfaces "ec2-api/internal/interfaces"
+	libvirt "ec2-api/internal/infra/libvirt"
 )
 
 type TemplateService struct {

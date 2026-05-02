@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"ec2-api/internal/domain"
-	"ec2-api/internal/interfaces"
+	domain "ec2-api/internal/domain/instance"
+	interfaces "ec2-api/internal/interfaces"
 	"golang.org/x/crypto/ssh"
 )
 

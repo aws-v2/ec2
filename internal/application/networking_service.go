@@ -7,11 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"ec2-api/internal/domain"
-	"ec2-api/internal/interfaces"
-	"ec2-api/internal/libvirt"
-	"ec2-api/pkg/messaging"
-)
+	domain "ec2-api/internal/domain/instance"
+	interfaces "ec2-api/internal/interfaces"
+	messaging "ec2-api/internal/infra/messaging"
+	libvirt  "ec2-api/internal/infra/libvirt")
 
 type NetworkingService struct {
 	ipRepo       interfaces.IPRepository

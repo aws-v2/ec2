@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"ec2-api/internal/domain"
-	"ec2-api/internal/interfaces"
+	// "ec2-api/internal/domain"
+	domain "ec2-api/internal/domain/dto"
+	interfaces "ec2-api/internal/interfaces"
 )
 
 type FleetService struct {
