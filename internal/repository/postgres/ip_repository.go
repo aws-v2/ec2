@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,7 +14,7 @@ type ipRepository struct {
 	db *sqlx.DB
 }
 
-func NewIPRepository(db *sqlx.DB) domain.IPRepository {
+func NewIPRepository(db *sqlx.DB) interfaces.IPRepository {
 	return &ipRepository{db: db}
 }
 

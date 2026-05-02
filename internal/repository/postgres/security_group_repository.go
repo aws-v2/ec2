@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,7 +14,7 @@ type securityGroupRepository struct {
 	db *sqlx.DB
 }
 
-func NewSecurityGroupRepository(db *sqlx.DB) domain.SecurityGroupRepository {
+func NewSecurityGroupRepository(db *sqlx.DB) interfaces.SecurityGroupRepository {
 	return &securityGroupRepository{db: db}
 }
 

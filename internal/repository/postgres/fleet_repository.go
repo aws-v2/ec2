@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -14,7 +15,7 @@ type fleetRepository struct {
 	db *sqlx.DB
 }
 
-func NewFleetRepository(db *sqlx.DB) domain.FleetRepository {
+func NewFleetRepository(db *sqlx.DB) interfaces.FleetRepository {
 	return &fleetRepository{db: db}
 }
 
@@ -95,7 +96,7 @@ type lambdaRepository struct {
 	db *sqlx.DB
 }
 
-func NewLambdaRepository(db *sqlx.DB) domain.LambdaRepository {
+func NewLambdaRepository(db *sqlx.DB) interfaces.LambdaRepository {
 	return &lambdaRepository{db: db}
 }
 

@@ -36,18 +36,3 @@ type CreateTemplateRequest struct {
 	Description string `json:"description"`
 }
 
-type TemplateRepository interface {
-	Create(template *Template) error
-	FindByID(id int) (*Template, error)
-	FindByName(name string) (*Template, error)
-	FindAll() ([]*Template, error)
-	UpdateStatus(id int, status TemplateStatus) error
-	Delete(id int) error
-}
-
-type TemplateService interface {
-	CreateTemplate(req *CreateTemplateRequest) (*Template, error)
-	GetTemplate(id int) (*Template, error)
-	ListTemplates() ([]*Template, error)
-	DeleteTemplate(id int) error
-}

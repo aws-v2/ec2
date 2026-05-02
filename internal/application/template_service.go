@@ -4,16 +4,17 @@ import (
 	"fmt"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 )
 
 type TemplateService struct {
-	templateRepo domain.TemplateRepository
-	instanceRepo domain.InstanceRepository
+	templateRepo interfaces.TemplateRepository
+	instanceRepo interfaces.InstanceRepository
 	libvirt      *libvirt.LibvirtClient
 }
 
-func NewTemplateService(templateRepo domain.TemplateRepository, instanceRepo domain.InstanceRepository, libvirt *libvirt.LibvirtClient) *TemplateService {
+func NewTemplateService(templateRepo interfaces.TemplateRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient) *TemplateService {
 	return &TemplateService{
 		templateRepo: templateRepo,
 		instanceRepo: instanceRepo,

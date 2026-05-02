@@ -23,18 +23,3 @@ type CreateSSHKeyRequest struct {
 	PublicKey string `json:"public_key"`
 }
 
-type SSHKeyRepository interface {
-	Create(key *SSHKey) error
-	FindByID(id int) (*SSHKey, error)
-	FindByName(name string) (*SSHKey, error)
-	FindAll() ([]*SSHKey, error)
-	Delete(id int) error
-}
-
-type SSHKeyService interface {
-	CreateSSHKey(req *CreateSSHKeyRequest) (*SSHKey, error)
-	GetSSHKey(id int) (*SSHKey, error)
-	GetSSHKeyByName(name string) (*SSHKey, error)
-	ListSSHKeys() ([]*SSHKey, error)
-	DeleteSSHKey(id int) error
-}

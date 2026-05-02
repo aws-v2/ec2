@@ -8,19 +8,20 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 	"ec2-api/pkg/messaging"
 )
 
 type NetworkingService struct {
-	ipRepo       domain.IPRepository
-	sgRepo       domain.SecurityGroupRepository
-	instanceRepo domain.InstanceRepository
+	ipRepo       interfaces.IPRepository
+	sgRepo       interfaces.SecurityGroupRepository
+	instanceRepo interfaces.InstanceRepository
 	libvirt      *libvirt.LibvirtClient
 	publisher    messaging.Publisher
 }
 
-func NewNetworkingService(ipRepo domain.IPRepository, sgRepo domain.SecurityGroupRepository, instanceRepo domain.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher messaging.Publisher) *NetworkingService {
+func NewNetworkingService(ipRepo interfaces.IPRepository, sgRepo interfaces.SecurityGroupRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher messaging.Publisher) *NetworkingService {
 	return &NetworkingService{
 		ipRepo:       ipRepo,
 		sgRepo:       sgRepo,

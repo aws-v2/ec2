@@ -19,10 +19,10 @@ import (
 
 	"ec2-api/internal/application"
 	"ec2-api/internal/config"
-	"ec2-api/internal/domain"
-	"ec2-api/internal/infrastructure/storage"
+	"ec2-api/internal/interfaces"
 	"ec2-api/internal/libvirt"
 	"ec2-api/internal/repository/postgres"
+	"ec2-api/internal/storage"
 	transport "ec2-api/internal/transport/http"
 	"ec2-api/pkg/database"
 	"ec2-api/pkg/messaging"
@@ -128,14 +128,14 @@ func main() {
 	}
 
 	// // 2. Initialize Repository Layer
-	var instanceRepo domain.InstanceRepository
-	var volumeRepo domain.VolumeRepository
-	var snapshotRepo domain.SnapshotRepository
-	var sshKeyRepo domain.SSHKeyRepository
-	var ipRepo domain.IPRepository
-	var sgRepo domain.SecurityGroupRepository
-	var templateRepo domain.TemplateRepository
-	var fleetRepo domain.FleetRepository
+	var instanceRepo interfaces.InstanceRepository
+	var volumeRepo interfaces.VolumeRepository
+	var snapshotRepo interfaces.SnapshotRepository
+	var sshKeyRepo interfaces.SSHKeyRepository
+	var ipRepo interfaces.IPRepository
+	var sgRepo interfaces.SecurityGroupRepository
+	var templateRepo interfaces.TemplateRepository
+	var fleetRepo interfaces.FleetRepository
 
 	instanceRepo = postgres.NewInstanceRepository(db)
 	volumeRepo = postgres.NewVolumeRepository(db)
