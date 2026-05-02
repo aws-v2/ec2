@@ -5,14 +5,15 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 )
 
 type FleetService struct {
-	fleetRepo    domain.FleetRepository
-	instanceRepo domain.InstanceRepository
+	fleetRepo    interfaces.FleetRepository
+	instanceRepo interfaces.InstanceRepository
 }
 
-func NewFleetService(fleetRepo domain.FleetRepository, instanceRepo domain.InstanceRepository) *FleetService {
+func NewFleetService(fleetRepo interfaces.FleetRepository, instanceRepo interfaces.InstanceRepository) *FleetService {
 	return &FleetService{
 		fleetRepo:    fleetRepo,
 		instanceRepo: instanceRepo,

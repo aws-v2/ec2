@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS ec2_scaling_policies;

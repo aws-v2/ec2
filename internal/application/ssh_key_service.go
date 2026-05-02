@@ -10,17 +10,17 @@ import (
 	"path/filepath"
 
 	"ec2-api/internal/domain"
-
+	"ec2-api/internal/interfaces"
 	"golang.org/x/crypto/ssh"
 )
 
 type SSHKeyService struct {
-	repo             domain.SSHKeyRepository
+	repo             interfaces.SSHKeyRepository
 	systemKeyService *SystemKeyService
 	keysDir          string
 }
 
-func NewSSHKeyService(repo domain.SSHKeyRepository, systemKeyService *SystemKeyService, keysDir string) *SSHKeyService {
+func NewSSHKeyService(repo interfaces.SSHKeyRepository, systemKeyService *SystemKeyService, keysDir string) *SSHKeyService {
 	return &SSHKeyService{
 		repo:             repo,
 		systemKeyService: systemKeyService,

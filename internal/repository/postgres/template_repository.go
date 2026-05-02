@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
+	"ec2-api/internal/interfaces"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,7 +14,7 @@ type templateRepository struct {
 	db *sqlx.DB
 }
 
-func NewTemplateRepository(db *sqlx.DB) domain.TemplateRepository {
+func NewTemplateRepository(db *sqlx.DB) interfaces.TemplateRepository {
 	return &templateRepository{db: db}
 }
 

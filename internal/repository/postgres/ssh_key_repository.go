@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"ec2-api/internal/domain"
-
+	"ec2-api/internal/interfaces"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -13,7 +13,7 @@ type sshKeyRepository struct {
 	db *sqlx.DB
 }
 
-func NewSSHKeyRepository(db *sqlx.DB) domain.SSHKeyRepository {
+func NewSSHKeyRepository(db *sqlx.DB) interfaces.SSHKeyRepository {
 	return &sshKeyRepository{db: db}
 }
 
