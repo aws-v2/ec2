@@ -170,7 +170,7 @@ func main() {
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
-	terminalService := application.NewTerminalService(instanceService, systemKeyService)
+terminalService := application.NewTerminalService(instanceService, "ws://localhost:9030")
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 	docsService := application.NewDocsService("docs")
 

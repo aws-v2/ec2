@@ -14,7 +14,7 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // In production, check origins
+		return true
 	},
 }
 
@@ -27,7 +27,7 @@ func NewTerminalHandler(service *application.TerminalService) *TerminalHandler {
 }
 
 type TerminalMessage struct {
-	Type string `json:"type"` // "stdin", "resize"
+	Type string `json:"type"` // "stdin", "resize", "stdout", "error"
 	Data string `json:"data"`
 	Cols int    `json:"cols"`
 	Rows int    `json:"rows"`
@@ -35,61 +35,69 @@ type TerminalMessage struct {
 
 func (h *TerminalHandler) HandleTerminal(c *gin.Context) {
 	instanceID := c.Param("id")
+	userID := c.GetString("userID")
+
 	log.Printf("[TERMINAL] Handling request for instance: %s", instanceID)
 
-	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	// Resolve the agent session BEFORE upgrading to WebSocket so we can
+	// still return a proper HTTP error if the agent is unreachable / nil.
+	session, err := h.service.CreateAgentSession(instanceID, userID)
 	if err != nil {
-		log.Printf("failed to upgrade to websocket: %v", err)
-		return
-	}
-	defer ws.Close()
-
-	userID := c.GetString("userID")
-	sshSession, err := h.service.CreateSSHSession(instanceID, userID)
-	if err != nil {
-		log.Printf("[TERMINAL] SSH connection failed.: %v", err)
-		errorMessage := fmt.Sprintf("\r\n[ERROR] Failed to connect: %v\r\n", err)
-		ws.WriteJSON(TerminalMessage{
-			Type: "error",
-			Data: errorMessage,
+		log.Printf("[TERMINAL] Agent connection failed: %v", err)
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": fmt.Sprintf("failed to connect to agent: %v", err),
 		})
 		return
 	}
-	defer sshSession.Close()
 
-	log.Printf("[TERMINAL] SSH session established for %s, starting bridge", instanceID)
+	// Only upgrade once we know the agent is reachable.
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		session.Close()
+		log.Printf("[TERMINAL] Failed to upgrade to websocket: %v", err)
+		return
+	}
+	defer ws.Close()
+	defer session.Close()
 
-	// SSH -> WebSocket
+	log.Printf("[TERMINAL] Agent session established for %s, starting bridge", instanceID)
+
+	// Agent -> WebSocket
 	go func() {
 		buf := make([]byte, 8192)
 		for {
-			n, err := sshSession.Out.Read(buf)
+			n, err := session.Out.Read(buf)
 			if err != nil {
-				log.Printf("[TERMINAL] SSH output closed: %v", err)
+				log.Printf("[TERMINAL] Agent output closed: %v", err)
+				ws.WriteJSON(TerminalMessage{
+					Type: "error",
+					Data: "\r\n[INFO] Terminal session closed.\r\n",
+				})
 				return
 			}
-			msg := TerminalMessage{
+			if err := ws.WriteJSON(TerminalMessage{
 				Type: "stdout",
 				Data: string(buf[:n]),
-			}
-			if err := ws.WriteJSON(msg); err != nil {
+			}); err != nil {
 				log.Printf("[TERMINAL] WS write failed: %v", err)
 				return
 			}
 		}
 	}()
 
-	// WebSocket -> SSH
+	// WebSocket -> Agent
 	for {
 		_, p, err := ws.ReadMessage()
 		if err != nil {
+			log.Printf("[TERMINAL] WS read closed: %v", err)
 			return
 		}
 
 		var msg TerminalMessage
 		if err := json.Unmarshal(p, &msg); err != nil {
-			// If not JSON, maybe raw data (fallback)
-			if _, err := sshSession.In.Write(p); err != nil {
+			// Not JSON — pass raw bytes through directly.
+			if _, err := session.Write(p); err != nil {
+				log.Printf("[TERMINAL] Agent write failed: %v", err)
 				return
 			}
 			continue
@@ -97,12 +105,13 @@ func (h *TerminalHandler) HandleTerminal(c *gin.Context) {
 
 		switch msg.Type {
 		case "stdin":
-			if _, err := sshSession.In.Write([]byte(msg.Data)); err != nil {
+			if _, err := session.Write([]byte(msg.Data)); err != nil {
+				log.Printf("[TERMINAL] Agent stdin write failed: %v", err)
 				return
 			}
 		case "resize":
 			if msg.Cols > 0 && msg.Rows > 0 {
-				sshSession.Session.WindowChange(msg.Rows, msg.Cols)
+				session.WindowChange(msg.Rows, msg.Cols)
 			}
 		}
 	}
