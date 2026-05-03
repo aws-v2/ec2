@@ -2,12 +2,8 @@
 ALTER TABLE instances
 DROP COLUMN IF EXISTS private_sshkey;
 -- Remove new column safely
-ALTER TABLE instances
-DROP COLUMN IF EXISTS public_sshkey;
-
-ALTER TABLE instances
-ADD COLUMN ssh VARCHAR(255);
-
+ALTER TABLE instances DROP COLUMN IF EXISTS ssh;
+ 
 -- Revert rename only if needed
 DO $$
 BEGIN

@@ -6,6 +6,9 @@ ADD COLUMN IF NOT EXISTS public_sshkey TEXT;
 
 ALTER TABLE instances
 DROP COLUMN IF EXISTS ssh;
+
+ALTER TABLE instances DROP COLUMN IF EXISTS ssh;
+
 -- If old column exists under legacy name, rename it safely
 DO $$
 BEGIN

@@ -68,6 +68,7 @@ type Instance struct {
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UserID       string         `json:"user_id" db:"user_id"`
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
+	SSH        string         `json:"ssh" db:"ssh"`
 }
 
 type ProvisionInstanceEvent struct {
@@ -126,4 +127,22 @@ type InstanceMetrics struct {
 type InstanceTag struct {
 	Key   string `json:"key" db:"key"`
 	Value string `json:"value" db:"value"`
+}
+
+// InstanceInfo holds the connection details the terminal agent needs to open
+// an SSH session to a VM. It is stored in the domain so that both the
+// application layer and the repository interface can reference it without
+// creating an import cycle.
+type InstanceInfo struct {
+	// AgentURL is the base URL of the agent (http/https/ws/wss).
+	// Example: "http://10.201.129.253:9030"
+	AgentURL string
+
+	// SSH target fields forwarded verbatim to the agent's open_terminal message.
+	VMIP      string
+	VMSSHPort int    // 0 → agent defaults to 22
+	SSHUser   string
+	SSHKey    string // private key PEM content
+	VMHost		string
+	
 }

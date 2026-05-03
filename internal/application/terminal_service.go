@@ -1,41 +1,23 @@
 package application
 
 import (
-	"context"
-	domain "ec2-api/internal/domain/instance"
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net/http"
-	"strings"
+	"io"
+	"log"
+	"net/url"
 	"sync"
-	"time"
 
-	"github.com/gin-gonic/gin"
+	"ec2-api/internal/interfaces"
+
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
-// ─── Terminal Service ─────────────────────────────────────────────────────────
+// ─── Agent wire protocol ──────────────────────────────────────────────────────
+// Mirrors the Message struct in agent.go exactly so both sides stay in sync.
 
-type TerminalService struct {
-	instanceService *InstanceService
-	agentURL        string
-
-	mu          sync.Mutex
-	connections map[string]*websocket.Conn
-}
-
-func NewTerminalService(instanceService *InstanceService, agentURL string) *TerminalService {
-	return &TerminalService{
-		instanceService: instanceService,
-		agentURL:        agentURL,
-		connections:     make(map[string]*websocket.Conn),
-	}
-}
-
-// ─── Message Types ──────────────────────────────────────────────────────────────
-
-type TerminalMessage struct {
+type agentMessage struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id,omitempty"`
 
@@ -43,9 +25,9 @@ type TerminalMessage struct {
 	VMIP      string `json:"vm_ip,omitempty"`
 	VMSSHPort int    `json:"vm_ssh_port,omitempty"`
 	SSHUser   string `json:"ssh_user,omitempty"`
-	SSHKey    string `json:"ssh_key,omitempty"` // base64-encoded PEM
+	SSHKey    string `json:"ssh_key,omitempty"` // private key PEM
 
-	// terminal_data
+	// terminal_data (both directions)
 	Data string `json:"data,omitempty"`
 
 	// resize
@@ -56,161 +38,202 @@ type TerminalMessage struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// ─── WebSocket Upgrader ─────────────────────────────────────────────────────────
+// ─── TerminalService ──────────────────────────────────────────────────────────
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins for now
-	},
+// TerminalService opens agent sessions for browser terminals.
+type TerminalService struct {
+	instances interfaces.InstanceRepository
 }
 
-// ─── HTTP Handler ───────────────────────────────────────────────────────────────
+// ─── AgentSession ─────────────────────────────────────────────────────────────
 
-func (s *TerminalService) HandleTerminal(w http.ResponseWriter, r *http.Request, c *gin.Context) {
-	instanceID := r.URL.Query().Get("instance_id")
-	if instanceID == "" {
-		http.Error(w, "missing instance_id", http.StatusBadRequest)
-		return
-	}
+// AgentSession is the object the transport layer holds.
+// Out streams raw terminal bytes coming from the agent.
+// Write / WindowChange / Close drive the agent from the browser side.
+type AgentSession struct {
+	// Out is an io.Reader whose bytes are terminal_data frames forwarded by the
+	// agent.  The handler drains this in a goroutine and writes to the browser
+	// WebSocket.
+	Out io.Reader
 
-	// Get instance details from EC2 service
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
+	conn      *websocket.Conn
+	sessionID string
+	pw        *io.PipeWriter // closed when the read-loop exits
 
-	instance, err := s.instanceService.GetInstance(instanceID, c.GetString("userID"))
-	if err != nil {
-		http.Error(w, fmt.Sprintf("instance not found: %v", err), http.StatusNotFound)
-		return
-	}
-
-	// Build agent URL
-	agentURL := s.agentURL
-	if !strings.HasPrefix(agentURL, "ws") {
-		agentURL = "ws://" + agentURL
-	}
-	agentURL += fmt.Sprintf("/ws/terminal?instance_id=%s", instanceID)
-
-	// Upgrade WebSocket
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		slog.Error("failed to upgrade WebSocket", "error", err)
-		return
-	}
-	defer conn.Close()
-
-	slog.Info("Terminal WebSocket connected", "instance_id", instanceID, "agent_url", agentURL)
-
-	// Store connection
-	s.mu.Lock()
-	s.connections[instanceID] = conn
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		delete(s.connections, instanceID)
-		s.mu.Unlock()
-		slog.Info("Terminal WebSocket disconnected", "instance_id", instanceID)
-	}()
-
-	// Open terminal on agent
-	if err := s.openTerminalOnAgent(ctx, instance, conn); err != nil {
-		slog.Error("failed to open terminal on agent", "error", err)
-		return
-	}
+	writeMu sync.Mutex // serialise concurrent WriteJSON calls
+	once    sync.Once  // guard Close
 }
 
-// ─── Open Terminal on Agent ─────────────────────────────────────────────────────
-
-func (s *TerminalService) openTerminalOnAgent(ctx context.Context, instance *domain.Instance, conn *websocket.Conn) error {
-	// Get SSH key from instance (base64 encoded PEM)
-	privateKey, err := base64.StdEncoding.DecodeString(instance.IP)
+// Write sends raw bytes to the VM's stdin via the agent.
+func (s *AgentSession) Write(p []byte) (int, error) {
+	msg := agentMessage{
+		Type:      "terminal_data",
+		SessionID: s.sessionID,
+		Data:      string(p),
+	}
+	s.writeMu.Lock()
+	err := s.conn.WriteJSON(msg)
+	s.writeMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("failed to decode private key: %w", err)
+		return 0, fmt.Errorf("agent write: %w", err)
 	}
+	return len(p), nil
+}
 
-	// Build agent URL
-	agentURL := s.agentURL
-	if !strings.HasPrefix(agentURL, "ws") {
-		agentURL = "ws://" + agentURL
+// WindowChange forwards a terminal resize event to the agent.
+func (s *AgentSession) WindowChange(rows, cols int) {
+	if rows <= 0 || cols <= 0 {
+		return
 	}
-	agentURL += "/ws/terminal"
-
-	// Connect to agent
-	agentConn, _, err := websocket.DefaultDialer.DialContext(ctx, agentURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to agent: %w", err)
+	msg := agentMessage{
+		Type:      "resize",
+		SessionID: s.sessionID,
+		Rows:      rows,
+		Cols:      cols,
 	}
-	defer agentConn.Close()
+	s.writeMu.Lock()
+	_ = s.conn.WriteJSON(msg)
+	s.writeMu.Unlock()
+}
 
-	// Send open_terminal message
-	msg := TerminalMessage{
-		Type:      "open_terminal",
-		SessionID: instance.ID,
-		VMIP:      instance.IP,
-		VMSSHPort: 22, // Assuming default SSH port
-		SSHUser:   "ubuntu", // Assuming default user
-		SSHKey:    string(privateKey),
-	}
+// Close tears down the agent session and the underlying WebSocket connection.
+// Safe to call more than once.
+func (s *AgentSession) Close() {
+	s.once.Do(func() {
+		log.Printf("[terminal-service] closing session %s", s.sessionID)
 
-	if err := agentConn.WriteJSON(msg); err != nil {
-		return fmt.Errorf("failed to send open_terminal: %w", err)
-	}
+		// Ask the agent to clean up its SSH session.
+		s.writeMu.Lock()
+		_ = s.conn.WriteJSON(agentMessage{
+			Type:      "close_terminal",
+			SessionID: s.sessionID,
+		})
+		s.writeMu.Unlock()
 
-	// Goroutine: forward messages from agent to client
-	go func() {
-		for {
-			var agentMsg TerminalMessage
-			if err := agentConn.ReadJSON(&agentMsg); err != nil {
-				// Agent disconnected
-				closeMsg := TerminalMessage{
-					Type:      "terminal_closed",
-					SessionID: instance.ID,
-					Reason:    "agent disconnected",
-				}
-				conn.WriteJSON(closeMsg)
-				return
-			}
+		// Closing the pipe unblocks any reader of Out.
+		s.pw.Close()
+		s.conn.Close()
+	})
+}
 
-			if err := conn.WriteJSON(agentMsg); err != nil {
-				return
-			}
-		}
-	}()
+// readLoop runs in its own goroutine and pumps agent frames into the Out pipe.
+func (s *AgentSession) readLoop() {
+	defer s.pw.Close() // unblock Out reader when we exit for any reason
 
-	// Goroutine: forward messages from client to agent
 	for {
-		var clientMsg TerminalMessage
-		if err := conn.ReadJSON(&clientMsg); err != nil {
-			// Client disconnected
-			break
+		_, raw, err := s.conn.ReadMessage()
+		if err != nil {
+			// Normal closure or network error — either way the session is done.
+			log.Printf("[terminal-service] agent disconnected (session=%s): %v", s.sessionID, err)
+			return
 		}
 
-		if err := agentConn.WriteJSON(clientMsg); err != nil {
-			break
+		var msg agentMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.Printf("[terminal-service] malformed agent frame (session=%s): %v", s.sessionID, err)
+			continue
+		}
+
+		switch msg.Type {
+
+		case "terminal_data":
+			// Forward raw bytes to the Out pipe; the handler writes them to the
+			// browser WebSocket.
+			if _, err := s.pw.Write([]byte(msg.Data)); err != nil {
+				log.Printf("[terminal-service] pipe write error (session=%s): %v", s.sessionID, err)
+				return
+			}
+
+		case "terminal_closed":
+			log.Printf("[terminal-service] agent closed session=%s reason=%q", s.sessionID, msg.Reason)
+			return
+
+		default:
+			log.Printf("[terminal-service] unexpected agent message type=%q (session=%s)", msg.Type, s.sessionID)
 		}
 	}
-
-	// Close terminal on agent
-	closeMsg := TerminalMessage{
-		Type:      "terminal_closed",
-		SessionID: instance.ID,
-		Reason:    "client disconnected",
-	}
-	agentConn.WriteJSON(closeMsg)
-
-	return nil
 }
 
-// ─── Helper Methods ─────────────────────────────────────────────────────────────
+// NewTerminalService creates a TerminalService backed by the given repository.
+func NewTerminalService(repo interfaces.InstanceRepository) *TerminalService {
+	return &TerminalService{instances: repo}
+}
 
-func (s *TerminalService) CloseTerminal(instanceID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	conn, ok := s.connections[instanceID]
-	if !ok {
-		return
+// CreateAgentSession resolves the instance, dials the agent's WebSocket, sends
+// an open_terminal command, and returns a live AgentSession.
+//
+// The caller must call session.Close() when the terminal is done.
+func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*AgentSession, error) {
+	info, err := svc.instances.GetInstanceInfo(instanceID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("instance lookup %q: %w", instanceID, err)
 	}
-	conn.Close()
+
+
+	// Build the WebSocket URL from whatever scheme the caller stored.
+	agentWS:= info.AgentURL
+	if err != nil {
+		return nil, fmt.Errorf("agent url: %w", err)
+	}
+
+	log.Printf("[terminal-service] dialling agent at %s for instance %s", agentWS, instanceID)
+
+	conn, _, err := websocket.DefaultDialer.Dial(agentWS, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial agent %s: %w", agentWS, err)
+	}
+
+	sessionID := uuid.NewString()
+
+	// Tell the agent to open an SSH connection to the target VM.
+	openMsg := agentMessage{
+		Type:      "open_terminal",
+		SessionID: sessionID,
+		VMIP:      info.VMIP,
+		VMSSHPort: info.VMSSHPort,
+		SSHUser:   info.SSHUser,
+		SSHKey:    info.SSHKey, // private key PEM
+	}
+	if err := conn.WriteJSON(openMsg); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("send open_terminal: %w", err)
+	}
+
+	pr, pw := io.Pipe()
+
+	sess := &AgentSession{
+		Out:       pr,
+		conn:      conn,
+		sessionID: sessionID,
+		pw:        pw,
+	}
+
+	// Start pumping agent output into the pipe.
+	go sess.readLoop()
+
+	log.Printf("[terminal-service] session %s opened for instance %s", sessionID, instanceID)
+	return sess, nil
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+// toWebSocketURL rewrites http/https to ws/wss and appends the /terminal path.
+func toWebSocketURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	case "ws", "wss":
+		// already correct
+	default:
+		return "", fmt.Errorf("unsupported scheme %q (want http/https/ws/wss)", u.Scheme)
+	}
+	u.Path = "/terminal"
+
+	return u.String(), nil
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
+	"ec2-api/config"
 	dto "ec2-api/internal/domain/dto"
 	domain "ec2-api/internal/domain/instance"
 
@@ -17,8 +19,11 @@ import (
 
 type instanceRepository struct { // lowercase, unexported
 	db *sqlx.DB
+	cfg *config.Config
 }
-
+func NewInstanceRepository(db *sqlx.DB, cfg *config.Config) interfaces.InstanceRepository { // return interface
+	return &instanceRepository{db: db, cfg:& *cfg}
+}
 func (r *instanceRepository) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
 	query := `
 		INSERT INTO ec2_scaling_policies (
@@ -124,9 +129,7 @@ func (r *instanceRepository) DeleteScalingPolicy(ctx context.Context, userID, po
 	}
 	return nil
 }
-func NewInstanceRepository(db *sqlx.DB) interfaces.InstanceRepository { // return interface
-	return &instanceRepository{db: db}
-}
+
 func (r *instanceRepository) Update(instance *domain.Instance) error {
 	query := `
 		UPDATE instances 
@@ -260,8 +263,45 @@ func (r *instanceRepository) AddOrUpdateTag(instanceID string, tag *domain.Insta
 	return err
 }
 
+
 func (r *instanceRepository) DeleteTag(instanceID string, key string) error {
 	query := `DELETE FROM instance_tags WHERE instance_id = $1 AND key = $2`
 	_, err := r.db.Exec(query, instanceID, key)
 	return err
+}
+
+// GetInstanceInfo returns the connection details the terminal agent needs
+// to open an SSH session to the given VM.
+//
+// The agent is assumed to run on the instance's public IP on port 9030
+// (the same port every provisioned agent binds to). Adjust the port
+// constant below if your deployment uses a different one.
+func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain.InstanceInfo, error) {
+	const agentPort = 9030
+
+	instance, err := r.FindByID(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("GetInstanceInfo: %w, forinstance %s", err,instanceID)
+	}
+	// Ownership check.
+	if instance.UserID != userID {
+		return nil, fmt.Errorf("GetInstanceInfo: instance %s not found for user %s", instanceID, userID)
+	}
+
+	agentHost := instance.PublicIP
+	if agentHost == "" {
+		agentHost = instance.IP // fall back to private IP
+	}
+	log.Printf("-------->>IN %s: ", agentHost)
+
+
+	return &domain.InstanceInfo{
+		VMHost:  fmt.Sprintf("http://%s:%d", agentHost, agentPort),
+		AgentURL:  r.cfg.AgentUrl,
+		
+		VMIP:      instance.IP,
+		VMSSHPort: 22,
+		SSHUser:   "root",
+		SSHKey:    instance.PrivateSshKey,
+	}, nil
 }

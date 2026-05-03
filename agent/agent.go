@@ -41,7 +41,7 @@ k2cYaY5lwsPgHptQLJvDAAAAEXNlcndpbi1hZ2VudC10ZXN0AQIDBA==
 
 type Config struct {
 	NodeID     string
-	ListenAddr string
+	 ListenAddr string
 }
 
 func configFromEnv() Config {

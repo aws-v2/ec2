@@ -20,7 +20,9 @@ type InstanceRepository interface {
 	GetScalingPolicies(ctx context.Context, userID string) ([]domain.ScalingPolicy, error)
 	UpdateScalingPolicy(ctx context.Context, userID, policyID string, req *domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(ctx context.Context, userID, policyID string) error
+	GetInstanceInfo(instanceID, userID string) (*domain.InstanceInfo, error)
 }
+
 
 type SnapshotRepository interface {
 	Create(snapshot *domain.Snapshot) error

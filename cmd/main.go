@@ -99,12 +99,12 @@ func main() {
 	}
 	defer db.Close()
 
-	slog.Info("Running database migrations...")
-	if err := database.MigrateDir(db, "migrations"); err != nil {
-		slog.Error("Failed to migrate database", "error", err)
-		os.Exit(1)
-	}
-	slog.Info("Database migration completed successfully")
+	// slog.Info("Running database migrations...")
+	// if err := database.MigrateDir(db, "migrations"); err != nil {
+	// 	slog.Error("Failed to migrate database", "error", err)
+	// 	os.Exit(1)
+	// }
+	// slog.Info("Database migration completed successfully")
 
 	slog.Info("Initializing Libvirt client...")
 	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
@@ -140,7 +140,7 @@ func main() {
 	var templateRepo interfaces.TemplateRepository
 	var fleetRepo interfaces.FleetRepository
 
-	instanceRepo = repository.NewInstanceRepository(db)
+	instanceRepo = repository.NewInstanceRepository(db,cfg)
 	volumeRepo = repository.NewVolumeRepository(db)
 	snapshotRepo = repository.NewSnapshotRepository(db)
 	sshKeyRepo = repository.NewSSHKeyRepository(db)
@@ -173,7 +173,7 @@ func main() {
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
-terminalService := application.NewTerminalService(instanceService, "ws://localhost:9030")
+	terminalService := application.NewTerminalService(instanceRepo)
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 	docsService := application.NewDocsService("docs")
 
