@@ -73,7 +73,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		AgentUrl :"ws://localhost:9030/terminal",
+		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
 		DB: DBConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
 			Port:            getEnvInt("DB_PORT", 5432),

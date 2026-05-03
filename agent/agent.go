@@ -43,10 +43,13 @@ type Config struct {
 	NodeID     string
 	 ListenAddr string
 }
-
+var (
+	NodeID          = "default-node"
+	ControlPlaneURL = "ws://localhost:8080/agent"
+)
 func configFromEnv() Config {
 	return Config{
-		NodeID:     getEnv("NODE_ID", "node-1"),
+		NodeID:     getEnv("NODE_ID", NodeID),
 		ListenAddr: getEnv("LISTEN_ADDR", ":9030"),
 	}
 }
