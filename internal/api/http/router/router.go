@@ -2,23 +2,27 @@ package transport
 
 import (
 	"github.com/gin-gonic/gin"
+
+	transport "ec2-api/internal/api/http/handlers"
+	"ec2-api/internal/api/http/middleware"
 )
 
 // api/routes.go
 
 func SetupRoutes(r *gin.Engine, 
-	instanceHandler *InstanceHandler, 
-	volumeHandler *VolumeHandler, 
-	snapshotHandler *SnapshotHandler, 
-	sshKeyHandler *SSHKeyHandler, 
-	networkingHandler *NetworkingHandler, 
-	templateHandler *TemplateHandler, 
-	terminalHandler *TerminalHandler,
-	fleetHandler *FleetHandler,
-	docsHandler *DocsHandler) {
+	instanceHandler *transport.InstanceHandler, 
+	volumeHandler *transport.VolumeHandler, 
+	snapshotHandler *transport.SnapshotHandler, 
+	sshKeyHandler *transport.SSHKeyHandler, 
+	networkingHandler *transport.NetworkingHandler, 
+	templateHandler *transport.TemplateHandler, 
+	terminalHandler *transport.TerminalHandler,
+	fleetHandler *transport.FleetHandler,
+	docsHandler *transport.DocsHandler) {
 	
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
+	fleet.Use(middleware.AuthMiddleware())
 	{
 		fleet.GET("/overview", fleetHandler.GetOverview)
 		fleet.GET("/events", fleetHandler.GetEvents)
@@ -33,13 +37,13 @@ func SetupRoutes(r *gin.Engine,
 	
 	// Compute API
 	compute := r.Group("/api/v1/compute")
-	compute.Use(AuthMiddleware())
+	compute.Use(middleware.AuthMiddleware())
 	{
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
 	}
 
 	api := r.Group("/api/v1/ec2")
-	api.Use(AuthMiddleware())
+	api.Use(middleware.AuthMiddleware())
 	{
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
@@ -138,6 +142,7 @@ func SetupRoutes(r *gin.Engine,
 	}
 
 	internalDocs := api.Group("/internal/docs")
+	internalDocs.Use(middleware.AuthMiddleware())
 	{
 		internalDocs.GET("", docsHandler.GetInternalManifest)
 		internalDocs.GET("/:slug", docsHandler.GetInternalDoc)

@@ -8,7 +8,6 @@ import (
 	"log"
 	"os/exec"
 	"strings"
-	"time"
 
 	domain "ec2-api/internal/domain/instance"
 
@@ -44,32 +43,7 @@ func GenerateSSHKeyPair() (*SSHKeyPair, error) {
 	}, nil
 }
 
-
-// startHealthUpdateLoop periodically publishes HEALTH_UPDATE events for all instances.
-// Why this is being implemented: The purpose is to allow the Network Service to learn
-// about EC2 instances and track their health, so we can later integrate VPC/subnet
-// awareness safely.
-func (s *InstanceService) startHealthUpdateLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		instances, err := s.repo.FindAll("") // Find all across all users
-		if err != nil {
-			log.Printf("[InstanceService] Error fetching instances for health update: %v", err)
-			continue
-		}
-
-		for _, instance := range instances {
-			// Only publish health for running or stopped instances, but mainly we want the registry to know they exist
-			// The Network Service will use this to track health.
-			if (instance.Status == domain.StatusRunning || instance.Status == domain.StatusStopped) && s.publisher != nil {
-				s.publisher.PublishInstanceEvent(domain.EventHealthUpdate, instance)
-			}
-		}
-	}
-}
-
+ 
 func (s *InstanceService) publishProgress(instanceID, stage, message string) {
 	if s.publisher != nil {
 		_ = s.publisher.PublishProvisioningProgress(instanceID, stage, message)

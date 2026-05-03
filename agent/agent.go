@@ -22,7 +22,7 @@ import (
 const TEST_MODE = true
 
 // ── Plug your values in here ──────────────────────────────────────────────────
-const TEST_VM_IP = "10.239.188.253" // ← replace with: hostname -I | awk '{print $1}'
+const TEST_VM_IP = "10.201.129.253" // ← replace with: hostname -I | awk '{print $1}'
 const TEST_VM_SSH_PORT = 22       // ← usually 22, change if your machine uses another port
 const TEST_SSH_USER = "martin"    // ← replace with your Linux username on that machine
 

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	domain "ec2-api/internal/domain/instance"
 	dto "ec2-api/internal/domain/dto"
+	domain "ec2-api/internal/domain/instance"
 
 	"ec2-api/internal/interfaces"
 
@@ -158,16 +158,47 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 	return err
 }
 func (r *instanceRepository) Create(instance *domain.Instance) error {
-	query := `INSERT INTO instances (id, vm_name, image, cpu, ram, ssh_key, status, ip, public_ip, proxmox_id, created_at, user_id, root_volume_id, storage_size, storage_type, device_name, vpc_id) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+	query := `INSERT INTO instances (
+		id, vm_name, image, cpu, ram, 
+		public_sshkey, private_sshkey,
+		status, ip, public_ip, proxmox_id, 
+		created_at, user_id, root_volume_id, 
+		storage_size, storage_type, device_name, vpc_id
+	) 
+	VALUES (
+		$1, $2, $3, $4, $5, 
+		$6, $7,
+		$8, $9, $10, $11, 
+		$12, $13, $14, 
+		$15, $16, $17, $18
+	)`
 
 	instance.CreatedAt = time.Now()
-	_, err := r.db.Exec(query, instance.ID, instance.VMName, instance.Image, instance.CPU, instance.RAM,
-		instance.PublicSSHKey, instance.Status, instance.IP, instance.PublicIP, instance.ProxmoxID, instance.CreatedAt, instance.UserID,
-		instance.RootVolumeID, instance.StorageSize, instance.StorageType, instance.DeviceName, instance.VPCID)
+
+	_, err := r.db.Exec(
+		query,
+		instance.ID,
+		instance.VMName,
+		instance.Image,
+		instance.CPU,
+		instance.RAM,
+		instance.PublicSSHKey,
+		instance.PrivateSshKey, // ✅ new field
+		instance.Status,
+		instance.IP,
+		instance.PublicIP,
+		instance.ProxmoxID,
+		instance.CreatedAt,
+		instance.UserID,
+		instance.RootVolumeID,
+		instance.StorageSize,
+		instance.StorageType,
+		instance.DeviceName,
+		instance.VPCID,
+	)
+
 	return err
 }
-
 func (r *instanceRepository) FindByID(id string) (*domain.Instance, error) {
 	var instance domain.Instance
 	query := `SELECT * FROM instances WHERE id = $1 AND status != 'terminated'`
@@ -179,11 +210,19 @@ func (r *instanceRepository) FindByID(id string) (*domain.Instance, error) {
 	return &instance, err
 }
 
+// repository
 func (r *instanceRepository) FindAll(userID string) ([]*domain.Instance, error) {
 	var instances []*domain.Instance
+
 	query := `SELECT * FROM instances WHERE status != 'terminated' AND user_id = $1 ORDER BY created_at DESC`
+
 	err := r.db.Select(&instances, query, userID)
-	return instances, err
+	if err != nil {
+		return nil, err
+	}
+
+	// log.Printf("[repo] FindAll userID=%s found=%d", userID, len(instances))
+	return instances, nil
 }
 
 func (r *instanceRepository) UpdateStatus(id string, status domain.InstanceStatus) error {

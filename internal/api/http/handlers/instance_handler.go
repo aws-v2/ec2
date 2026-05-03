@@ -64,19 +64,23 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 }
 
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
-	userID := c.GetString("userID")
-	instances, err := h.service.ListInstances(userID)
-	if err != nil {
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+    userID := c.GetString("userID")
+    if userID == "" {
+        dto.SendError(c, http.StatusUnauthorized, "missing user identity")
+        return
+    }
 
-	// Ensure empty slice instead of null
-	if instances == nil {
-		instances = []*domain.Instance{}
-	}
+    instances, err := h.service.ListInstances(userID)
+    if err != nil {
+        dto.SendError(c, http.StatusInternalServerError, err.Error())
+        return
+    }
 
-	dto.SendSuccess(c, http.StatusOK, "Instances retrieved successfully", instances)
+    if instances == nil {
+        instances = []*domain.Instance{}
+    }
+
+    dto.SendSuccess(c, http.StatusOK, "Instances retrieved successfully", instances)
 }
 
 func (h *InstanceHandler) StopInstance(c *gin.Context) {

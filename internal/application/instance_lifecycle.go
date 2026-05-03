@@ -48,10 +48,7 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 	return baseImagePath, instanceID, vmName, newDiskPath, instanceToken, nil
 }
 
-// allocateInstanceNetwork resolves the VPC (user-supplied or default) and asks
-// the network service to pre-allocate an IP, gateway, and bridge. The IP is
-// baked into cloud-init as a static address — no DHCP polling required.
-func (s *InstanceService) allocateInstanceNetwork(req *domain.CreateInstanceRequest, userID, instanceID string) (
+func (s *InstanceService) allocateInstanceNetwork(userID, instanceID string) (
 	vpcID, privateIP, gateway, bridgeName string, err error,
 ) {
 	if s.publisher == nil {
@@ -60,26 +57,12 @@ func (s *InstanceService) allocateInstanceNetwork(req *domain.CreateInstanceRequ
 
 	log.Printf("[NETWORK] Preparing network for instance %s", instanceID)
 
-	if req.VPCID != "" {
-		valid, err := s.publisher.ValidateVPC(userID, req.VPCID)
-		if err != nil {
-			log.Printf("[VPC] [ERROR] VPC validation failed for user %s, vpc %s: %v", userID, req.VPCID, err)
-			return "", "", "", "", fmt.Errorf("failed to validate VPC: %w", err)
-		}
-		if !valid {
-			log.Printf("[VPC] [FAILURE] Invalid VPC %s for user %s", req.VPCID, userID)
-			return "", "", "", "", fmt.Errorf("invalid VPC ID: %s", req.VPCID)
-		}
-		vpcID = req.VPCID
-		log.Printf("[VPC] [OK] Validated VPC %s for instance %s", vpcID, instanceID)
-	} else {
-		vpcID, bridgeName, err = s.publisher.GetDefaultVPC(userID)
-		if err != nil {
-			log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v", userID, err)
-			return "", "", "", "", fmt.Errorf("failed to get default VPC: %w", err)
-		}
-		log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", vpcID, bridgeName, instanceID)
+	vpcID, bridgeName, err = s.publisher.GetDefaultVPC(userID)
+	if err != nil {
+		log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v", userID, err)
+		return "", "", "", "", fmt.Errorf("failed to get default VPC: %w", err)
 	}
+	log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", vpcID, bridgeName, instanceID)
 
 	privateIP, gateway, bridgeName, err = s.publisher.PrepareInstanceNetwork(userID, instanceID, vpcID)
 	if err != nil {
@@ -92,9 +75,6 @@ func (s *InstanceService) allocateInstanceNetwork(req *domain.CreateInstanceRequ
 
 	return vpcID, privateIP, gateway, bridgeName, nil
 }
-
-
-
 
 // persistAndLaunch generates the SSH key pair, writes the instance record to
 // the DB with the pre-allocated IP, then fires off async VM creation.
@@ -184,11 +164,23 @@ func (s *InstanceService) createVMAsync(
 		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return
 	}
+// ── Step 1.75: Generate SSH key pair for instance ─────────────────────────
+keyPair, err := GenerateSSHKeyPair()
+if err != nil {
+    log.Printf("[VM] Failed to generate SSH key pair for %s: %v", instance.VMName, err)
+    s.publishProgress(instance.ID, StageFailed, "Failed to generate SSH keys")
+    s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+    return
+}
 
-	combinedKeys := req.SSHKey
-	if s.systemPubKey != "" {
-		combinedKeys += "\n" + s.systemPubKey
-	}
+
+combinedKeys := keyPair.PublicKeyAuth
+if s.systemPubKey != "" {
+    combinedKeys += "\n" + s.systemPubKey
+}
+
+
+
 
 	log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
 

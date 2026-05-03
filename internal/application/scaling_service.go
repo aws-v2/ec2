@@ -79,8 +79,6 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 		Image:  baseInstance.Image,
 		CPU:    baseInstance.CPU,
 		RAM:    baseInstance.RAM,
-		SSHKey: baseInstance.PublicSSHKey,
-		VPCID:  baseInstance.VPCID,
 	}
 
 	_, err := s.CreateInstance(req, baseInstance.UserID)
@@ -138,7 +136,6 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		Image:      "ubuntu-22.04", // Default base image
 		CPU:        event.Specs.CPU,
 		RAM:        event.Specs.RAM,
-		SSHKey:     "", // System key will be added automatically
 		Profile:    event.Profile,
 		Parameters: event.Parameters,
 	}

@@ -31,11 +31,7 @@ type InstanceService struct {
 func NewInstanceService(repo interfaces.InstanceRepository, sgService interfaces.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher, minioAdapter *storage.MinIOAdapter) *InstanceService {
 	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher, minioAdapter: minioAdapter}
 
-	// Start background health update loop
-	if publisher != nil {
-		go s.startHealthUpdateLoop()
-	}
-
+ 
 	return s
 }
 
@@ -90,7 +86,7 @@ func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, user
 	}
 
 	// Step 2: Allocate networking (VPC + IP) from the network service
-	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(req, userID, instanceID)
+	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(userID, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +339,11 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
+log.Printf("[VPC-HOP] Combined SSH keys for instance %s: %s", instance.VMName, combinedKeys)
+log.Printf("[VPC-HOP] Private SSH keys for instance %s: %s", instance.VMName, instance.PrivateSshKey)
+log.Printf("[VPC-HOP] Public SSH keys for instance %s: %s", instance.VMName, instance.PublicSSHKey)
+
+
 
 	_, err = s.libvirtClient.CreateAndStartVM(
 		instance.VMName,

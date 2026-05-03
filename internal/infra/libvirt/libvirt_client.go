@@ -52,7 +52,7 @@ func (l *LibvirtClient) GetImagesDir() string {
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
 // via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, sshKey, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string) (int, error) {
+func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, combinedKeys, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
@@ -62,7 +62,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 	}
 
 	// Create cloud-init ISO with static network config and metrics agent token baked in
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, profile, params)
+	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile, params)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
@@ -100,7 +100,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
+func (l *LibvirtClient) createCloudInitISO(vmName, combainedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
@@ -118,7 +118,7 @@ func (l *LibvirtClient) createCloudInitISO(vmName, sshKey, privateIP, gateway, i
 
 	// ── user-data ─────────────────────────────────────────────────────────────
 	keysYaml := ""
-	for _, key := range strings.Split(sshKey, "\n") {
+	for _, key := range strings.Split(combainedKeys, "\n") {
 		if strings.TrimSpace(key) != "" {
 			keysYaml += fmt.Sprintf("      - %s\n", strings.TrimSpace(key))
 		}

@@ -55,8 +55,8 @@ type Instance struct {
 	Image        string         `json:"image" db:"image"`
 	CPU          int            `json:"cpu" db:"cpu"`
 	RAM          int            `json:"ram" db:"ram"`
-	PublicSSHKey       string         `json:"public_ssh_key" db:"ssh_key"`
-	PrivateSshKey       string         `json:"private_ssh_key" db:"private_ssh_key"`
+	PublicSSHKey       string         `json:"public_ssh_key" db:"public_sshkey"`
+	PrivateSshKey       string         `json:"private_ssh_key" db:"private_sshkey"`
 	Status       InstanceStatus `json:"status" db:"status"`
 	IP           string         `json:"ip" db:"ip"`
 	PublicIP     string         `json:"public_ip" db:"public_ip"`
@@ -89,8 +89,6 @@ type CreateInstanceRequest struct {
 	Image      string            `json:"image" binding:"required"`
 	CPU        int               `json:"cpu" binding:"required"`
 	RAM        int               `json:"ram" binding:"required"`
-	SSHKey     string            `json:"ssh_key" binding:"required"`
-	VPCID      string            `json:"vpc_id"`
 	Profile    string            `json:"profile"`
 	Parameters map[string]string `json:"parameters"`
 }

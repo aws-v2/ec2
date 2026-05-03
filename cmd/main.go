@@ -100,7 +100,7 @@ func main() {
 	defer db.Close()
 
 	slog.Info("Running database migrations...")
-	if err := database.Migrate(db, repos.Schema); err != nil {
+	if err := database.MigrateDir(db, "migrations"); err != nil {
 		slog.Error("Failed to migrate database", "error", err)
 		os.Exit(1)
 	}
