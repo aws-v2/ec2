@@ -69,7 +69,7 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey ${{ secrets.TAILSCALE_AUTH_KEY }}
 
-      - name: Deploy to Staging via SSH over Tailscale.
+      - name: Deploy to Staging via SSH over Tailscale....
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAGING_HOST }}
