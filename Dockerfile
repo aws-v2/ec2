@@ -15,7 +15,7 @@ COPY . .
 
 # Build the application
 # We need CGO_ENABLED=1 because we use libvirt.org/go/libvirt
-RUN CGO_ENABLED=1 GOOS=linux go build -o ec2-api ./cmd/api
+RUN CGO_ENABLED=1 GOOS=linux go build -o ec2-api ./cmd
 
 # Stage 2: Final
 FROM alpine:latest
