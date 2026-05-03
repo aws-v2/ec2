@@ -17,7 +17,6 @@ import (
 
 // ─── TEST INTERCEPT ───────────────────────────────────────────────────────────
 // Toggle this to true to bypass whatever the control plane sends
-// and force all open_terminal requests to hit your real test machine.
 // Set back to false when you're ready to use real VMs.
 const TEST_MODE = true
 
