@@ -106,6 +106,7 @@ jobs:
               -e MINIO_ENDPOINT=minio-staging:9000 \
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
+              -e MIGRATIONS_PATH=/app/migrations \
               -e MINIO_USE_SSL=false \
               -e NATS_PREFIX=staging.v1 \
               --add-host=host.docker.internal:host-gateway \

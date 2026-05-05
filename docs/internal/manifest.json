@@ -15,9 +15,9 @@
       ]
     },
     {
-      "title": "Core Execution Model",
+      "title": "Networking Core",
       "items": [
-        { "title": "Lambda Lifecycle", "slug": "lambda-lifecycle" },
+        { "title": "Networking Core", "slug": "networking-core" },
         { "title": "Runtime Environments", "slug": "lambda-runtimes" },
         { "title": "Environment Variables", "slug": "lambda-env-vars" }
       ]

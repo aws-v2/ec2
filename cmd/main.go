@@ -100,8 +100,8 @@ func main() {
 	}
 	defer db.Close()
 
-	slog.Info("Running database migrations...")
-	if err := database.MigrateDir(db, "migrations"); err != nil {
+	slog.Info("Running database migrations...", "migrations_dir", cfg.MigrationsDir)
+	if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
 		slog.Error("Failed to migrate database", "error", err)
 		os.Exit(1)
 	}
