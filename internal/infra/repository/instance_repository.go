@@ -292,7 +292,7 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 	if agentHost == "" {
 		agentHost = instance.IP // fall back to private IP
 	}
-	log.Printf("-------->>IN %s: ", agentHost)
+	log.Printf("-------->>IN %s: ", instance.PublicSSHKey)
 
 
 	return &domain.InstanceInfo{

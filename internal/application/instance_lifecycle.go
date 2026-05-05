@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
+	"strings"
 
 	"fmt"
 	"log"
@@ -120,7 +121,7 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken,keyPair)
 
 	// Return the full key so the caller can hand it back to the user once
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
@@ -133,6 +134,7 @@ func (s *InstanceService) createVMAsync(
 	instance *domain.Instance,
 	req *domain.CreateInstanceRequest,
 	baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken string,
+	keyPair *SSHKeyPair,
 ) {
 	profile := req.Profile
 	params := req.Parameters
@@ -168,23 +170,20 @@ func (s *InstanceService) createVMAsync(
 		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return
 	}
-// ── Step 1.75: Generate SSH key pair for instance ─────────────────────────
-keyPair, err := GenerateSSHKeyPair()
-if err != nil {
-    log.Printf("[VM] Failed to generate SSH key pair for %s: %v", instance.VMName, err)
-    s.publishProgress(instance.ID, StageFailed, "Failed to generate SSH keys")
-    s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
-    return
-}
-
-
-combinedKeys := keyPair.PublicKeyAuth
-if s.systemPubKey != "" {
-    combinedKeys += "\n" + s.systemPubKey
-}
+// // ── Step 1.75: Generate SSH key pair for instance ─────────────────────────
+// keyPair, err := GenerateSSHKeyPair()
 
 
 
+// if err != nil {
+//     log.Printf("[VM] Failed to generate SSH key pair for %s: %v", instance.VMName, err)
+//     s.publishProgress(instance.ID, StageFailed, "Failed to generate SSH keys")
+//     s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+//     return
+// }
+
+
+ 
 
 	log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
 
@@ -193,10 +192,25 @@ if s.systemPubKey != "" {
 	// into the cloud-init network-config. The VM boots already knowing its IP.
 	// waitForVMIP is no longer needed since the IP is statically configured.
 	s.publishProgress(instance.ID, StageStartingVM, "Defining and starting the virtual machine...")
-	vmID, err := s.libvirtClient.CreateAndStartVM(
-		instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, privateIP, gateway, instanceToken,
-		profile, params,
-	)
+	keys := []string{}
+for _, key := range []string{keyPair.PublicKeyAuth, s.systemPubKey} {
+    key = strings.TrimSpace(key)
+    key = strings.ReplaceAll(key, "\n", "")
+    key = strings.ReplaceAll(key, "\r", "")
+    if key != "" {
+        keys = append(keys, key)
+    }
+}
+
+// ✅ Build a newline-joined string — matches what createCloudInitISO expects
+combinedKeys := strings.Join(keys, "\n")
+
+log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
+
+vmID, err := s.libvirtClient.CreateAndStartVM(
+    instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
+    privateIP, gateway, instanceToken, profile, params,
+)
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
 		exec.Command("rm", "-f", newDiskPath).Run()

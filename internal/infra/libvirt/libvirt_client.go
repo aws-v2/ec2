@@ -102,7 +102,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, combainedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
+func (l *LibvirtClient) createCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
@@ -119,16 +119,26 @@ func (l *LibvirtClient) createCloudInitISO(vmName, combainedKeys, privateIP, gat
 	}
 
 	// ── user-data ─────────────────────────────────────────────────────────────
-	keysYaml := ""
-	for _, key := range strings.Split(combainedKeys, "\n") {
-		if strings.TrimSpace(key) != "" {
-			keysYaml += fmt.Sprintf("      - %s\n", strings.TrimSpace(key))
-		}
-	}
+ keysYaml := ""
+    for _, key := range strings.Split(combinedKeys, "\n") {
+        key = strings.TrimSpace(key)
+        // Drop blank lines and any fragment that isn't a real key
+        if key == "" || (!strings.HasPrefix(key, "ssh-") && !strings.HasPrefix(key, "ecdsa-")) {
+            continue
+        }
+        keysYaml += fmt.Sprintf("      - %s\n", key)
+    }
+
+    if keysYaml == "" {
+        fmt.Printf("[Libvirt] [WARN] No valid SSH keys found for VM %s\n", vmName)
+    }
+
 
 	if keysYaml == "" {
 		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
 	}
+		fmt.Printf("[Libvirt] [WARN**] No SSH keys provided for VM %s\n", keysYaml)
+
 
 	writeFiles := `  - path: /opt/metrics-agent/config
     permissions: '0600'
