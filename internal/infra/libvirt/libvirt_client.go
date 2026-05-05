@@ -38,7 +38,9 @@ func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, na
 		natsSubject:   natsSubject,
 	}, nil
 }
-
+func (c *LibvirtClient) Conn() *libvirt.Connect {
+    return c.conn
+}
 func (l *LibvirtClient) Close() error {
 	_, err := l.conn.Close()
 	return err

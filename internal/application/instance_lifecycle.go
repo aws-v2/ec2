@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	domain "ec2-api/internal/domain/instance"
 
 	"fmt"
@@ -18,6 +19,7 @@ import (
 func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID string) (
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken string, err error,
 ) {
+	
 	baseImageName, ok := imageMap[req.Image]
 	if !ok {
 		available := make([]string, 0, len(imageMap))
@@ -26,7 +28,6 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 		}
 		return "", "", "", "", "", fmt.Errorf("image %s not found. Available: %v", req.Image, available)
 	}
-
 	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
 	if err = s.EnsureImageExists(req.Image, baseImagePath); err != nil {
 		return "", "", "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
@@ -48,33 +49,31 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 	return baseImagePath, instanceID, vmName, newDiskPath, instanceToken, nil
 }
 
-func (s *InstanceService) allocateInstanceNetwork(userID, instanceID string) (
+// allocateInstanceNetwork now calls vpcService directly instead of NATS.
+func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, instanceID string) (
 	vpcID, privateIP, gateway, bridgeName string, err error,
 ) {
-	if s.publisher == nil {
-		return "", "", "", "", nil
-	}
-
 	log.Printf("[NETWORK] Preparing network for instance %s", instanceID)
-
-	vpcID, bridgeName, err = s.publisher.GetDefaultVPC(userID)
+ 
+	// Get or create the default VPC for this user
+	defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
 	if err != nil {
-		log.Printf("[VPC] [FAILURE] Failed to get default VPC for user %s: %v", userID, err)
-		return "", "", "", "", fmt.Errorf("failed to get default VPC: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
 	}
-	log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", vpcID, bridgeName, instanceID)
-
-	privateIP, gateway, bridgeName, err = s.publisher.PrepareInstanceNetwork(userID, instanceID, vpcID)
+	log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", defaultVPC.ID, defaultVPC.BridgeName, instanceID)
+ 
+	// Allocate an IP within that VPC
+	network, err := s.vpcService.AllocateInstanceNetwork(ctx, userID, instanceID, defaultVPC.ID)
 	if err != nil {
-		log.Printf("[NETWORK] [ERROR] Failed to prepare network for instance %s in VPC %s: %v", instanceID, vpcID, err)
-		return "", "", "", "", fmt.Errorf("failed to prepare instance network: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
 	}
-
+ 
 	log.Printf("[NETWORK] [OK] Network ready for instance %s — IP: %s, gateway: %s, bridge: %s",
-		instanceID, privateIP, gateway, bridgeName)
-
-	return vpcID, privateIP, gateway, bridgeName, nil
+		instanceID, network.PrivateIP, network.Gateway, network.BridgeName)
+ 
+	return network.VPCID, network.PrivateIP, network.Gateway, network.BridgeName, nil
 }
+ 
 
 // persistAndLaunch generates the SSH key pair, writes the instance record to
 // the DB with the pre-allocated IP, then fires off async VM creation.
@@ -107,13 +106,18 @@ func (s *InstanceService) persistAndLaunch(
 		VPCID:         vpcID,
 	}
 
+
+
+
+
+
 	if err := s.repo.Create(instance); err != nil {
 		if s.publisher != nil && privateIP != "" {
 			if releaseErr := s.publisher.ReleaseInstanceNetwork(userID, instanceID, vpcID); releaseErr != nil {
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
-		return nil, fmt.Errorf("failed to save instance: %w", err)
+		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken)

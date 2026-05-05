@@ -93,6 +93,8 @@ jobs:
               -e EUREKA_IP_ADDR=127.0.0.1 \
               -e DB_PORT=5432 \
               -e DB_USER=postgres-staging-user \
+              -e LOG_LEVEL=info \
+              -e LOG_FORMAT=json \
               -e DB_PASSWORD=postgres-staging-password \
               -e DB_NAME=ec2_db \
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
