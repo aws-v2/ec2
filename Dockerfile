@@ -31,7 +31,7 @@ RUN apk add --no-cache ca-certificates libvirt-libs qemu-img cdrkit
 # Copy the binary from the builder stage
 COPY --from=builder /app/ec2-api .
 COPY --from=builder /app/docs ./docs
-
+COPY --from=builder /app/migrations ./migrations
 # Expose the application port
 EXPOSE 8088
 
