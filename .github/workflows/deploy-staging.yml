@@ -96,7 +96,7 @@ jobs:
               -e LOG_LEVEL=info \
               -e LOG_FORMAT=json \
               -e DB_PASSWORD=postgres-staging-password \
-              -e DB_NAME=ec2_db \
+              -e DB_NAME=ec2_db1 \
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e DB_SSLMODE=disable \
               -e NATS_URL=nats://nats-staging:4222 \
