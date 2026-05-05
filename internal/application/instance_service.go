@@ -2,13 +2,13 @@ package application
 
 import (
 	"context"
-	interfaces "ec2-api/internal/interfaces"
-	messaging "ec2-api/internal/infra/messaging"
-	libvirt "ec2-api/internal/infra/libvirt"
-	storage "ec2-api/internal/infra/storage"
-	domain "ec2-api/internal/domain/instance"
 	dto "ec2-api/internal/domain/dto"
-
+	domain "ec2-api/internal/domain/instance"
+	libvirt "ec2-api/internal/infra/libvirt"
+	messaging "ec2-api/internal/infra/messaging"
+	storage "ec2-api/internal/infra/storage"
+	interfaces "ec2-api/internal/interfaces"
+	"ec2-api/internal/vpcpkg"
 
 	"fmt"
 	"log"
@@ -26,10 +26,29 @@ type InstanceService struct {
 	imagesDir     string
 	publisher     messaging.Publisher
 	minioAdapter  *storage.MinIOAdapter
+	vpcService    *vpcpkg.Service   // ← replaces publisher
 }
 
-func NewInstanceService(repo interfaces.InstanceRepository, sgService interfaces.SecurityGroupService, libvirt *libvirt.LibvirtClient, systemPubKey string, imagesDir string, publisher messaging.Publisher, minioAdapter *storage.MinIOAdapter) *InstanceService {
-	s := &InstanceService{repo: repo, sgService: sgService, libvirtClient: libvirt, systemPubKey: systemPubKey, imagesDir: imagesDir, publisher: publisher, minioAdapter: minioAdapter}
+func NewInstanceService(
+	repo interfaces.InstanceRepository, 
+	sgService interfaces.SecurityGroupService, 
+	libvirt *libvirt.LibvirtClient, 
+	systemPubKey string, 
+	imagesDir string, 
+	publisher messaging.Publisher, 
+	minioAdapter *storage.MinIOAdapter,
+	vpcService *vpcpkg.Service,
+) *InstanceService {
+	s := &InstanceService{
+		repo: repo, 
+		sgService: sgService, 
+		libvirtClient: libvirt, 
+		systemPubKey: systemPubKey, 
+		imagesDir: imagesDir, 
+		publisher: publisher, 
+		minioAdapter: minioAdapter,
+		vpcService: vpcService,
+	}
 
  
 	return s
@@ -75,27 +94,25 @@ type SSHKeyPair struct {
 }
 
 
+// CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
+func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
-// CreateInstance is the public en	try point. It orchestrates validation,
-// networking, and VM launch by delegating to three focused helpers.
-func (s *InstanceService) CreateInstance(req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Step 2: Allocate networking (VPC + IP) from the network service
-	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(userID, instanceID)
+ 
+	// Step 2: Allocate networking — direct call, no NATS
+	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
 	if err != nil {
 		return nil, err
 	}
-
+ 
 	// Step 3: Persist the record and launch VM creation asynchronously
 	return s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken)
 }
-
-
+ 
 
 
 

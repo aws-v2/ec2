@@ -18,7 +18,7 @@ import (
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 
-const TEST_MODE = true
+const TEST_MODE = false
 
 var (
 	NodeID          = "default-node"
@@ -223,7 +223,7 @@ func (a *Agent) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 				sess, err := dialSSH(msg.VMIP, msg.VMSSHPort, msg.SSHUser, msg.SSHKey, msg.Cols, msg.Rows)
 				if err != nil {
-					log.Printf("[agent] ssh dial failed session=%s: %v", msg.SessionID, err)
+					log.Printf("[agent] ssh dial failed session=%s: %v with ssh-key %s", msg.SessionID, err, msg.SSHKey)
 					send(Message{Type: "terminal_closed", SessionID: msg.SessionID, Reason: err.Error()})
 					return
 				}

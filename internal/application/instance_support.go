@@ -16,7 +16,6 @@ import (
 )
 
 // GenerateSSHKeyPair creates an ed25519 key pair.
-// Call this once at instance creation time and persist both keys to the DB.
 func GenerateSSHKeyPair() (*SSHKeyPair, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -28,21 +27,35 @@ func GenerateSSHKeyPair() (*SSHKeyPair, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal private key: %w", err)
 	}
+
+	// ✅ Declare BEFORE any use
 	privPEMStr := string(pem.EncodeToMemory(privPEM))
 
-	// Marshal public key to authorized_keys format ("ssh-ed25519 AAAA...")
+	// Marshal public key to authorized_keys format
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
 		return nil, fmt.Errorf("derive public key: %w", err)
 	}
 	pubAuthStr := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 
+ 
+
 	return &SSHKeyPair{
 		PrivateKeyPEM: privPEMStr,
 		PublicKeyAuth: pubAuthStr,
 	}, nil
+
+
+	
 }
 
+// min helper if you're on Go < 1.21
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
  
 func (s *InstanceService) publishProgress(instanceID, stage, message string) {
 	if s.publisher != nil {

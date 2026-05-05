@@ -11,6 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+
+
+
+
 type InstanceHandler struct {
 	service *application.InstanceService
 }
@@ -39,7 +43,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		return
 	}
 	userID := c.GetString("userID")
-	instance, err := h.service.CreateInstance(&req, userID)
+	instance, err := h.service.CreateInstance(c.Request.Context(),&req, userID)
 	if err != nil {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
 		return
