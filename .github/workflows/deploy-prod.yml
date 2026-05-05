@@ -76,14 +76,17 @@ jobs:
           username: ${{ secrets.PROD_USERNAME }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
-            docker network create --driver overlay aws-prod-network || true
+            HOST_GW=$(ip route show default | awk '/default/{print $3; exit}')
+
+            docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') 2>/dev/null || true
+
+            docker network create --driver overlay aws-prod-network 2>/dev/null || true
 
             docker pull qarani/ec2-api:prod-${{ github.sha }}
 
             docker service update \
               --image qarani/ec2-api:prod-${{ github.sha }} \
               ec2-service-prod 2>/dev/null || \
-
             docker service create \
               --name ec2-service-prod \
               --network aws-prod-network \
@@ -113,8 +116,7 @@ jobs:
               --env MINIO_SECRET_KEY=minio-prod-password \
               --env MINIO_USE_SSL=false \
               --env NATS_PREFIX=prod.v1 \
-              --add-host=host.docker.internal:host-gateway \
-              --env AGENT_URL=ws://host.docker.internal:9030/terminal \
+              --env AGENT_URL=ws://${HOST_GW}:9030/terminal \
               --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
               --env IMAGES_DIR=/var/lib/libvirt/images \
               qarani/ec2-api:prod-${{ github.sha }}

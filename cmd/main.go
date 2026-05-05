@@ -18,17 +18,18 @@ import (
 	"strings"
 
 	config "ec2-api/config"
+	transport "ec2-api/internal/api/http/handlers"
+	routes "ec2-api/internal/api/http/router"
 	application "ec2-api/internal/application"
 	database "ec2-api/internal/infra/database"
 	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
+	repository "ec2-api/internal/infra/repository"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
+	"ec2-api/internal/vpcpkg"
 	pkg "ec2-api/pkg"
-	repository "ec2-api/internal/infra/repository"
-	transport "ec2-api/internal/api/http/handlers"
-	routes "ec2-api/internal/api/http/router"
-	
+
 
 	"log/slog"
 
@@ -99,12 +100,12 @@ func main() {
 	}
 	defer db.Close()
 
-	// slog.Info("Running database migrations...")
-	// if err := database.MigrateDir(db, "migrations"); err != nil {
-	// 	slog.Error("Failed to migrate database", "error", err)
-	// 	os.Exit(1)
-	// }
-	// slog.Info("Database migration completed successfully")
+	slog.Info("Running database migrations...")
+	if err := database.MigrateDir(db, "migrations"); err != nil {
+		slog.Error("Failed to migrate database", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Database migration completed successfully")
 
 	slog.Info("Initializing Libvirt client...")
 	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
@@ -167,8 +168,10 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter)
+	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
+	vpcRepo := repository.NewVPCRepository(db)
+	vpcService := vpcpkg.NewVpcService(vpcRepo,vpcProvisioner)
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)

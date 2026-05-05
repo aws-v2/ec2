@@ -1,6 +1,6 @@
 -- internal/repository/postgres/migrations/001_initial_schema.sql
 
-CREATE TABLE IF NOT EXISTS instances (
+CREATE TABLE IF NOT EXISTS instances(
     id VARCHAR(20) PRIMARY KEY,
     vm_name VARCHAR(100) NOT NULL,
     image VARCHAR(100) NOT NULL,

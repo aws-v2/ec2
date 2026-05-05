@@ -17,6 +17,9 @@ COPY . .
 # We need CGO_ENABLED=1 because we use libvirt.org/go/libvirt
 RUN CGO_ENABLED=1 GOOS=linux go build -o ec2-api ./cmd
 
+ENV LOG_LEVEL=info
+ENV LOG_FORMAT=json
+
 # Stage 2: Final
 FROM alpine:latest
 

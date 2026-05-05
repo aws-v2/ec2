@@ -42,7 +42,7 @@ func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.Scal
 
 	switch event.Action {
 	case domain.ScaleOutAction:
-		return s.handleScaleOut(targetInstance, event.Policy.MaxCapacity)
+		return s.handleScaleOut(ctx,targetInstance, event.Policy.MaxCapacity)
 	case domain.ScaleInAction:
 		return s.handleScaleIn(targetInstance)
 	default:
@@ -50,9 +50,9 @@ func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.Scal
 	}
 }
 
-func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInstances int) error {
+func (s *InstanceService) handleScaleOut(ctx context.Context,baseInstance *domain.Instance, maxInstances int) error {
 	log.Printf("[SCALER] Initiating scale-out based on instance %s (VPC: %s)", baseInstance.ID, baseInstance.VPCID)
-
+	
 	// Check if max limit is reached
 	if maxInstances > 0 {
 		instances, err := s.ListInstances(baseInstance.UserID)
@@ -81,7 +81,7 @@ func (s *InstanceService) handleScaleOut(baseInstance *domain.Instance, maxInsta
 		RAM:    baseInstance.RAM,
 	}
 
-	_, err := s.CreateInstance(req, baseInstance.UserID)
+	_, err := s.CreateInstance(ctx,req, baseInstance.UserID)
 	return err
 }
 
@@ -154,7 +154,7 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		userID = "system"
 	}
 
-	_, err := s.CreateInstance(req, userID)
+	_, err := s.CreateInstance(ctx,req, userID)
 	if err != nil {
 		return fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
 	}

@@ -191,9 +191,12 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 		SessionID: sessionID,
 		VMIP:      info.VMIP,
 		VMSSHPort: info.VMSSHPort,
-		SSHUser:   info.SSHUser,
+		
+		SSHUser:   "ubuntu",
 		SSHKey:    info.SSHKey, // private key PEM
 	}
+	log.Printf("The && ssh key used in the terminal service %s for instance %s", info.SSHUser, instanceID)
+
 	if err := conn.WriteJSON(openMsg); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send open_terminal: %w", err)
