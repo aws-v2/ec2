@@ -192,6 +192,7 @@ func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profi
 
 	// 4. Multi-stage guestmount injection
 	s.publishProgress(instance.ID, StageInjectingPayload, "Injecting payload files into instance disk...")
+	
 	mountDir := filepath.Join(workdir, "mount")
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
 		return err

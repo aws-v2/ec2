@@ -157,7 +157,7 @@ func (s *InstanceService) createVMAsync(
 	// For ai-worker, we now use SageMaker-like simulation where the VM handles its own preparation.
 	if profile == "gamelift" {
 		if err := s.injectPayloadIntoDisk(instance, profile, params, absNew); err != nil {
-			log.Printf("[VM] [%s] Injection failed for %s: %v", profile, instance.VMName, err)
+			log.Printf("[VM] [%s] Injection failed for9 %s: %v", profile, instance.VMName, err)
 			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject payload: %v", err))
 			s.markTerminatedAndReleaseNetwork(instance, absNew)
 			return
