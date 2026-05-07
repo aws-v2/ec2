@@ -116,13 +116,7 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 
 
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
-	log.Printf("[PROVISIONER] START profile=%s userID=%s rawSpecs={CPU:%d RAM:%d} storageARN=%s headlessBin=%s",
-		event.Profile,
-		event.UserID,
-		event.Specs["cpu"],
-		event.Specs["ram"],
-		event.StorageARN,
-	)
+ 
 		fmt.Printf("[PROVISIONER]------------------>...event parameters: %v", event)
 
 	// event.StorageARN = "arn:serw:s3::bdcc0db1-8a77-44a3-90d6-f7fcd604971e:bucket/gamelift_games"
