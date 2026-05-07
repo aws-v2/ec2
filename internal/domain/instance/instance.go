@@ -79,6 +79,7 @@ type ProvisionInstanceEvent struct
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
 
+
 }
 
 type GameManifest struct {

@@ -123,9 +123,10 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		event.Specs["ram"],
 		event.StorageARN,
 	)
-		log.Printf("[PROVISIONER]------------------>...event parameters: %s", event.StorageARN)
+		fmt.Printf("[PROVISIONER]------------------>...event parameters: %v", event)
 
- 
+	// event.StorageARN = "arn:serw:s3::bdcc0db1-8a77-44a3-90d6-f7fcd604971e:bucket/gamelift_games"
+	
 
 	log.Printf("[PROVISIONER] initial parameters=%v", event)
 
@@ -134,6 +135,23 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		log.Printf("[PROVISIONER] injecting STORAGE_ARN from event → %s", event.StorageARN)
 		return fmt.Errorf("STORAGE_ARN provided but not supported in this version: %s", event.StorageARN)
 	}
+
+	event.Manifest.Name="test"
+	event.Manifest.Version="1.0.0"
+
+	event.Manifest.MainScene="main.tscn"
+	event.Manifest.PlayerNode="Player"
+	event.Manifest.SyncNodes=[]domain.SyncNode{
+		{
+			Name: "SyncNode",
+			Type: "SyncNode",
+		},
+	}
+	event.Manifest.Parameters=map[string]string{
+		"param1": "value1",
+		"param2": "value2",
+	}
+
 
 	// Merge HEADLESS_BIN
 	if event.Manifest.HeadlessBin == "" {
