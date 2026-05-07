@@ -115,52 +115,76 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 
 
 
-
-// HandleProvision handles a request to provision a new VM based on a profile.
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
-	log.Printf("[PROVISIONER] Provisioning VM for profile: %s", event.Profile)
+	log.Printf("[PROVISIONER] START profile=%s userID=%s rawSpecs={CPU:%d RAM:%d} storageARN=%s headlessBin=%s",
+		event.Profile,
+		event.UserID,
+		event.Specs["cpu"],
+		event.Specs["ram"],
+		event.StorageARN,
+	)
+		log.Printf("[PROVISIONER]------------------>...event parameters: %s", event.StorageARN)
 
-	// Merge flat fields into Parameters for backward compatibility
-	if event.Parameters == nil {
-		event.Parameters = make(map[string]string)
-	}
-	if event.StorageARN != "" && event.Parameters["STORAGE_ARN"] == "" {
-		event.Parameters["STORAGE_ARN"] = event.StorageARN
-	}
-	if event.HeadlessBin != "" && event.Parameters["HEADLESS_BIN"] == "" {
-		event.Parameters["HEADLESS_BIN"] = event.HeadlessBin
+ 
+
+	log.Printf("[PROVISIONER] initial parameters=%v", event)
+
+	// Merge STORAGE_ARN
+	if event.StorageARN == ""  {
+		log.Printf("[PROVISIONER] injecting STORAGE_ARN from event → %s", event.StorageARN)
+		return fmt.Errorf("STORAGE_ARN provided but not supported in this version: %s", event.StorageARN)
 	}
 
-	// Create a provision request
+	// Merge HEADLESS_BIN
+	if event.Manifest.HeadlessBin == "" {
+		log.Printf("[PROVISIONER] injecting HEADLESS_BIN from event → %s", event.Manifest.HeadlessBin)
+		return fmt.Errorf("HEADLESS_BIN provided but not supported in this version: %s", event.Manifest.HeadlessBin)
+	}
+
+
+	// Build request
 	req := &domain.CreateInstanceRequest{
-		Image:      "ubuntu-22.04", // Default base image
-		CPU:        event.Specs.CPU,
-		RAM:        event.Specs.RAM,
+		Image:      "ubuntu-22.04",
+		CPU:        event.Specs["cpu"],
+		RAM:        event.Specs["ram"],
 		Profile:    event.Profile,
-		Parameters: event.Parameters,
+		Manifest: event.Manifest,
+		// pa
+		ARN: event.StorageARN,
 	}
 
-	// Ensure sensible defaults if specs are empty
+	// Defaults
 	if req.CPU == 0 {
+		log.Printf("[PROVISIONER] CPU not provided → defaulting to 2")
 		req.CPU = 2
 	}
+
 	if req.RAM == 0 {
+		log.Printf("[PROVISIONER] RAM not provided → defaulting to 4096MB")
 		req.RAM = 4096
 	}
 
-	// Use the provided user ID or "system"
-	// userID := event.UserID  4c8eeb08-97d2-4c1e-ae0c-e37675b49ee2
-	// if userID == "" {
-	// 	userID = "system"
-	// }
+	log.Printf("[PROVISIONER] final request → image=%s cpu=%d ram=%d profile=%s",
+		req.Image, req.CPU, req.RAM, req.Profile,
+	)
 
-	userID := "4c8eeb08-97d2-4c1e-ae0c-e37675b49ee2"
+	// Resolve user ID
+	userID := event.UserID
+	if userID == "" {
+		log.Printf("[PROVISIONER] userID missing → defaulting to system")
+		userID = "system"
+	}
 
+	log.Printf("[PROVISIONER] invoking CreateInstance userID=%s", userID)
 
-	_, err := s.CreateInstance(ctx,req, userID)
+	// Call core logic
+	instance, err := s.CreateInstance(ctx, req, userID)
 	if err != nil {
+		log.Printf("[PROVISIONER] ERROR CreateInstance failed profile=%s error=%v", event.Profile, err)
 		return fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
 	}
+
+	log.Printf("[PROVISIONER] SUCCESS instanceID=%s profile=%s", instance.ID, event.Profile)
 
 	return nil
 }

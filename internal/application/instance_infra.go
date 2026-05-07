@@ -123,23 +123,28 @@ func (s *InstanceService) downloadImage(url string, destPath string) error {
 
 
 
-func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profile string, params map[string]string, diskPath string) error {
+func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profile string, manifest domain.GameManifest,arn string, diskPath string) error {
 	// Case-insensitive lookup with STORAGE_ARN as fallback for DOWNLOAD_URL
 	var downloadURL, headlessBin string
-	for k, v := range params {
-		switch strings.ToUpper(k) {
-		case "DOWNLOAD_URL", "STORAGE_ARN":
-			if downloadURL == "" || strings.ToUpper(k) == "DOWNLOAD_URL" {
-				downloadURL = v
-			}
-		case "HEADLESS_BIN":
-			headlessBin = v
-		}
-	}
 
-	if downloadURL == "" {
-		return fmt.Errorf("missing DOWNLOAD_URL or STORAGE_ARN in parameters (keys found: %v)", getMapKeys(params))
-	}
+	headlessBin=manifest.HeadlessBin
+	downloadURL=arn
+
+	// for k, v := range params {
+	// 	switch strings.ToUpper(k) {
+	// 	case "DOWNLOAD_URL", "STORAGE_ARN":
+	// 		if downloadURL == "" || strings.ToUpper(k) == "DOWNLOAD_URL" {
+	// 			downloadURL = v
+	// 		}
+	// 	case "HEADLESS_BIN":
+	// 		headlessBin = v
+	// 	}
+	// }
+
+	// if downloadURL == "" {
+	// 	return fmt.Errorf("missing DOWNLOAD_URL or STORAGE_ARN in parameters (keys found: %v)", getMapKeys(params))
+	// }
+
 
 	// For gamelift, headlessBin is mandatory. For others (like ai-worker), it's optional.
 	if headlessBin == "" && instance.Image == "" { // Use a better check if needed, but for now let's just use profile if we had it here

@@ -71,14 +71,29 @@ type Instance struct {
 	SSH        string         `json:"ssh" db:"ssh"`
 }
 
-type ProvisionInstanceEvent struct {
+type ProvisionInstanceEvent struct 
+{
 	Profile    string            `json:"profile"`
-	Specs      InstanceSpecs     `json:"specs"`
-	Parameters map[string]string `json:"parameters"`
+	Specs      map[string]int    `json:"specs"`
 	UserID     string            `json:"user_id"`
-	// Flat fields for compatibility with simpler orchestrators
-	StorageARN  string `json:"storage_arn"`
-	HeadlessBin string `json:"headless_bin"`
+	StorageARN string            `json:"storage_arn"`
+	Manifest GameManifest `json:"manifest"`
+
+}
+
+type GameManifest struct {
+	Name        string     `json:"name"`
+	Version     string     `json:"version"`
+	HeadlessBin string     `json:"headless_bin"`
+	MainScene   string     `json:"main_scene"`
+	PlayerNode  string     `json:"player_node"`
+	SyncNodes   []SyncNode `json:"sync_nodes"`
+	Parameters map[string]string `json:"parameters"`
+
+}
+type SyncNode struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type InstanceSpecs struct {
@@ -86,12 +101,14 @@ type InstanceSpecs struct {
 	RAM int `json:"ram"`
 }
 
+
 type CreateInstanceRequest struct {
 	Image      string            `json:"image" binding:"required"`
 	CPU        int               `json:"cpu" binding:"required"`
 	RAM        int               `json:"ram" binding:"required"`
 	Profile    string            `json:"profile"`
-	Parameters map[string]string `json:"parameters"`
+	Manifest GameManifest `json:"manifest"`
+	ARN string `json:arn`
 }
 
 type CreateInstanceResponse struct {
