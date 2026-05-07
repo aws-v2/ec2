@@ -96,7 +96,7 @@ jobs:
               -e LOG_LEVEL=info \
               -e LOG_FORMAT=json \
               -e DB_PASSWORD=postgres-staging-password \
-              -e DB_NAME=ec2_db \
+              -e DB_NAME=ec2_db1 \
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e DB_SSLMODE=disable \
               -e NATS_URL=nats://nats-staging:4222 \
@@ -106,6 +106,7 @@ jobs:
               -e MINIO_ENDPOINT=minio-staging:9000 \
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
+              -e MIGRATIONS_PATH=/app/migrations \
               -e MINIO_USE_SSL=false \
               -e NATS_PREFIX=staging.v1 \
               --add-host=host.docker.internal:host-gateway \

@@ -29,6 +29,7 @@ type Config struct {
 	MinIO MinIOConfig
 
 	AgentUrl string
+	MigrationsDir string 
 }
 
 type LibvirtConfig struct {
@@ -74,6 +75,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
+		MigrationsDir :getEnv("MIGRATIONS_PATH", "./migrations"),
 		DB: DBConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
 			Port:            getEnvInt("DB_PORT", 5432),

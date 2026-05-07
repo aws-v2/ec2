@@ -137,7 +137,9 @@ func (s *InstanceService) createVMAsync(
 	keyPair *SSHKeyPair,
 ) {
 	profile := req.Profile
-	params := req.Parameters
+	manifest := req.Manifest
+	arn := req.ARN
+
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
@@ -156,13 +158,14 @@ func (s *InstanceService) createVMAsync(
 	// For gamelift, we still use host-side injection for legacy compatibility.
 	// For ai-worker, we now use SageMaker-like simulation where the VM handles its own preparation.
 	if profile == "gamelift" {
-		if err := s.injectPayloadIntoDisk(instance, profile, params, absNew); err != nil {
-			log.Printf("[VM] [%s] Injection failed for %s: %v", profile, instance.VMName, err)
+		if err := s.injectPayloadIntoDisk(instance, profile, manifest, arn,absNew); err != nil {
+			log.Printf("[VM] [%s] Injection failed for9 %s: %v", profile, instance.VMName, err)
 			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject payload: %v", err))
 			s.markTerminatedAndReleaseNetwork(instance, absNew)
 			return
 		}
 	}
+
 
 	// ── Step 2: Validate libvirt is available ─────────────────────────────────
 	if s.libvirtClient == nil {
@@ -207,9 +210,13 @@ combinedKeys := strings.Join(keys, "\n")
 
 log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
 
+
+
+
+
 vmID, err := s.libvirtClient.CreateAndStartVM(
     instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
-    privateIP, gateway, instanceToken, profile, params,
+    privateIP, gateway, instanceToken, profile, manifest.Parameters,
 )
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)

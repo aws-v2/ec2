@@ -113,6 +113,7 @@ jobs:
               --env EUREKA_INSTANCE_ID=ec2-service:8088 \
               --env MINIO_ENDPOINT=minio-prod:9000 \
               --env MINIO_ACCESS_KEY=minio-prod-user \
+              --env MIGRATIONS_PATH=/app/migrations \
               --env MINIO_SECRET_KEY=minio-prod-password \
               --env MINIO_USE_SSL=false \
               --env NATS_PREFIX=prod.v1 \
