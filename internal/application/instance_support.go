@@ -57,12 +57,11 @@ func min(a, b int) int {
 	return b
 }
  
-func (s *InstanceService) publishProgress(instanceID, stage, message string) {
-	if s.publisher != nil {
-		_ = s.publisher.PublishProvisioningProgress(instanceID, stage, message)
-	}
+func (s *InstanceService) publishProgress(instanceID, stage, message string, payload ...any) {
+    if s.publisher != nil {
+        _ = s.publisher.PublishProvisioningProgress(instanceID, stage, message, payload...)
+    }
 }
-
 
 
 

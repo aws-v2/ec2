@@ -47,6 +47,7 @@ type ProvisioningProgressEvent struct {
 	Stage      string `json:"stage"`
 	Message    string `json:"message"`
 	Timestamp  string `json:"timestamp"`
+	 Data       any    `json:"data,omitempty"`
 }
 
 type Instance struct {
@@ -79,6 +80,12 @@ type ProvisionInstanceEvent struct
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
 
+
+}
+
+type ProvisionedRequesFinishedResponse struct{
+	VMID string `json:"vm_id"`
+	AgentURL  string `json:"agent_url"`
 
 }
 
