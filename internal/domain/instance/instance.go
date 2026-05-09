@@ -69,6 +69,7 @@ type Instance struct {
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UserID       string         `json:"user_id" db:"user_id"`
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
+	HostID       string         `json:"host_id" db:"host_id"`
 	SSH        string         `json:"ssh" db:"ssh"`
 }
 

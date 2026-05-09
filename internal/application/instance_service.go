@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-
 type InstanceService struct {
 	repo          interfaces.InstanceRepository
 	sgService     interfaces.SecurityGroupService
@@ -27,30 +26,32 @@ type InstanceService struct {
 	publisher     messaging.Publisher
 	minioAdapter  *storage.MinIOAdapter
 	vpcService    *vpcpkg.Service   // ← replaces publisher
+	hostService   *HostService
 }
 
 func NewInstanceService(
-	repo interfaces.InstanceRepository, 
-	sgService interfaces.SecurityGroupService, 
-	libvirt *libvirt.LibvirtClient, 
-	systemPubKey string, 
-	imagesDir string, 
-	publisher messaging.Publisher, 
+	repo interfaces.InstanceRepository,
+	sgService interfaces.SecurityGroupService,
+	libvirt *libvirt.LibvirtClient,
+	systemPubKey string,
+	imagesDir string,
+	publisher messaging.Publisher,
 	minioAdapter *storage.MinIOAdapter,
 	vpcService *vpcpkg.Service,
+	hostService *HostService,
 ) *InstanceService {
 	s := &InstanceService{
-		repo: repo, 
-		sgService: sgService, 
-		libvirtClient: libvirt, 
-		systemPubKey: systemPubKey, 
-		imagesDir: imagesDir, 
-		publisher: publisher, 
-		minioAdapter: minioAdapter,
-		vpcService: vpcService,
+		repo:          repo,
+		sgService:     sgService,
+		libvirtClient: libvirt,
+		systemPubKey:  systemPubKey,
+		imagesDir:     imagesDir,
+		publisher:     publisher,
+		minioAdapter:  minioAdapter,
+		vpcService:    vpcService,
+		hostService:   hostService,
 	}
 
- 
 	return s
 }
 
@@ -108,9 +109,29 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	if err != nil {
 		return nil, err
 	}
+
+	// Step 2.5: Select best host
+	bestHost, err := s.hostService.SelectBestHost()
+	if err != nil {
+		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
+	}
+	hostID := ""
+	if bestHost != nil {
+		hostID = bestHost.ID
+		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
+	} else {
+		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
+	}
  
 	// Step 3: Persist the record and launch VM creation asynchronously
-	return s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken)
+	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken)
+	if err != nil {
+		return nil, err
+	}
+	instance.HostID = hostID
+	_ = s.repo.Update(instance)
+
+	return instance, nil
 }
  
 

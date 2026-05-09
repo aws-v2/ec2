@@ -18,8 +18,10 @@ func SetupRoutes(r *gin.Engine,
 	templateHandler *transport.TemplateHandler, 
 	terminalHandler *transport.TerminalHandler,
 	fleetHandler *transport.FleetHandler,
-	docsHandler *transport.DocsHandler) {
+	docsHandler *transport.DocsHandler,
+	hostHandler *transport.HostHandler) {
 	
+ 
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
 	fleet.Use(middleware.AuthMiddleware())
@@ -38,7 +40,11 @@ func SetupRoutes(r *gin.Engine,
 	// Compute API
 	compute := r.Group("/api/v1/compute")
 	compute.Use(middleware.AuthMiddleware())
+
 	{
+		compute.POST("/hosts/heartbeat", hostHandler.HandleHeartbeat)
+
+	
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
 	}
 

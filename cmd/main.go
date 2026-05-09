@@ -140,6 +140,7 @@ func main() {
 	var sgRepo interfaces.SecurityGroupRepository
 	var templateRepo interfaces.TemplateRepository
 	var fleetRepo interfaces.FleetRepository
+	var hostRepo interfaces.HostRepository
 
 	instanceRepo = repository.NewInstanceRepository(db,cfg)
 	volumeRepo = repository.NewVolumeRepository(db)
@@ -149,6 +150,7 @@ func main() {
 	sgRepo = repository.NewSecurityGroupRepository(db)
 	templateRepo = repository.NewTemplateRepository(db)
 	fleetRepo = repository.NewFleetRepository(db)
+	hostRepo = repository.NewHostRepository(db.DB)
 
 	// Initialize System Key Service
 	systemKeyService := application.NewSystemKeyService(imagesDir) // Store keys near images
@@ -171,7 +173,10 @@ func main() {
 	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo,vpcProvisioner)
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService)
+
+	hostService := application.NewHostService(hostRepo)
+
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService, hostService)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
@@ -205,6 +210,7 @@ func main() {
 	terminalHandler := transport.NewTerminalHandler(terminalService)
 	fleetHandler := transport.NewFleetHandler(fleetService)
 	docsHandler := transport.NewDocsHandler(docsService)
+	hostHandler := transport.NewHostHandler(hostService)
 
 	// 5. Setup Router
 	router := gin.Default()
@@ -215,7 +221,7 @@ func main() {
 		c.JSON(httpd.StatusOK, gin.H{"status": "UP"})
 	})
 
-	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler)
+	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler)
 
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()
