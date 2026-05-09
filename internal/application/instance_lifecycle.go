@@ -266,7 +266,7 @@ vmID, err := s.libvirtClient.CreateAndStartVM(
 
 s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.", domain.ProvisionedRequesFinishedResponse{
     VMID:     "vm-hardcoded-001",   // hardcoded for now
-    AgentURL: "http://10.0.0.1:8080", // hardcoded for now
+    AgentURL: "http://10.0.0.1:90", // hardcoded for now
 })
 
 
