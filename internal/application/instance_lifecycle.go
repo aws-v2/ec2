@@ -262,7 +262,14 @@ vmID, err := s.libvirtClient.CreateAndStartVM(
 		}
 	}()
 
-	s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.")
+	// s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.")
+
+s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.", domain.ProvisionedRequesFinishedResponse{
+    VMID:     "vm-hardcoded-001",   // hardcoded for now
+    AgentURL: "http://10.0.0.1:90", // hardcoded for now
+})
+
+
 	log.Printf("✓ VM %s created successfully (ID: %s, IP: %s, bridge: %s)",
 		instance.VMName, instance.ID, privateIP, bridgeName)
 }

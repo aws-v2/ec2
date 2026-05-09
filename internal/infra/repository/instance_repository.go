@@ -22,7 +22,7 @@ type instanceRepository struct { // lowercase, unexported
 	cfg *config.Config
 }
 func NewInstanceRepository(db *sqlx.DB, cfg *config.Config) interfaces.InstanceRepository { // return interface
-	return &instanceRepository{db: db, cfg:& *cfg}
+	return &instanceRepository{db: db, cfg: cfg}
 }
 func (r *instanceRepository) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
 	query := `
@@ -142,8 +142,9 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		    storage_size = $7,
 		    storage_type = $8,
 		    device_name = $9,
-		    vpc_id = $10
-		WHERE id = $11
+		    vpc_id = $10,
+		    host_id = $11
+		WHERE id = $12
 	`
 	_, err := r.db.Exec(query,
 		instance.Status,
@@ -156,6 +157,7 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		instance.StorageType,
 		instance.DeviceName,
 		instance.VPCID,
+		instance.HostID,
 		instance.ID,
 	)
 	return err
@@ -166,14 +168,14 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		public_sshkey, private_sshkey,
 		status, ip, public_ip, proxmox_id, 
 		created_at, user_id, root_volume_id, 
-		storage_size, storage_type, device_name, vpc_id
+		storage_size, storage_type, device_name, vpc_id, host_id
 	) 
 	VALUES (
 		$1, $2, $3, $4, $5, 
 		$6, $7,
 		$8, $9, $10, $11, 
 		$12, $13, $14, 
-		$15, $16, $17, $18
+		$15, $16, $17, $18, $19
 	)`
 
 	instance.CreatedAt = time.Now()
@@ -198,6 +200,7 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		instance.StorageType,
 		instance.DeviceName,
 		instance.VPCID,
+		instance.HostID,
 	)
 
 	return err

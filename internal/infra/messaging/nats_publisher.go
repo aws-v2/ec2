@@ -34,7 +34,8 @@ type Publisher interface {
 	GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error)
 	UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(tenantID, policyID string) error
-	PublishProvisioningProgress(instanceID, stage, message string) error
+	PublishProvisioningProgress(instanceID, stage, message string, payload ...any) error
+	// PublishProvisioningProgress(instanceID, stage, message string) error
 }
 
 type NATSPublisher struct {
@@ -724,30 +725,34 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 	return nil
 }
 
-func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message string) error {
-	if p == nil || p.nc == nil {
-		return fmt.Errorf("NATS publisher or connection not initialized")
-	}
+func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message string, payload ...any) error {
+    if p == nil || p.nc == nil {
+        return fmt.Errorf("NATS publisher or connection not initialized")
+    }
 
-	event := domain.ProvisioningProgressEvent{
-		InstanceID: instanceID,
-		EventType:  domain.EventProvisioningProgress,
-		Stage:      stage,
-		Message:    message,
-		Timestamp:  time.Now().Format(time.RFC3339),
-	}
+    event := domain.ProvisioningProgressEvent{
+        InstanceID: instanceID,
+        EventType:  domain.EventProvisioningProgress,
+        Stage:      stage,
+        Message:    message,
+        Timestamp:  time.Now().Format(time.RFC3339),
+    }
 
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal progress event: %w", err)
-	}
-	fmt.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s instance_id=%s event_type=%s ip=%s status=published\n",
-		p.subject, instanceID, stage, message, message)
+    // Attach struct payload only when explicitly provided
+    if len(payload) > 0 {
+        event.Data = payload[0]
+    }
 
-	// Use the same subject for now, as the backend will filter by event_type
-	if err := p.nc.Publish(p.subject, data); err != nil {
-		return fmt.Errorf("failed to publish progress event: %w", err)
-	}
+    data, err := json.Marshal(event)
+    if err != nil {
+        return fmt.Errorf("failed to marshal progress event: %w", err)
+    }
 
-	return p.nc.Flush()
+    fmt.Printf("[NATS] [REQUEST*] subject=%s instance_id=%s stage=%s\n, with this data %v", p.subject, instanceID, stage, payload)
+
+    if err := p.nc.Publish(p.subject, data); err != nil {
+        return fmt.Errorf("failed to publish progress event: %w", err)
+    }
+
+    return p.nc.Flush()
 }

@@ -47,6 +47,7 @@ type ProvisioningProgressEvent struct {
 	Stage      string `json:"stage"`
 	Message    string `json:"message"`
 	Timestamp  string `json:"timestamp"`
+	 Data       any    `json:"data,omitempty"`
 }
 
 type Instance struct {
@@ -68,6 +69,7 @@ type Instance struct {
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UserID       string         `json:"user_id" db:"user_id"`
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
+	HostID       string         `json:"host_id" db:"host_id"`
 	SSH        string         `json:"ssh" db:"ssh"`
 }
 
@@ -79,6 +81,12 @@ type ProvisionInstanceEvent struct
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
 
+
+}
+
+type ProvisionedRequesFinishedResponse struct{
+	VMID string `json:"vm_id"`
+	AgentURL  string `json:"agent_url"`
 
 }
 
