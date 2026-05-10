@@ -178,7 +178,7 @@ func main() {
 
 	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService, hostService)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
-	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
+	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
 	terminalService := application.NewTerminalService(instanceRepo)

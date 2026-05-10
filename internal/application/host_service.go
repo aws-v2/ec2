@@ -19,6 +19,10 @@ func NewHostService(repo domain.Repository) *HostService {
 	}
 }
 
+func (s *HostService) GetHost(id string) (*domain.Host, error) {
+	return s.repo.GetByID(id)
+}
+
 func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) error {
 	log.Printf("[host-service] handling heartbeat for host %s, cpu: %d, ram: %d, storage: %d", req.HostID, req.CPUTotal, req.RAMTotal, req.DiskTotal)
 	host := &domain.Host{

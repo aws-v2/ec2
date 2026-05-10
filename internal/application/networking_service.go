@@ -228,7 +228,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 
 	// 2. Stop the Instance
 	fmt.Printf("[NetworkingService] Stopping instance %s for VPC migration\n", instanceID)
-	if err := s.libvirt.StopVM(instance.VMName); err != nil {
+	if err := s.libvirt.StopVM("", instance.VMName); err != nil {
 		fmt.Printf("[NetworkingService] Warning: StopVM failed for %s: %v\n", instanceID, err)
 	}
 
@@ -260,7 +260,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 	// 6. Reconfigure & Start
 	// We need to undefine and redefine with new bridge and new cloud-init
 	fmt.Printf("[NetworkingService] Reconfiguring and restarting instance %s\n", instanceID)
-	if err := s.libvirt.DeleteVM(instance.VMName); err != nil {
+	if err := s.libvirt.DeleteVM("", instance.VMName); err != nil {
 		fmt.Printf("[NetworkingService] Warning: DeleteVM (undefine) failed: %v\n", err)
 	}
 
@@ -271,6 +271,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 	// Get tags/ssh keys if needed, for prototype we assume we have them or can get them
 	// Instance struct has SSHKey
 	_, err = s.libvirt.CreateAndStartVM(
+		"", // remoteHostIP not available in NetworkingService
 		instance.VMName,
 		diskPath,
 		instance.CPU,

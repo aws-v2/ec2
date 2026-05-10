@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -159,7 +160,15 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 		return err
 	}
 
-	if err := s.libvirtClient.StopVM(instance.VMName); err != nil {
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
+	if err := s.libvirtClient.StopVM(remoteHostIP, instance.VMName); err != nil {
 		return err
 	}
 
@@ -183,8 +192,16 @@ func (s *InstanceService) RestartInstance(instanceID, userID string) error {
 		return fmt.Errorf("instance not found: %w", err)
 	}
 
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
 	// Use the LibvirtClient to restart the VM
-	err = s.libvirtClient.RestartVM(instance.VMName)
+	err = s.libvirtClient.RestartVM(remoteHostIP, instance.VMName)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM: %w", err)
 	}
@@ -204,7 +221,15 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 		return err
 	}
 
-	if err := s.libvirtClient.StartVM(instance.VMName); err != nil {
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
+	if err := s.libvirtClient.StartVM(remoteHostIP, instance.VMName); err != nil {
 		return err
 	}
 
@@ -230,13 +255,25 @@ func (s *InstanceService) DeleteInstance(id, userID string) error {
 	// Use the VMName from the database to ensure consistency
 	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
 
-	if err := s.libvirtClient.DeleteVM(instance.VMName); err != nil {
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
+	if err := s.libvirtClient.DeleteVM(remoteHostIP, instance.VMName); err != nil {
 		return err
 	}
 
 	// Delete disk file
-	if err := os.Remove(diskPath); err != nil && !os.IsNotExist(err) {
-		fmt.Printf("Warning: Failed to delete disk file %s: %v\n", diskPath, err)
+	if remoteHostIP != "" {
+		exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("root@%s", remoteHostIP), "rm", "-f", diskPath).Run()
+	} else {
+		if err := os.Remove(diskPath); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("Warning: Failed to delete disk file %s: %v\n", diskPath, err)
+		}
 	}
 
 	return s.repo.Delete(id)
@@ -331,9 +368,17 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 
 	log.Printf("[VPC-HOP] Starting migration for instance %s from VPC %s to %s", instanceID, oldVPCID, newVPCID)
 
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
 	// 2. Stop the Instance
-	log.Printf("[VPC-HOP] Stopping VM %s", instance.VMName)
-	if err := s.libvirtClient.StopVM(instance.VMName); err != nil {
+	log.Printf("[VPC-HOP] Stopping VM %s on host %s", instance.VMName, remoteHostIP)
+	if err := s.libvirtClient.StopVM(remoteHostIP, instance.VMName); err != nil {
 		log.Printf("[VPC-HOP] Warning: StopVM failed: %v", err)
 		// Continue anyway as it might already be stopped
 	}
@@ -367,7 +412,7 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	// 6. Re-configure Libvirt XML & Restart
 	// We achieve this by deleting the old definition and creating a new one with same disk but new bridge
 	log.Printf("[VPC-HOP] Reconfiguring VM %s with new bridge %s and IP %s", instance.VMName, bridgeName, privateIP)
-	if err := s.libvirtClient.DeleteVM(instance.VMName); err != nil {
+	if err := s.libvirtClient.DeleteVM(remoteHostIP, instance.VMName); err != nil {
 		log.Printf("[VPC-HOP] Warning: DeleteVM (undefine) failed: %v", err)
 	}
 
@@ -384,6 +429,7 @@ log.Printf("[VPC-HOP] Public SSH keys for instance %s: %s", instance.VMName, ins
 
 
 	_, err = s.libvirtClient.CreateAndStartVM(
+		remoteHostIP,
 		instance.VMName,
 		diskPath,
 		instance.CPU,

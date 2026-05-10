@@ -14,14 +14,16 @@ type SnapshotService struct {
 	instanceRepo  interfaces.InstanceRepository
 	volumeRepo    interfaces.VolumeRepository
 	libvirtClient *libvirt.LibvirtClient
+	hostRepo      interfaces.HostRepository
 }
 
-func NewSnapshotService(repo interfaces.SnapshotRepository, instanceRepo interfaces.InstanceRepository, volumeRepo interfaces.VolumeRepository, libvirt *libvirt.LibvirtClient) *SnapshotService {
+func NewSnapshotService(repo interfaces.SnapshotRepository, instanceRepo interfaces.InstanceRepository, volumeRepo interfaces.VolumeRepository, libvirt *libvirt.LibvirtClient, hostRepo interfaces.HostRepository) *SnapshotService {
 	return &SnapshotService{
 		repo:          repo,
 		instanceRepo:  instanceRepo,
 		volumeRepo:    volumeRepo,
 		libvirtClient: libvirt,
+		hostRepo:      hostRepo,
 	}
 }
 
@@ -48,11 +50,17 @@ func (s *SnapshotService) CreateVolumeSnapshot(volumeID int, req *domain.CreateS
 		return nil, fmt.Errorf("failed to save snapshot metadata: %w", err)
 	}
 
-	// Logic for volume snapshot
 	if volume.Status == domain.VolumeStatusAttached && volume.AttachedTo != "" {
 		instance, err := s.instanceRepo.FindByID(volume.AttachedTo)
 		if err == nil && instance != nil {
-			if err := s.libvirtClient.CreateSnapshot(instance.VMName, snapshot.Name, snapshot.Description); err != nil {
+			var remoteHostIP string
+			if instance.HostID != "" {
+				host, _ := s.hostRepo.GetByID(instance.HostID)
+				if host != nil {
+					remoteHostIP = host.IP
+				}
+			}
+			if err := s.libvirtClient.CreateSnapshot(remoteHostIP, instance.VMName, snapshot.Name, snapshot.Description); err != nil {
 				s.repo.UpdateStatus(snapshot.ID, domain.SnapshotStatusFailed)
 				return nil, fmt.Errorf("failed to create libvirt snapshot for attached volume: %w", err)
 			}
@@ -94,8 +102,17 @@ func (s *SnapshotService) CreateSnapshot(instanceID string, req *domain.CreateSn
 		return nil, fmt.Errorf("failed to save snapshot metadata: %w", err)
 	}
 
+	// Fetch host IP
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostRepo.GetByID(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
 	// Create snapshot in Libvirt
-	if err := s.libvirtClient.CreateSnapshot(instance.VMName, snapshot.Name, snapshot.Description); err != nil {
+	if err := s.libvirtClient.CreateSnapshot(remoteHostIP, instance.VMName, snapshot.Name, snapshot.Description); err != nil {
 		s.repo.UpdateStatus(snapshot.ID, domain.SnapshotStatusFailed)
 		return nil, fmt.Errorf("failed to create libvirt snapshot: %w", err)
 	}
@@ -136,7 +153,15 @@ func (s *SnapshotService) DeleteSnapshot(id int) error {
 		return err
 	}
 
-	if err := s.libvirtClient.DeleteSnapshot(instance.VMName, snapshot.Name); err != nil {
+	var remoteHostIP string
+	if instance.HostID != "" {
+		host, _ := s.hostRepo.GetByID(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+		}
+	}
+
+	if err := s.libvirtClient.DeleteSnapshot(remoteHostIP, instance.VMName, snapshot.Name); err != nil {
 		return fmt.Errorf("failed to delete libvirt snapshot: %w", err)
 	}
 

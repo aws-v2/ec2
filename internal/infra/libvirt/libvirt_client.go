@@ -54,7 +54,7 @@ func (l *LibvirtClient) GetImagesDir() string {
 // privateIP and gateway come from the network service — they are pre-allocated
 // before this function is called. The VM boots with this IP already configured
 // via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, combinedKeys, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string) (int, error) {
+func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, vmName, diskPath string, cpu, ram int, combinedKeys, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string) (int, error) {
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
@@ -72,7 +72,38 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 
 	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName, profile)
 
-	domain, err := l.conn.DomainDefineXML(xmlConfig)
+	// Transfer disks and execute remotely if remoteHostIP is provided
+	conn := l.conn
+	if remoteHostIP != "" {
+		fmt.Printf("[Libvirt] Transferring disks to remote host %s...\n", remoteHostIP)
+		
+		// Ensure the remote directory exists
+		// if err := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("root@%s", remoteHostIP), "mkdir", "-p", filepath.Dir(diskPath), filepath.Dir(isoPath)).Run(); err != nil {
+		// 	return 0, fmt.Errorf("failed to create remote directories: %w", err)
+		// }
+		
+		fmt.Printf("[Libvirt] Copying disk %s...\n", diskPath)
+		if err := exec.Command("scp", "-o", "StrictHostKeyChecking=no", diskPath, fmt.Sprintf("root@%s:%s", remoteHostIP, diskPath)).Run(); err != nil {
+			return 0, fmt.Errorf("failed to scp disk to remote host: %w", err)
+		}
+		
+		fmt.Printf("[Libvirt] Copying cloud-init ISO %s...\n", isoPath)
+		if err := exec.Command("scp", "-o", "StrictHostKeyChecking=no", isoPath, fmt.Sprintf("root@%s:%s", remoteHostIP, isoPath)).Run(); err != nil {
+			return 0, fmt.Errorf("failed to scp iso to remote host: %w", err)
+		}
+
+		// Connect to remote Libvirt
+		remoteURI := fmt.Sprintf("qemu+ssh://root@%s/system?no_verify=1", remoteHostIP)
+		fmt.Printf("[Libvirt] Connecting to remote libvirt: %s\n", remoteURI)
+		remoteConn, err := libvirt.NewConnect(remoteURI)
+		if err != nil {
+			return 0, fmt.Errorf("failed to connect to remote libvirt: %w", err)
+		}
+		defer remoteConn.Close()
+		conn = remoteConn
+	}
+
+	domain, err := conn.DomainDefineXML(xmlConfig)
 	if err != nil {
 		return 0, fmt.Errorf("failed to define domain: %w", err)
 	}
@@ -89,7 +120,7 @@ func (l *LibvirtClient) CreateAndStartVM(vmName, diskPath string, cpu, ram int, 
 
 	// We no longer wait for DHCP — the IP was pre-allocated and is baked into
 	// cloud-init. The VM will boot with it immediately.
-	fmt.Printf("[Libvirt] VM %s started with static IP %s (bridge: %s)\n", vmName, privateIP, bridgeName)
+	fmt.Printf("[Libvirt] VM %s started with static IP %s (bridge: %s) on host %s\n", vmName, privateIP, bridgeName, remoteHostIP)
 
 	return int(id), nil
 }
@@ -415,9 +446,28 @@ ethernets:
 
 	return isoPath, cleanup, nil
 }
-func (l *LibvirtClient) RestartVM(vmName string) error {
+
+func (l *LibvirtClient) getConnection(remoteHostIP string) (*libvirt.Connect, func(), error) {
+	if remoteHostIP == "" {
+		return l.conn, func() {}, nil
+	}
+	remoteURI := fmt.Sprintf("qemu+ssh://root@%s/system?no_verify=1", remoteHostIP)
+	remoteConn, err := libvirt.NewConnect(remoteURI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to remote libvirt: %w", err)
+	}
+	return remoteConn, func() { remoteConn.Close() }, nil
+}
+
+func (l *LibvirtClient) RestartVM(remoteHostIP, vmName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	// Lookup the domain by name
-	domain, err := l.conn.LookupDomainByName(vmName)
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return fmt.Errorf("failed to find VM %s: %w", vmName, err)
 	}
@@ -462,8 +512,14 @@ func (l *LibvirtClient) RestartVM(vmName string) error {
 	return nil
 }
 
-func (l *LibvirtClient) StopVM(vmName string) error {
-	domain, err := l.conn.LookupDomainByName(vmName)
+func (l *LibvirtClient) StopVM(remoteHostIP, vmName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return err
 	}
@@ -471,9 +527,15 @@ func (l *LibvirtClient) StopVM(vmName string) error {
 	return domain.Shutdown()
 }
 
-func (l *LibvirtClient) StartVM(vmName string) error {
+func (l *LibvirtClient) StartVM(remoteHostIP, vmName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	// Use name instead of ID
-	domain, err := l.conn.LookupDomainByName(vmName)
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return fmt.Errorf("failed to find VM %s: %w", vmName, err)
 	}
@@ -497,8 +559,14 @@ func (l *LibvirtClient) StartVM(vmName string) error {
 	return nil
 }
 
-func (l *LibvirtClient) DeleteVM(vmName string) error {
-	domain, err := l.conn.LookupDomainByName(vmName)
+func (l *LibvirtClient) DeleteVM(remoteHostIP, vmName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return err
 	}
@@ -674,8 +742,14 @@ func (l *LibvirtClient) getVMIP(domain *libvirt.Domain) (string, error) {
 	return "", fmt.Errorf("no IP found")
 }
 
-func (l *LibvirtClient) CreateSnapshot(vmName, snapshotName, description string) error {
-	domain, err := l.conn.LookupDomainByName(vmName)
+func (l *LibvirtClient) CreateSnapshot(remoteHostIP, vmName, snapshotName, description string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
 	}
@@ -695,8 +769,14 @@ func (l *LibvirtClient) CreateSnapshot(vmName, snapshotName, description string)
 	return nil
 }
 
-func (l *LibvirtClient) DeleteSnapshot(vmName, snapshotName string) error {
-	domain, err := l.conn.LookupDomainByName(vmName)
+func (l *LibvirtClient) DeleteSnapshot(remoteHostIP, vmName, snapshotName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
 	}
@@ -715,8 +795,14 @@ func (l *LibvirtClient) DeleteSnapshot(vmName, snapshotName string) error {
 	return nil
 }
 
-func (l *LibvirtClient) RestoreSnapshot(vmName, snapshotName string) error {
-	domain, err := l.conn.LookupDomainByName(vmName)
+func (l *LibvirtClient) RestoreSnapshot(remoteHostIP, vmName, snapshotName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
 	}

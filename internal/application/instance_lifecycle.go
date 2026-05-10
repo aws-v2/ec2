@@ -143,6 +143,14 @@ func (s *InstanceService) createVMAsync(
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
+	var remoteHostIP string
+	if instance.HostID != "" {
+		if host, err := s.hostService.GetHost(instance.HostID); err == nil && host != nil {
+			remoteHostIP = host.IP
+			log.Printf("[VM] Targeted for remote host %s (IP: %s)", instance.HostID, remoteHostIP)
+		}
+	}
+
 	// ── Step 1: Clone base disk ───────────────────────────────────────────────
 	s.publishProgress(instance.ID, StageCloningDisk, "Cloning base image to new instance disk...")
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2",
@@ -166,6 +174,22 @@ func (s *InstanceService) createVMAsync(
 		}
 	}
 
+
+	// ── Step 1.6: Bake Standalone Image ──────────────────────────────────────
+	if remoteHostIP != "" {
+		s.publishProgress(instance.ID, StageCloningDisk, "Baking standalone image for remote host transfer...")
+		bakedDisk := absNew + ".baked"
+		convertCmd := exec.Command("qemu-img", "convert", "-O", "qcow2", absNew, bakedDisk)
+		if output, err := convertCmd.CombinedOutput(); err != nil {
+			log.Printf("[VM] Failed to bake disk for %s: %v\nOutput: %s", instance.VMName, err, string(output))
+			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to bake disk: %v", err))
+			s.markTerminatedAndReleaseNetwork(instance, absNew)
+			return
+		}
+		// Replace original with baked standalone disk
+		exec.Command("mv", bakedDisk, absNew).Run()
+		log.Printf("[VM] Standalone baked disk ready for transfer: %s", absNew)
+	}
 
 	// ── Step 2: Validate libvirt is available ─────────────────────────────────
 	if s.libvirtClient == nil {
@@ -215,12 +239,16 @@ log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName
 
 
 vmID, err := s.libvirtClient.CreateAndStartVM(
-    instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
+    remoteHostIP, instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
     privateIP, gateway, instanceToken, profile, manifest.Parameters,
 )
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
-		exec.Command("rm", "-f", newDiskPath).Run()
+		if remoteHostIP != "" {
+			exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("root@%s", remoteHostIP), "rm", "-f", newDiskPath).Run()
+		} else {
+			exec.Command("rm", "-f", newDiskPath).Run()
+		}
 		s.markTerminatedAndReleaseNetwork(instance, "")
 		return
 	}
@@ -234,8 +262,12 @@ vmID, err := s.libvirtClient.CreateAndStartVM(
 
 	if err := s.repo.Update(instance); err != nil {
 		log.Printf("[VM] Failed to update instance %s in DB: %v", instance.ID, err)
-		s.libvirtClient.DeleteVM(instance.VMName)
-		exec.Command("rm", "-f", newDiskPath).Run()
+		s.libvirtClient.DeleteVM(remoteHostIP, instance.VMName)
+		if remoteHostIP != "" {
+			exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("root@%s", remoteHostIP), "rm", "-f", newDiskPath).Run()
+		} else {
+			exec.Command("rm", "-f", newDiskPath).Run()
+		}
 		return
 	}
 
