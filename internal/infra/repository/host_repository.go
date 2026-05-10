@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type hostRepository struct {
@@ -18,27 +20,30 @@ func NewHostRepository(db *sql.DB) interfaces.HostRepository {
 }
 
 func (r *hostRepository) Update(host *domain.Host) error {
-	log.Printf("[-->host-service] handling heartbeat for host %s, cpu: %d, ram: %d, storage: %d", host.ID, host.CPUTotal, host.RAMTotal, host.DiskTotal)
+	log.Printf("[-->host-service] handling heartbeat for host %s, cpu: %d, ram: %d, storage: %d, available templates: %v", host.ID, host.CPUTotal, host.RAMTotal, host.DiskTotal, host.AvailableTemplates)
 
 	query := `
-		INSERT INTO hosts (id, hostname, ip, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO hosts (id, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)	
 		ON CONFLICT (id) DO UPDATE SET
 			hostname = EXCLUDED.hostname,
 			ip = EXCLUDED.ip,
+			ssh_user = EXCLUDED.ssh_user,
 			cpu_total = EXCLUDED.cpu_total,
 			cpu_used = EXCLUDED.cpu_used,
 			ram_total = EXCLUDED.ram_total,
 			ram_free = EXCLUDED.ram_free,
 			disk_total = EXCLUDED.disk_total,
 			disk_free = EXCLUDED.disk_free,
+			available_templates = EXCLUDED.available_templates,
 			status = EXCLUDED.status,
 			last_heartbeat = EXCLUDED.last_heartbeat
 	`
 	_, err := r.db.Exec(query,
-		host.ID, host.Hostname, host.IP, host.CPUTotal, host.CPUUsed,
+		host.ID, host.Hostname, host.IP, host.SSHUser, host.CPUTotal, host.CPUUsed,
 		host.RAMTotal, host.RAMFree, host.DiskTotal, host.DiskFree,
 		host.Status, host.LastHeartbeat,
+		pq.Array(host.AvailableTemplates),
 	)
 	return err
 }
@@ -46,7 +51,7 @@ func (r *hostRepository) Update(host *domain.Host) error {
 func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 	// Scoring logic: sort by RAM free desc, CPU used asc, Disk free desc
 	query := `
-		SELECT id, hostname, ip, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at
+		SELECT id, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at, available_templates
 		FROM hosts
 		WHERE status = 'active' AND last_heartbeat > $1
 		ORDER BY ram_free DESC, cpu_used ASC, disk_free DESC
@@ -64,9 +69,10 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 	for rows.Next() {
 		h := &domain.Host{}
 		err := rows.Scan(
-			&h.ID, &h.Hostname, &h.IP, &h.CPUTotal, &h.CPUUsed,
+			&h.ID, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
 			&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
 			&h.Status, &h.LastHeartbeat, &h.CreatedAt,
+			pq.Array(&h.AvailableTemplates),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
@@ -78,15 +84,16 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 
 func (r *hostRepository) GetByID(id string) (*domain.Host, error) {
 	query := `
-		SELECT id, hostname, ip, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at
+		SELECT id, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at, available_templates
 		FROM hosts
 		WHERE id = $1
 	`
 	h := &domain.Host{}
 	err := r.db.QueryRow(query, id).Scan(
-		&h.ID, &h.Hostname, &h.IP, &h.CPUTotal, &h.CPUUsed,
+		&h.ID, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
 		&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
 		&h.Status, &h.LastHeartbeat, &h.CreatedAt,
+		pq.Array(&h.AvailableTemplates),
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

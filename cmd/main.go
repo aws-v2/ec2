@@ -159,9 +159,15 @@ func main() {
 	}
 	systemPubKey, _ := systemKeyService.GetPublicKeyString()
 
+	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
+	vpcRepo := repository.NewVPCRepository(db)
+	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
+
+	hostService := application.NewHostService(hostRepo)
+
 	// 3. Initialize Application Layer (Services)
 	slog.Info("Initializing services...")
-	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher)
+	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher, vpcService, hostService)
 	if err := networkingService.SeedDefaultSecurityGroup(); err != nil {
 		slog.Warn("Failed to seed default security group", "error", err)
 	}
@@ -170,13 +176,8 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
-	vpcRepo := repository.NewVPCRepository(db)
-	vpcService := vpcpkg.NewVpcService(vpcRepo,vpcProvisioner)
 
-	hostService := application.NewHostService(hostRepo)
-
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService, hostService)
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)

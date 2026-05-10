@@ -15,8 +15,10 @@ type Host struct {
 	DiskTotal     int       `json:"disk_total"` // in GB
 	DiskFree      int       `json:"disk_free"`  // in GB
 	Status        string    `json:"status"`    // active, inactive, maintenance
+	SSHUser       string    `json:"ssh_user"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 	CreatedAt     time.Time `json:"created_at"`
+	AvailableTemplates   []string `json:"available_templates"`
 }
 
 type HeartbeatRequest struct {
@@ -29,6 +31,8 @@ type HeartbeatRequest struct {
 	RAMFree   int    `json:"ram_free"`
 	DiskTotal int    `json:"disk_total"`
 	DiskFree  int    `json:"disk_free"`
+	AvailableTemplates   []string `json:"available_templates"`
+
 }
 
 type Repository interface {

@@ -3,6 +3,7 @@ package application
 import (
 	domain "ec2-api/internal/domain/host"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,17 +25,29 @@ func (s *HostService) GetHost(id string) (*domain.Host, error) {
 }
 
 func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) error {
-	log.Printf("[host-service] handling heartbeat for host %s, cpu: %d, ram: %d, storage: %d", req.HostID, req.CPUTotal, req.RAMTotal, req.DiskTotal)
+	// Extract SSH username from MAC:User:Hostname format
+	// MAC address has 6 parts (0-5), User is the 7th part (index 6)
+	sshUser := "x6617274696" // Default fallback
+	parts := strings.Split(req.Hostname, ":")
+	if len(parts) >= 7 {
+		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
+		sshUser = parts[6]
+	} else {
+		log.Printf("[host-service] [WARN] Hostname format unexpected (%s), falling back to default user", req.Hostname)
+	}
+
 	host := &domain.Host{
 		ID:            req.HostID,
 		Hostname:      req.Hostname,
 		IP:            req.IP,
+		SSHUser:       sshUser,
 		CPUTotal:      req.CPUTotal,
 		CPUUsed:       req.CPUUsed,
 		RAMTotal:      req.RAMTotal,
 		RAMFree:       req.RAMFree,
 		DiskTotal:     req.DiskTotal,
 		DiskFree:      req.DiskFree,
+		AvailableTemplates: req.AvailableTemplates,
 		Status:        "active",
 		LastHeartbeat: time.Now(),
 	}
