@@ -29,12 +29,11 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) error {
 	// MAC address has 6 parts (0-5), User is the 7th part (index 6)
 	sshUser := "x6617274696" // Default fallback
 	parts := strings.Split(req.Hostname, ":")
-	if len(parts) >= 7 {
+	if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
 		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
 		sshUser = parts[6]
-	} else {
-		log.Printf("[host-service] [WARN] Hostname format unexpected (%s), falling back to default user", req.Hostname)
-	}
+	} 
+
 
 	host := &domain.Host{
 		ID:            req.HostID,
@@ -48,6 +47,7 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) error {
 		DiskTotal:     req.DiskTotal,
 		DiskFree:      req.DiskFree,
 		AvailableTemplates: req.AvailableTemplates,
+		SSHPrivateKey: req.SSHPrivateKey,
 		Status:        "active",
 		LastHeartbeat: time.Now(),
 	}

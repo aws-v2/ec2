@@ -20,15 +20,22 @@ func NewHostRepository(db *sql.DB) interfaces.HostRepository {
 }
 
 func (r *hostRepository) Update(host *domain.Host) error {
-	log.Printf("[-->host-service] handling heartbeat for host %s, cpu: %d, ram: %d, storage: %d, available templates: %v", host.ID, host.CPUTotal, host.RAMTotal, host.DiskTotal, host.AvailableTemplates)
+	log.Printf("[-->host-service] handling heartbeat for host %s, available templates: %v, ssh_user: %s", host.ID, host.AvailableTemplates, host.SSHUser)
 
 	query := `
-		INSERT INTO hosts (id, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)	
+		INSERT INTO hosts (id, hostname, ip, ssh_user, ssh_private_key, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)	
 		ON CONFLICT (id) DO UPDATE SET
 			hostname = EXCLUDED.hostname,
 			ip = EXCLUDED.ip,
-			ssh_user = EXCLUDED.ssh_user,
+			ssh_user = CASE 
+				WHEN hosts.ssh_user IS NOT NULL AND hosts.ssh_user != '' AND hosts.ssh_user != 'root' THEN hosts.ssh_user 
+				ELSE EXCLUDED.ssh_user 
+			END,
+			ssh_private_key = CASE
+				WHEN EXCLUDED.ssh_private_key != '' THEN EXCLUDED.ssh_private_key
+				ELSE hosts.ssh_private_key
+			END,
 			cpu_total = EXCLUDED.cpu_total,
 			cpu_used = EXCLUDED.cpu_used,
 			ram_total = EXCLUDED.ram_total,
@@ -40,9 +47,9 @@ func (r *hostRepository) Update(host *domain.Host) error {
 			last_heartbeat = EXCLUDED.last_heartbeat
 	`
 	_, err := r.db.Exec(query,
-		host.ID, host.Hostname, host.IP, host.SSHUser, host.CPUTotal, host.CPUUsed,
-		host.RAMTotal, host.RAMFree, host.DiskTotal, host.DiskFree,
-		host.Status, host.LastHeartbeat,
+		host.ID, host.Hostname, host.IP, host.SSHUser, host.SSHPrivateKey,
+		host.CPUTotal, host.CPUUsed, host.RAMTotal, host.RAMFree,
+		host.DiskTotal, host.DiskFree, host.Status, host.LastHeartbeat,
 		pq.Array(host.AvailableTemplates),
 	)
 	return err
@@ -83,17 +90,14 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 }
 
 func (r *hostRepository) GetByID(id string) (*domain.Host, error) {
-	query := `
-		SELECT id, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at, available_templates
-		FROM hosts
-		WHERE id = $1
-	`
-	h := &domain.Host{}
-	err := r.db.QueryRow(query, id).Scan(
-		&h.ID, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
-		&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
-		&h.Status, &h.LastHeartbeat, &h.CreatedAt,
-		pq.Array(&h.AvailableTemplates),
+	query := `SELECT id, hostname, ip, ssh_user, ssh_private_key, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates FROM hosts WHERE id = $1`
+	row := r.db.QueryRow(query, id)
+	host := &domain.Host{}
+	err := row.Scan(
+		&host.ID, &host.Hostname, &host.IP, &host.SSHUser, &host.SSHPrivateKey,
+		&host.CPUTotal, &host.CPUUsed, &host.RAMTotal, &host.RAMFree,
+		&host.DiskTotal, &host.DiskFree, &host.Status, &host.LastHeartbeat,
+		pq.Array(&host.AvailableTemplates),
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -101,5 +105,5 @@ func (r *hostRepository) GetByID(id string) (*domain.Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get host by id: %w", err)
 	}
-	return h, nil
+	return host, nil
 }

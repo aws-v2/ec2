@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,13 +10,7 @@ func AuthMiddleware() gin.HandlerFunc {
         c.Set("userID",     c.GetHeader("X-User-Id"))
         c.Set("userRole",   c.GetHeader("X-User-Role"))
         c.Set("authMethod", c.GetHeader("X-Auth-Method"))
-
-        log.Printf("[auth] userID=%s role=%s method=%s",
-            c.GetHeader("X-User-Id"),
-            c.GetHeader("X-User-Role"),
-            c.GetHeader("X-Auth-Method"),
-        )
-
+ 
         c.Next()
     }
 }

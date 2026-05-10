@@ -230,12 +230,13 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		return fmt.Errorf("unauthorized: instance does not belong to tenant")
 	}
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
@@ -243,7 +244,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 
 	// 2. Stop the Instance
 	fmt.Printf("[NetworkingService] Stopping VM %s on host %s (user: %s)\n", instance.VMName, remoteHostIP, remoteHostUser)
-	if err := s.libvirt.StopVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirt.StopVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		fmt.Printf("[NetworkingService] Warning: StopVM failed for %s: %v\n", instanceID, err)
 	}
 
@@ -277,7 +278,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 
 	// 6. Re-configure Libvirt XML & Restart
 	fmt.Printf("[NetworkingService] Reconfiguring VM %s with new bridge %s and IP %s\n", instance.VMName, bridgeName, privateIP)
-	if err := s.libvirt.DeleteVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirt.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		fmt.Printf("[NetworkingService] Warning: DeleteVM failed: %v\n", err)
 	}
 
@@ -287,6 +288,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 	_, err = s.libvirt.CreateAndStartVM(
 		remoteHostIP,
 		remoteHostUser,
+		remoteHostKey,
 		instance.VMName,
 		diskPath,
 		instance.CPU,
@@ -298,6 +300,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		"",  // no metrics token needed for VPC migration
 		"",  // no profile for VPC migration
 		nil, // no parameters for VPC migration
+		"",  // no backing template for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)

@@ -160,16 +160,17 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 		return err
 	}
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
-	if err := s.libvirtClient.StopVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirtClient.StopVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		return err
 	}
 
@@ -193,17 +194,18 @@ func (s *InstanceService) RestartInstance(instanceID, userID string) error {
 		return fmt.Errorf("instance not found: %w", err)
 	}
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
 	// Use the LibvirtClient to restart the VM
-	err = s.libvirtClient.RestartVM(remoteHostIP, remoteHostUser, instance.VMName)
+	err = s.libvirtClient.RestartVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM: %w", err)
 	}
@@ -223,16 +225,17 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 		return err
 	}
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
-	if err := s.libvirtClient.StartVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirtClient.StartVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		return err
 	}
 
@@ -258,16 +261,17 @@ func (s *InstanceService) DeleteInstance(id, userID string) error {
 	// Use the VMName from the database to ensure consistency
 	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
-	if err := s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		return err
 	}
 
@@ -372,18 +376,19 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 
 	log.Printf("[VPC-HOP] Starting migration for instance %s from VPC %s to %s", instanceID, oldVPCID, newVPCID)
 
-	var remoteHostIP, remoteHostUser string
+	var remoteHostIP, remoteHostUser, remoteHostKey string
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
 	// 2. Stop the Instance
 	log.Printf("[VPC-HOP] Stopping VM %s on host %s (user: %s)", instance.VMName, remoteHostIP, remoteHostUser)
-	if err := s.libvirtClient.StopVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirtClient.StopVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		log.Printf("[VPC-HOP] Warning: StopVM failed: %v", err)
 		// Continue anyway as it might already be stopped
 	}
@@ -397,17 +402,14 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	}
 
 	// 4. Prepare New Network
-	var privateIP, gateway, bridgeName string
-	if s.vpcService != nil {
-		log.Printf("[VPC-HOP] Preparing network in VPC %s", newVPCID)
-		network, err := s.vpcService.AllocateInstanceNetwork(context.Background(), userID, instanceID, newVPCID)
-		if err != nil {
-			return fmt.Errorf("failed to prepare new network in VPC %s: %w", newVPCID, err)
-		}
-		privateIP = network.PrivateIP
-		gateway = network.Gateway
-		bridgeName = network.BridgeName
+	log.Printf("[VPC-HOP] Preparing new network for %s in VPC %s", instanceID, newVPCID)
+	network, err := s.vpcService.AllocateInstanceNetwork(context.Background(), userID, instanceID, newVPCID)
+	if err != nil {
+		return fmt.Errorf("failed to prepare new network: %w", err)
 	}
+	privateIP := network.PrivateIP
+	gateway := network.Gateway
+	bridgeName := network.BridgeName
 
 	// 5. Update Instance Metadata
 	instance.VPCID = newVPCID
@@ -420,7 +422,7 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	// 6. Re-configure Libvirt XML & Restart
 	// We achieve this by deleting the old definition and creating a new one with same disk but new bridge
 	log.Printf("[VPC-HOP] Reconfiguring VM %s with new bridge %s and IP %s", instance.VMName, bridgeName, privateIP)
-	if err := s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, instance.VMName); err != nil {
+	if err := s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		log.Printf("[VPC-HOP] Warning: DeleteVM (undefine) failed: %v", err)
 	}
 
@@ -430,15 +432,11 @@ func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, new
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
-log.Printf("[VPC-HOP] Combined SSH keys for instance %s: %s", instance.VMName, combinedKeys)
-log.Printf("[VPC-HOP] Private SSH keys for instance %s: %s", instance.VMName, instance.PrivateSshKey)
-log.Printf("[VPC-HOP] Public SSH keys for instance %s: %s", instance.VMName, instance.PublicSSHKey)
-
-
 
 	_, err = s.libvirtClient.CreateAndStartVM(
 		remoteHostIP,
 		remoteHostUser,
+		remoteHostKey,
 		instance.VMName,
 		diskPath,
 		instance.CPU,
@@ -450,6 +448,7 @@ log.Printf("[VPC-HOP] Public SSH keys for instance %s: %s", instance.VMName, ins
 		"",  // no metrics token needed for VPC-hop
 		"",  // no profile for VPC-hop
 		nil, // no parameters for VPC-hop
+		"",  // no backing template for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)

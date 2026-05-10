@@ -18,21 +18,22 @@ type Host struct {
 	SSHUser       string    `json:"ssh_user"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 	CreatedAt     time.Time `json:"created_at"`
-	AvailableTemplates   []string `json:"available_templates"`
+	AvailableTemplates []string  `json:"available_templates"`
+	SSHPrivateKey      string    `json:"ssh_private_key"`
 }
 
 type HeartbeatRequest struct {
-	HostID    string `json:"host_id"`
-	Hostname  string `json:"hostname"`
-	IP        string `json:"ip"`
-	CPUTotal  int    `json:"cpu_total"`
-	CPUUsed   int    `json:"cpu_used"`
-	RAMTotal  int    `json:"ram_total"`
-	RAMFree   int    `json:"ram_free"`
-	DiskTotal int    `json:"disk_total"`
-	DiskFree  int    `json:"disk_free"`
-	AvailableTemplates   []string `json:"available_templates"`
-
+	HostID             string   `json:"host_id"`
+	Hostname           string   `json:"hostname"`
+	IP                 string   `json:"ip"`
+	CPUTotal           int      `json:"cpu_total"`
+	CPUUsed            int      `json:"cpu_used"`
+	RAMTotal           int      `json:"ram_total"`
+	RAMFree            int      `json:"ram_free"`
+	DiskTotal          int      `json:"disk_total"`
+	DiskFree           int      `json:"disk_free"`
+	AvailableTemplates []string `json:"available_templates"`
+	SSHPrivateKey      string   `json:"ssh_private_key"`
 }
 
 type Repository interface {
