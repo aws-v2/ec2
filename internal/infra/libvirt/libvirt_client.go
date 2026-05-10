@@ -3,11 +3,14 @@
 package libvirt
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	libvirt "libvirt.org/go/libvirt"
@@ -39,7 +42,7 @@ func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, na
 	}, nil
 }
 func (c *LibvirtClient) Conn() *libvirt.Connect {
-    return c.conn
+	return c.conn
 }
 func (l *LibvirtClient) Close() error {
 	_, err := l.conn.Close()
@@ -48,6 +51,15 @@ func (l *LibvirtClient) Close() error {
 
 func (l *LibvirtClient) GetImagesDir() string {
 	return l.imagesDir
+}
+
+func runCmdWithProgress(cmd *exec.Cmd) ([]byte, error) {
+	var buf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // don't die on parent SIGINT
+	err := cmd.Run()
+	return buf.Bytes(), err
 }
 
 // CreateAndStartVM creates and starts a VM with a statically configured IP.
@@ -80,7 +92,7 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 		}
 
 		sshArgs := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
-		scpArgs := []string{  "-v", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
+		scpArgs := []string{"-v", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
 		var tempKeyPath string
 		if remoteHostKey != "" {
 			// Ensure actual newlines and trailing newline for OpenSSH
@@ -110,13 +122,13 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 		}
 
 		fmt.Printf("[Libvirt] Transferring disks to remote host %s (user: %s)...\n", remoteHostIP, remoteHostUser)
-		
+
 		// Ensure the remote directory exists
 		mkdirCmd := exec.Command("ssh", append(sshArgs, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "mkdir", "-p", filepath.Dir(diskPath), filepath.Dir(isoPath))...)
 		if output, err := mkdirCmd.CombinedOutput(); err != nil {
 			return 0, fmt.Errorf("failed to create remote directories (output: %s): %w", string(output), err)
 		}
-		
+
 		fmt.Printf("[1Libvirt] Copying disk %s (Overlay/Delta)...\n", diskPath)
 
 		scpDiskCmd := exec.Command("scp", append(scpArgs, diskPath, fmt.Sprintf("%s@%s:%s", remoteHostUser, remoteHostIP, diskPath))...)
@@ -125,23 +137,22 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 			return 0, fmt.Errorf("failed to scp disk to remote host (output: %s): %w", string(output), err)
 		}
 
-
 		if backingTemplate != "" {
 			fmt.Printf("[Libvirt] Using remote template %s. Performing remote rebase.\n", backingTemplate)
-			remoteTemplatePath := filepath.Join("/var/lib/libvirt/templates", backingTemplate + ".qcow2")
-			
+			remoteTemplatePath := filepath.Join("/var/lib/libvirt/templates", backingTemplate+".qcow2")
+
 			// Remote rebase command to link the transferred delta to the agent's local template
-			rebaseCmd := exec.Command("ssh", append(sshArgs, 
+			rebaseCmd := exec.Command("ssh", append(sshArgs,
 				fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP),
 				"qemu-img", "rebase", "-u", "-b", remoteTemplatePath, diskPath)...)
-			
+
 			if output, err := rebaseCmd.CombinedOutput(); err != nil {
 				return 0, fmt.Errorf("remote rebase failed: %w\nOutput: %s", err, string(output))
 			}
 			fmt.Printf("[Libvirt] Remote rebase successful for %s\n", vmName)
 		}
 		fmt.Println("-------------------end of phase two-----")
-		
+
 		fmt.Printf("[Libvirt] Copying cloud-init ISO %s...\n", isoPath)
 		scpIsoCmd := exec.Command("scp", append(scpArgs, isoPath, fmt.Sprintf("%s@%s:%s", remoteHostUser, remoteHostIP, isoPath))...)
 		if output, err := scpIsoCmd.CombinedOutput(); err != nil {
@@ -209,25 +220,23 @@ func (l *LibvirtClient) createCloudInitISO(vmName, combinedKeys, privateIP, gate
 	}
 
 	// ── user-data ─────────────────────────────────────────────────────────────
- keysYaml := ""
-    for _, key := range strings.Split(combinedKeys, "\n") {
-        key = strings.TrimSpace(key)
-        // Drop blank lines and any fragment that isn't a real key
-        if key == "" || (!strings.HasPrefix(key, "ssh-") && !strings.HasPrefix(key, "ecdsa-")) {
-            continue
-        }
-        keysYaml += fmt.Sprintf("      - %s\n", key)
-    }
+	keysYaml := ""
+	for _, key := range strings.Split(combinedKeys, "\n") {
+		key = strings.TrimSpace(key)
+		// Drop blank lines and any fragment that isn't a real key
+		if key == "" || (!strings.HasPrefix(key, "ssh-") && !strings.HasPrefix(key, "ecdsa-")) {
+			continue
+		}
+		keysYaml += fmt.Sprintf("      - %s\n", key)
+	}
 
-    if keysYaml == "" {
-        fmt.Printf("[Libvirt] [WARN] No valid SSH keys found for VM %s\n", vmName)
-    }
-
+	if keysYaml == "" {
+		fmt.Printf("[Libvirt] [WARN] No valid SSH keys found for VM %s\n", vmName)
+	}
 
 	if keysYaml == "" {
 		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
 	}
-
 
 	writeFiles := `  - path: /opt/metrics-agent/config
     permissions: '0600'
@@ -399,7 +408,7 @@ func (l *LibvirtClient) createCloudInitISO(vmName, combinedKeys, privateIP, gate
       PAYLOAD="{\"job_id\": ${JOB_ID:-0}, \"instance_id\": \"${INSTANCE_ID}\", \"status\": \"${STATUS}\"}"
       nats -s "${NATS_URL}" pub "${NATS_SUBJECT}" "${PAYLOAD}"
 `, l.minioEndpoint, l.minioAK, l.minioSK, l.natsURL, l.natsSubject)
-		
+
 		runCmd += "\n  - apt-get update && apt-get install -y unzip python3-pip"
 		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
 		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
@@ -536,7 +545,7 @@ func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKe
 			os.Remove(f.Name())
 			return nil, nil, fmt.Errorf("failed to chmod temp key file for connection: %w", err)
 		}
-		
+
 		remoteURI += fmt.Sprintf("&keyfile=%s", f.Name())
 		cleanupFuncs = append(cleanupFuncs, func() {
 			os.Remove(f.Name())
