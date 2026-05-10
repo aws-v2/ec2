@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
+	"os"
 	"strings"
 
 	"fmt"
@@ -113,8 +114,8 @@ func (s *InstanceService) persistAndLaunch(
 
 
 	if err := s.repo.Create(instance); err != nil {
-		if s.publisher != nil && privateIP != "" {
-			if releaseErr := s.publisher.ReleaseInstanceNetwork(userID, instanceID, vpcID); releaseErr != nil {
+		if s.vpcService != nil && privateIP != "" {
+			if releaseErr := s.vpcService.ReleaseInstanceNetwork(context.Background(), instanceID); releaseErr != nil {
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
@@ -143,6 +144,14 @@ func (s *InstanceService) createVMAsync(
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
+	var remoteHostIP string
+	if instance.HostID != "" {
+		if host, err := s.hostService.GetHost(instance.HostID); err == nil && host != nil {
+			remoteHostIP = host.IP
+			log.Printf("[VM] Targeted for remote host %s (IP: %s)", instance.HostID, remoteHostIP)
+		}
+	}
+
 	// ── Step 1: Clone base disk ───────────────────────────────────────────────
 	s.publishProgress(instance.ID, StageCloningDisk, "Cloning base image to new instance disk...")
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2",
@@ -166,6 +175,57 @@ func (s *InstanceService) createVMAsync(
 		}
 	}
 
+
+	// ── Step 1.6: Bake Standalone Image ──────────────────────────────────────
+	backingTemplate := ""
+	if remoteHostIP != "" {
+		// Check if the host has the template and we can skip baking
+		useTemplate := false
+		if profile != "gamelift" {
+			if host, err := s.hostService.GetHost(instance.HostID); err == nil && host != nil {
+				for _, t := range host.AvailableTemplates {
+					if t == instance.Image {
+						useTemplate = true
+						backingTemplate = instance.Image
+						break
+					}
+				}
+			}
+		}
+
+		if useTemplate {
+			log.Printf("[VM] Host %s has template %s. Skipping standalone bake step.", instance.HostID, instance.Image)
+		} else {
+			s.publishProgress(instance.ID, StageCloningDisk, "Baking standalone image for remote host transfer...")
+			bakedDisk := absNew + ".baked"
+			
+			var lastConvertErr error
+			var output []byte
+			
+			// Retry loop to handle slow filesystem lock releases from Step 1.5
+			for i := 0; i < 99; i++ {
+				convertCmd := exec.Command("qemu-img", "convert", "-U", "-O", "qcow2", absNew, bakedDisk)
+				output, lastConvertErr = convertCmd.CombinedOutput()
+				if lastConvertErr == nil {
+					break
+				}
+				
+				log.Printf("[VM] Bake attempt %d failed for %s, retrying in 1s... Error: %v", i+1, instance.VMName, lastConvertErr)
+				time.Sleep(1 * time.Second)
+			}
+
+			if lastConvertErr != nil {
+				log.Printf("[VM] Failed to bake disk for %s after retries: %v\nOutput: %s", instance.VMName, lastConvertErr, string(output))
+				s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to bake disk: %v", lastConvertErr))
+				s.markTerminatedAndReleaseNetwork(instance, absNew)
+				return
+			}
+			// Replace original with baked standalone disk
+			exec.Command("mv", bakedDisk, absNew).Run()
+			log.Printf("[VM] Standalone baked disk ready for transfer: %s", absNew)
+		}
+	}
+	log.Printf("-------------------end of phase one-----")
 
 	// ── Step 2: Validate libvirt is available ─────────────────────────────────
 	if s.libvirtClient == nil {
@@ -214,13 +274,48 @@ log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName
 
 
 
-vmID, err := s.libvirtClient.CreateAndStartVM(
-    instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
-    privateIP, gateway, instanceToken, profile, manifest.Parameters,
-)
+	var remoteHostUser string
+	var remoteHostKey string
+	if instance.HostID != "" {
+		h, _ := s.hostService.GetHost(instance.HostID)
+		if h != nil {
+			remoteHostUser = h.SSHUser
+			remoteHostKey = h.SSHPrivateKey
+			if remoteHostKey != "" {
+				log.Printf("[VM] Using SSH private key from host record for %s", instance.HostID)
+			} else {
+				log.Printf("[VM] [WARN] No SSH private key found in host record for %s", instance.HostID)
+			}
+		} else {
+			log.Printf("[VM] [WARN] Host record not found for %s", instance.HostID)
+		}
+	}
+	if remoteHostUser == "" {
+		remoteHostUser = "x6617274696" // Global fallback
+	}
+
+	vmID, err := s.libvirtClient.CreateAndStartVM(
+		remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName,
+		privateIP, gateway, instanceToken, profile, manifest.Parameters, backingTemplate,
+	)
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
-		exec.Command("rm", "-f", newDiskPath).Run()
+		if remoteHostIP != "" {
+			args := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
+			if remoteHostKey != "" {
+				f, err := os.CreateTemp("", "id_rsa_cleanup_*")
+				if err == nil {
+					f.WriteString(remoteHostKey)
+					f.Close()
+					os.Chmod(f.Name(), 0600)
+					args = append(args, "-i", f.Name())
+					defer os.Remove(f.Name())
+				}
+			}
+			exec.Command("ssh", append(args, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", absNew)...).Run()
+		} else {
+			exec.Command("rm", "-f", newDiskPath).Run()
+		}
 		s.markTerminatedAndReleaseNetwork(instance, "")
 		return
 	}
@@ -234,8 +329,13 @@ vmID, err := s.libvirtClient.CreateAndStartVM(
 
 	if err := s.repo.Update(instance); err != nil {
 		log.Printf("[VM] Failed to update instance %s in DB: %v", instance.ID, err)
-		s.libvirtClient.DeleteVM(instance.VMName)
-		exec.Command("rm", "-f", newDiskPath).Run()
+		s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName)
+		if remoteHostIP != "" {
+			// Effort-only cleanup
+			exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", newDiskPath).Run()
+		} else {
+			exec.Command("rm", "-f", newDiskPath).Run()
+		}
 		return
 	}
 

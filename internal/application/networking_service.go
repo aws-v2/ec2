@@ -10,7 +10,9 @@ import (
 	domain "ec2-api/internal/domain/instance"
 	interfaces "ec2-api/internal/interfaces"
 	messaging "ec2-api/internal/infra/messaging"
-	libvirt  "ec2-api/internal/infra/libvirt")
+	libvirt  "ec2-api/internal/infra/libvirt"
+	vpcpkg "ec2-api/internal/vpcpkg"
+)
 
 type NetworkingService struct {
 	ipRepo       interfaces.IPRepository
@@ -18,15 +20,19 @@ type NetworkingService struct {
 	instanceRepo interfaces.InstanceRepository
 	libvirt      *libvirt.LibvirtClient
 	publisher    messaging.Publisher
+	vpcService   *vpcpkg.Service
+	hostService  *HostService
 }
 
-func NewNetworkingService(ipRepo interfaces.IPRepository, sgRepo interfaces.SecurityGroupRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher messaging.Publisher) *NetworkingService {
+func NewNetworkingService(ipRepo interfaces.IPRepository, sgRepo interfaces.SecurityGroupRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher messaging.Publisher, vpcService *vpcpkg.Service, hostService *HostService) *NetworkingService {
 	return &NetworkingService{
 		ipRepo:       ipRepo,
 		sgRepo:       sgRepo,
 		instanceRepo: instanceRepo,
 		libvirt:      libvirt,
 		publisher:    publisher,
+		vpcService:   vpcService,
+		hostService:  hostService,
 	}
 }
 
@@ -224,11 +230,21 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		return fmt.Errorf("unauthorized: instance does not belong to tenant")
 	}
 
+	var remoteHostIP, remoteHostUser, remoteHostKey string
+	if instance.HostID != "" {
+		host, _ := s.hostService.GetHost(instance.HostID)
+		if host != nil {
+			remoteHostIP = host.IP
+			remoteHostUser = host.SSHUser
+			remoteHostKey = host.SSHPrivateKey
+		}
+	}
+
 	oldVPCID := instance.VPCID
 
 	// 2. Stop the Instance
-	fmt.Printf("[NetworkingService] Stopping instance %s for VPC migration\n", instanceID)
-	if err := s.libvirt.StopVM(instance.VMName); err != nil {
+	fmt.Printf("[NetworkingService] Stopping VM %s on host %s (user: %s)\n", instance.VMName, remoteHostIP, remoteHostUser)
+	if err := s.libvirt.StopVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
 		fmt.Printf("[NetworkingService] Warning: StopVM failed for %s: %v\n", instanceID, err)
 	}
 
@@ -238,17 +254,20 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 	// 3. Release Old IP
 	if oldVPCID != "" {
 		fmt.Printf("[NetworkingService] Releasing old network for %s in VPC %s\n", instanceID, oldVPCID)
-		if err := s.publisher.ReleaseInstanceNetwork(tenantID, instanceID, oldVPCID); err != nil {
+		if err := s.vpcService.ReleaseInstanceNetwork(context.Background(), instanceID); err != nil {
 			fmt.Printf("[NetworkingService] Warning: ReleaseInstanceNetwork failed: %v\n", err)
 		}
 	}
 
 	// 4. Prepare New IP
 	fmt.Printf("[NetworkingService] Preparing new network for %s in VPC %s\n", instanceID, vpcID)
-	privateIP, gateway, bridgeName, err := s.publisher.PrepareInstanceNetwork(tenantID, instanceID, vpcID)
+	network, err := s.vpcService.AllocateInstanceNetwork(context.Background(), tenantID, instanceID, vpcID)
 	if err != nil {
 		return fmt.Errorf("failed to prepare new network: %w", err)
 	}
+	privateIP := network.PrivateIP
+	gateway := network.Gateway
+	bridgeName := network.BridgeName
 
 	// 5. Update Database
 	instance.VPCID = vpcID
@@ -257,31 +276,31 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		return fmt.Errorf("failed to update instance record: %w", err)
 	}
 
-	// 6. Reconfigure & Start
-	// We need to undefine and redefine with new bridge and new cloud-init
-	fmt.Printf("[NetworkingService] Reconfiguring and restarting instance %s\n", instanceID)
-	if err := s.libvirt.DeleteVM(instance.VMName); err != nil {
-		fmt.Printf("[NetworkingService] Warning: DeleteVM (undefine) failed: %v\n", err)
+	// 6. Re-configure Libvirt XML & Restart
+	fmt.Printf("[NetworkingService] Reconfiguring VM %s with new bridge %s and IP %s\n", instance.VMName, bridgeName, privateIP)
+	if err := s.libvirt.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
+		fmt.Printf("[NetworkingService] Warning: DeleteVM failed: %v\n", err)
 	}
 
-	// Determine disk path (logic similar to InstanceService)
-	// For production we should store disk path in DB, but here we follow the convention
-	diskPath := filepath.Join(s.libvirt.GetImagesDir(), fmt.Sprintf("%s.qcow2", instance.VMName))
+	diskPath := filepath.Join("/var/lib/libvirt/images", fmt.Sprintf("%s.qcow2", instance.VMName))
+	combinedKeys := instance.PublicSSHKey
 
-	// Get tags/ssh keys if needed, for prototype we assume we have them or can get them
-	// Instance struct has SSHKey
 	_, err = s.libvirt.CreateAndStartVM(
+		remoteHostIP,
+		remoteHostUser,
+		remoteHostKey,
 		instance.VMName,
 		diskPath,
 		instance.CPU,
 		instance.RAM,
-		instance.PublicSSHKey,
+		combinedKeys,
 		bridgeName,
 		privateIP,
 		gateway,
 		"",  // no metrics token needed for VPC migration
 		"",  // no profile for VPC migration
 		nil, // no parameters for VPC migration
+		"",  // no backing template for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
