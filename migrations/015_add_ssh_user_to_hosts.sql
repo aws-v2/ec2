@@ -13,17 +13,8 @@ ALTER TABLE hosts ADD COLUMN IF NOT EXISTS ssh_user TEXT;
 -- The Parent (Golden Image): This is your 700MB ubuntu-22.04.qcow2. It is kept in a "Read-Only" state.
 -- The Child (Overlay): This is a new, empty file that points to the Parent. Every time the VM tries to read something, it looks at the Child first; if it’s not there, it reads from the Parent. Every time the VM writes something, it only goes into the Child.
 -- 2. The Deep-Dive Process
--- Phase 1: Local Orchestration (The "Brain")
--- On your Orchestrator server, where you have the game files:
 
--- Create Overlay: You run qemu-img create -f qcow2 -b ubuntu-22.04.qcow2 delta.qcow2. This file is less than 200 KB initially.
--- Inject Payload: You use guestmount to "open" delta.qcow2. You copy your 50MB of game files into it.
--- Result: delta.qcow2 is now roughly 55MB. It contains only the new game files and some filesystem metadata. It does not contain the Ubuntu OS code.
--- Phase 2: The Hand-off (The Network)
--- Transfer: You scp only the 55MB delta.qcow2 to the Agent.
--- The Metadata Problem: Inside delta.qcow2, there is a "pointer" that says: "My parent is located at /home/martin/images/ubuntu-22.04.qcow2" (the path on your Orchestrator).
--- The Fix (Rebase): On the Agent, that path doesn't exist. So, the Orchestrator sends one final command to the Agent via SSH: qemu-img rebase -u -b /var/lib/libvirt/templates/ubuntu-22.04.qcow2 delta.qcow2
--- This is "Unsafe Rebase" (-u), which just means: "Don't check anything, just change the internal text pointer to point to the Agent's local template path."
+
 
 
 -- Phase 3: Execution (The Worker)

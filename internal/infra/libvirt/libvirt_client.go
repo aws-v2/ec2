@@ -79,8 +79,8 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 			remoteHostUser = "x6617274696" // Global fallback
 		}
 
-		sshArgs := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes"}
-		scpArgs := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes"}
+		sshArgs := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
+		scpArgs := []string{  "-v", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
 		var tempKeyPath string
 		if remoteHostKey != "" {
 			// Ensure actual newlines and trailing newline for OpenSSH
@@ -117,11 +117,14 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 			return 0, fmt.Errorf("failed to create remote directories (output: %s): %w", string(output), err)
 		}
 		
-		fmt.Printf("[Libvirt] Copying disk %s (Overlay/Delta)...\n", diskPath)
+		fmt.Printf("[1Libvirt] Copying disk %s (Overlay/Delta)...\n", diskPath)
+
 		scpDiskCmd := exec.Command("scp", append(scpArgs, diskPath, fmt.Sprintf("%s@%s:%s", remoteHostUser, remoteHostIP, diskPath))...)
+		fmt.Printf("[Libvirt] Running: %s\n", strings.Join(scpDiskCmd.Args, " "))
 		if output, err := scpDiskCmd.CombinedOutput(); err != nil {
 			return 0, fmt.Errorf("failed to scp disk to remote host (output: %s): %w", string(output), err)
 		}
+
 
 		if backingTemplate != "" {
 			fmt.Printf("[Libvirt] Using remote template %s. Performing remote rebase.\n", backingTemplate)

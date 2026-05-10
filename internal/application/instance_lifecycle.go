@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
+	"os"
 	"strings"
 
 	"fmt"
@@ -300,13 +301,18 @@ log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
 		if remoteHostIP != "" {
-			args := []string{"-o", "StrictHostKeyChecking=no"}
+			args := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
 			if remoteHostKey != "" {
-				// We should probably use a temp file here too, but for simple cleanup we just try
-				// In a real scenario, the libvirt client's failure would have cleaned up its own temp file.
-				// For this quick cleanup, we'll assume the host might have the key in authorized_keys already or it fails.
+				f, err := os.CreateTemp("", "id_rsa_cleanup_*")
+				if err == nil {
+					f.WriteString(remoteHostKey)
+					f.Close()
+					os.Chmod(f.Name(), 0600)
+					args = append(args, "-i", f.Name())
+					defer os.Remove(f.Name())
+				}
 			}
-			exec.Command("ssh", append(args, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", newDiskPath)...).Run()
+			exec.Command("ssh", append(args, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", absNew)...).Run()
 		} else {
 			exec.Command("rm", "-f", newDiskPath).Run()
 		}
