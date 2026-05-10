@@ -171,6 +171,35 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 		}
 		defer remoteConn.Close()
 		conn = remoteConn
+
+		// ── Phase 3: Ensure bridge exists on Agent ─────────────────────────────
+		if bridgeName != "" {
+			fmt.Printf("[Libvirt] Ensuring network bridge %s exists on Agent...\n", bridgeName)
+			existingNet, netErr := remoteConn.LookupNetworkByName(bridgeName)
+			if netErr != nil {
+				// Bridge doesn't exist on Agent — define and start it
+				netXML := fmt.Sprintf(`<network>
+  <name>%s</name>
+  <bridge name='%s' stp='off' delay='0'/>
+</network>`, bridgeName, bridgeName)
+				newNet, err := remoteConn.NetworkDefineXML(netXML)
+				if err != nil {
+					return 0, fmt.Errorf("failed to define network %s on agent: %w", bridgeName, err)
+				}
+				defer newNet.Free()
+				if err := newNet.Create(); err != nil {
+					return 0, fmt.Errorf("failed to start network %s on agent: %w", bridgeName, err)
+				}
+				newNet.SetAutostart(true)
+				fmt.Printf("[Libvirt] Network bridge %s created and started on Agent\n", bridgeName)
+			} else {
+				defer existingNet.Free()
+				if active, _ := existingNet.IsActive(); !active {
+					_ = existingNet.Create()
+				}
+				fmt.Printf("[Libvirt] Network bridge %s already active on Agent\n", bridgeName)
+			}
+		}
 	}
 
 	domain, err := conn.DomainDefineXML(xmlConfig)
