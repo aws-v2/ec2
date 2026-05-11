@@ -80,14 +80,21 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 	if err != nil {
 		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
 	}
+		fmt.Printf("Cloud-init ISO created: %s\n", isoPath)
+
 	defer cleanupFn()
 
 	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName, profile)
+		fmt.Printf("XML Config created: ")
 
 	// Transfer disks and execute remotely if remoteHostIP is provided
 	conn := l.conn
 	if remoteHostIP != "" {
+		fmt.Printf("The remote host ip is %s", remoteHostIP)
+
 		if remoteHostUser == "" {
+		fmt.Printf("The remoteHostUser is mission",)
+
 			remoteHostUser = "x6617274696" // Global fallback
 		}
 
@@ -95,6 +102,8 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 		scpArgs := []string{"-v", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
 		var tempKeyPath string
 		if remoteHostKey != "" {
+		fmt.Printf("thisis the remotehost key %s",remoteHostKey)
+
 			// Ensure actual newlines and trailing newline for OpenSSH
 			formattedKey := strings.ReplaceAll(remoteHostKey, "\\n", "\n")
 			if !strings.HasSuffix(formattedKey, "\n") {
@@ -113,6 +122,8 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 			if err := os.Chmod(f.Name(), 0600); err != nil {
 				return 0, fmt.Errorf("failed to chmod temp key file: %w", err)
 			}
+		fmt.Printf("Formatingthe scp args",)
+
 			tempKeyPath = f.Name()
 			sshArgs = append(sshArgs, "-i", tempKeyPath)
 			scpArgs = append(scpArgs, "-i", tempKeyPath)
@@ -171,35 +182,6 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 		}
 		defer remoteConn.Close()
 		conn = remoteConn
-
-		// ── Phase 3: Ensure bridge exists on Agent ─────────────────────────────
-		if bridgeName != "" {
-			fmt.Printf("[Libvirt] Ensuring network bridge %s exists on Agent...\n", bridgeName)
-			existingNet, netErr := remoteConn.LookupNetworkByName(bridgeName)
-			if netErr != nil {
-				// Bridge doesn't exist on Agent — define and start it
-				netXML := fmt.Sprintf(`<network>
-  <name>%s</name>
-  <bridge name='%s' stp='off' delay='0'/>
-</network>`, bridgeName, bridgeName)
-				newNet, err := remoteConn.NetworkDefineXML(netXML)
-				if err != nil {
-					return 0, fmt.Errorf("failed to define network %s on agent: %w", bridgeName, err)
-				}
-				defer newNet.Free()
-				if err := newNet.Create(); err != nil {
-					return 0, fmt.Errorf("failed to start network %s on agent: %w", bridgeName, err)
-				}
-				newNet.SetAutostart(true)
-				fmt.Printf("[Libvirt] Network bridge %s created and started on Agent\n", bridgeName)
-			} else {
-				defer existingNet.Free()
-				if active, _ := existingNet.IsActive(); !active {
-					_ = existingNet.Create()
-				}
-				fmt.Printf("[Libvirt] Network bridge %s already active on Agent\n", bridgeName)
-			}
-		}
 	}
 
 	domain, err := conn.DomainDefineXML(xmlConfig)

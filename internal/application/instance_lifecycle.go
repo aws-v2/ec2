@@ -83,7 +83,7 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 func (s *InstanceService) persistAndLaunch(
 	req *domain.CreateInstanceRequest,
 	userID, instanceID, vmName, newDiskPath, baseImagePath,
-	bridgeName, privateIP, gateway, vpcID, instanceToken, hostID string,
+	bridgeName, privateIP, gateway, vpcID, instanceToken string,
 ) (*domain.Instance, error) {
 	keyPair, err := GenerateSSHKeyPair()
 	if err != nil {
@@ -106,7 +106,6 @@ func (s *InstanceService) persistAndLaunch(
 		CreatedAt:     time.Now(),
 		UserID:        userID,
 		VPCID:         vpcID,
-		HostID:        hostID, // set before goroutine starts to avoid race condition
 	}
 
 
@@ -123,7 +122,7 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken,keyPair)
 
 	// Return the full key so the caller can hand it back to the user once
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
@@ -145,8 +144,13 @@ func (s *InstanceService) createVMAsync(
 	absBase, _ := filepath.Abs(baseImagePath)
 	absNew, _ := filepath.Abs(newDiskPath)
 
-	// remoteHostIP, remoteHostUser, remoteHostKey will be resolved AFTER phase 1
-	// (scheduling has already written instance.HostID to the DB by then).
+	var remoteHostIP string
+	if instance.HostID != "" {
+		if host, err := s.hostService.GetHost(instance.HostID); err == nil && host != nil {
+			remoteHostIP = host.IP
+			log.Printf("[VM] Targeted for remote host %s (IP: %s)", instance.HostID, remoteHostIP)
+		}
+	}
 
 	// ── Step 1: Clone base disk ───────────────────────────────────────────────
 	s.publishProgress(instance.ID, StageCloningDisk, "Cloning base image to new instance disk...")
@@ -172,10 +176,55 @@ func (s *InstanceService) createVMAsync(
 	}
 
 
-	// Note: Template check (whether to use overlay or bake) is done AFTER phase 1
-	// in the consolidated host-resolve block just before CreateAndStartVM.
-	// This ensures instance.HostID is set by the scheduler.
+	// ── Step 1.6: Bake Standalone Image ──────────────────────────────────────
+	backingTemplate := ""
+	if remoteHostIP != "" {
+		// Check if the host has the template and we can skip baking
+		useTemplate := false
+		if profile != "gamelift" {
+			if host, err := s.hostService.GetHost(instance.HostID); err == nil && host != nil {
+				for _, t := range host.AvailableTemplates {
+					if t == instance.Image {
+						useTemplate = true
+						backingTemplate = instance.Image
+						break
+					}
+				}
+			}
+		}
 
+		if useTemplate {
+			log.Printf("[VM] Host %s has template %s. Skipping standalone bake step.", instance.HostID, instance.Image)
+		} else {
+			s.publishProgress(instance.ID, StageCloningDisk, "Baking standalone image for remote host transfer...")
+			bakedDisk := absNew + ".baked"
+			
+			var lastConvertErr error
+			var output []byte
+			
+			// Retry loop to handle slow filesystem lock releases from Step 1.5
+			for i := 0; i < 99; i++ {
+				convertCmd := exec.Command("qemu-img", "convert", "-U", "-O", "qcow2", absNew, bakedDisk)
+				output, lastConvertErr = convertCmd.CombinedOutput()
+				if lastConvertErr == nil {
+					break
+				}
+				
+				log.Printf("[VM] Bake attempt %d failed for %s, retrying in 1s... Error: %v", i+1, instance.VMName, lastConvertErr)
+				time.Sleep(1 * time.Second)
+			}
+
+			if lastConvertErr != nil {
+				log.Printf("[VM] Failed to bake disk for %s after retries: %v\nOutput: %s", instance.VMName, lastConvertErr, string(output))
+				s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to bake disk: %v", lastConvertErr))
+				s.markTerminatedAndReleaseNetwork(instance, absNew)
+				return
+			}
+			// Replace original with baked standalone disk
+			exec.Command("mv", bakedDisk, absNew).Run()
+			log.Printf("[VM] Standalone baked disk ready for transfer: %s", absNew)
+		}
+	}
 	log.Printf("-------------------end of phase one-----")
 
 	// ── Step 2: Validate libvirt is available ─────────────────────────────────
@@ -186,10 +235,20 @@ func (s *InstanceService) createVMAsync(
 	}
 // // ── Step 1.75: Generate SSH key pair for instance ─────────────────────────
 // keyPair, err := GenerateSSHKeyPair()
- 
+
+
+
+// if err != nil {
+//     log.Printf("[VM] Failed to generate SSH key pair for %s: %v", instance.VMName, err)
+//     s.publishProgress(instance.ID, StageFailed, "Failed to generate SSH keys")
+//     s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+//     return
+// }
 
 
  
+
+	log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
 
 	// ── Step 3: Create and start VM with pre-allocated static IP ─────────────
 	// privateIP and gateway are passed into CreateAndStartVM which writes them
@@ -215,156 +274,24 @@ log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName
 
 
 
-	// ── Resolve host details (done here so HostID is set after scheduling) ────
-var remoteHostIP, remoteHostUser, remoteHostKey string
-var backingTemplate string
-
-log.Printf("[VM] Starting remote host resolution for instance=%s hostID=%s image=%s",
-	instance.ID,
-	instance.HostID,
-	instance.Image,
-)
-
-if instance.HostID != "" {
-	log.Printf("[VM] Looking up host record for hostID=%s", instance.HostID)
-
-	h, err := s.hostService.GetHost(instance.HostID)
-	if err != nil {
-		log.Printf("[VM] [ERROR] Failed to lookup host %s: %v",
-			instance.HostID,
-			err,
-		)
-	} else if h == nil {
-		log.Printf("[VM] [WARN] Host lookup returned nil for hostID=%s",
-			instance.HostID,
-		)
-	} else {
-
-		log.Printf("[VM] Host record found:")
-		log.Printf("[VM]   HostID=%s", h.ID)
-		log.Printf("[VM]   IP=%s", h.IP)
-		log.Printf("[VM]   SSHUser=%s", h.SSHUser)
-		log.Printf("[VM]   AvailableTemplates=%v", h.AvailableTemplates)
-
-		remoteHostIP = h.IP
-		remoteHostUser = h.SSHUser
-		remoteHostKey = h.SSHPrivateKey
-
-		if remoteHostIP == "" {
-			log.Printf("[VM] [WARN] Host IP is empty")
-		}
-
-		if remoteHostUser == "" {
-			log.Printf("[VM] [WARN] SSH user is empty")
-		}
-
-		if remoteHostKey != "" {
-			log.Printf("[VM] SSH private key found for host=%s", instance.HostID)
-		} else {
-			log.Printf("[VM] [WARN] No SSH private key found for host=%s", instance.HostID)
-		}
-
-		log.Printf("[VM] Checking template availability on host=%s for image=%s",
-			instance.HostID,
-			instance.Image,
-		)
-
-		foundTemplate := false
-
-		for _, t := range h.AvailableTemplates {
-			log.Printf("[VM] Comparing host template=%s against requested image=%s",
-				t,
-				instance.Image,
-			)
-
-			if t == instance.Image {
-				backingTemplate = instance.Image
-				foundTemplate = true
-
-				log.Printf("[VM] Template match found")
-				log.Printf("[VM] Using backing template=%s", backingTemplate)
-				log.Printf("[VM] Overlay-only transfer enabled")
-				break
+	var remoteHostUser string
+	var remoteHostKey string
+	if instance.HostID != "" {
+		h, _ := s.hostService.GetHost(instance.HostID)
+		if h != nil {
+			remoteHostUser = h.SSHUser
+			remoteHostKey = h.SSHPrivateKey
+			if remoteHostKey != "" {
+				log.Printf("[VM] Using SSH private key from host record for %s", instance.HostID)
+			} else {
+				log.Printf("[VM] [WARN] No SSH private key found in host record for %s", instance.HostID)
 			}
-		}
-
-		if !foundTemplate {
-			log.Printf("[VM] No matching template found on host=%s",
-				instance.HostID,
-			)
-			log.Printf("[VM] Full image transfer will be required")
+		} else {
+			log.Printf("[VM] [WARN] Host record not found for %s", instance.HostID)
 		}
 	}
-} else {
-	log.Printf("[VM] [WARN] Instance has no HostID assigned")
-}
-
-log.Printf("[VM] Remote host resolution completed")
-log.Printf("[VM] Final remote config:")
-log.Printf("[VM]   remoteHostIP=%s", remoteHostIP)
-log.Printf("[VM]   remoteHostUser=%s", remoteHostUser)
-
-if backingTemplate != "" {
-	log.Printf("[VM]   backingTemplate=%s", backingTemplate)
-} else {
-	log.Printf("[VM]   backingTemplate=<none>")
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	if remoteHostUser == "" {
 		remoteHostUser = "x6617274696" // Global fallback
-	}
-
-	// If Agent has no template, bake a full standalone image before transfer.
-	if remoteHostIP != "" && backingTemplate == "" {
-		log.Printf("[VM] Host has no template for %s — baking standalone image for transfer", instance.Image)
-		s.publishProgress(instance.ID, StageCloningDisk, "Baking standalone image for remote host transfer...")
-		bakedDisk := absNew + ".baked"
-
-		var lastConvertErr error
-		var bakeOut []byte
-		for i := 0; i < 99; i++ {
-			convertCmd := exec.Command("qemu-img", "convert", "-U", "-O", "qcow2", absNew, bakedDisk)
-			bakeOut, lastConvertErr = convertCmd.CombinedOutput()
-			if lastConvertErr == nil {
-				break
-			}
-			log.Printf("[VM] Bake attempt %d failed for %s, retrying... Error: %v", i+1, instance.VMName, lastConvertErr)
-			time.Sleep(1 * time.Second)
-		}
-		if lastConvertErr != nil {
-			log.Printf("[VM] Failed to bake disk for %s: %v\nOutput: %s", instance.VMName, lastConvertErr, string(bakeOut))
-			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to bake disk: %v", lastConvertErr))
-			s.markTerminatedAndReleaseNetwork(instance, absNew)
-			return
-		}
-		exec.Command("mv", bakedDisk, absNew).Run()
-		log.Printf("[VM] Standalone baked disk ready for transfer: %s", absNew)
 	}
 
 	vmID, err := s.libvirtClient.CreateAndStartVM(

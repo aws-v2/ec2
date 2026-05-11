@@ -125,10 +125,12 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	}
  
 	// Step 3: Persist the record and launch VM creation asynchronously
-	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, hostID)
+	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken)
 	if err != nil {
 		return nil, err
 	}
+	instance.HostID = hostID
+	_ = s.repo.Update(instance)
 
 	return instance, nil
 }

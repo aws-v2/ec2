@@ -12,11 +12,17 @@ type HostService struct {
 	repo domain.Repository
 	mu   sync.Mutex
 	lastSelectionOffset int
+	 ec2PublicKey string // loaded from env/config at startup
+}// domain/host.go (add alongside HeartbeatRequest)
+
+type HeartbeatResponse struct {
+    EC2PublicKey string `json:"ec2_public_key"`
 }
 
-func NewHostService(repo domain.Repository) *HostService {
+func NewHostService(repo domain.Repository, ec2PublicKey string) *HostService {
 	return &HostService{
 		repo: repo,
+		ec2PublicKey: ec2PublicKey,
 	}
 }
 
@@ -24,34 +30,38 @@ func (s *HostService) GetHost(id string) (*domain.Host, error) {
 	return s.repo.GetByID(id)
 }
 
-func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) error {
-	// Extract SSH username from MAC:User:Hostname format
-	// MAC address has 6 parts (0-5), User is the 7th part (index 6)
-	sshUser := "x6617274696" // Default fallback
-	parts := strings.Split(req.Hostname, ":")
-	if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
-		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
-		sshUser = parts[6]
-	} 
+func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatResponse, error) {
+    sshUser := req.SSHUser
+    parts := strings.Split(req.Hostname, ":")
+    if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
+        log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
+        sshUser = parts[6]
+    }
 
+    host := &domain.Host{
+        ID:                 req.HostID,
+        Hostname:           req.Hostname,
+        IP:                 req.IP,
+        SSHUser:            sshUser,
+        CPUTotal:           req.CPUTotal,
+        CPUUsed:            req.CPUUsed,
+        RAMTotal:           req.RAMTotal,
+        RAMFree:            req.RAMFree,
+        DiskTotal:          req.DiskTotal,
+        DiskFree:           req.DiskFree,
+        AvailableTemplates: req.AvailableTemplates,
+        SSHPrivateKey:      req.SSHPrivateKey,
+        Status:             "active",
+        LastHeartbeat:      time.Now(),
+    }
 
-	host := &domain.Host{
-		ID:            req.HostID,
-		Hostname:      req.Hostname,
-		IP:            req.IP,
-		SSHUser:       sshUser,
-		CPUTotal:      req.CPUTotal,
-		CPUUsed:       req.CPUUsed,
-		RAMTotal:      req.RAMTotal,
-		RAMFree:       req.RAMFree,
-		DiskTotal:     req.DiskTotal,
-		DiskFree:      req.DiskFree,
-		AvailableTemplates: req.AvailableTemplates,
-		SSHPrivateKey: req.SSHPrivateKey,
-		Status:        "active",
-		LastHeartbeat: time.Now(),
-	}
-	return s.repo.Update(host)
+    if err := s.repo.Update(host); err != nil {
+        return nil, err
+    }
+
+    return &HeartbeatResponse{
+        EC2PublicKey: s.ec2PublicKey,
+    }, nil
 }
 
 func (s *HostService) SelectBestHost() (*domain.Host, error) {

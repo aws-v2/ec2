@@ -34,6 +34,8 @@ type HeartbeatRequest struct {
 	DiskFree           int      `json:"disk_free"`
 	AvailableTemplates []string `json:"available_templates"`
 	SSHPrivateKey      string   `json:"ssh_private_key"`
+	SSHUser       string    `json:"ssh_user"`
+
 }
 
 type Repository interface {

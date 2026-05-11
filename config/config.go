@@ -30,6 +30,7 @@ type Config struct {
 
 	AgentUrl string
 	MigrationsDir string 
+	PublicKey string
 }
 
 type LibvirtConfig struct {
@@ -74,6 +75,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		PublicKey:"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv07bsjDV3S5MlLxBnUd3WXngPu1Y0mByESqH58XvHI ec2-service",
 		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
 		MigrationsDir :getEnv("MIGRATIONS_PATH", "./migrations"),
 		DB: DBConfig{
