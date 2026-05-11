@@ -28,6 +28,7 @@ type InstanceService struct {
 	minioAdapter  *storage.MinIOAdapter
 	vpcService    *vpcpkg.Service   // ← replaces publisher
 	hostService   *HostService
+	    ec2PrivateKey string
 }
 
 func NewInstanceService(
@@ -40,6 +41,7 @@ func NewInstanceService(
 	minioAdapter *storage.MinIOAdapter,
 	vpcService *vpcpkg.Service,
 	hostService *HostService,
+	ec2PrivateKey string,
 ) *InstanceService {
 	s := &InstanceService{
 		repo:          repo,
@@ -51,6 +53,7 @@ func NewInstanceService(
 		minioAdapter:  minioAdapter,
 		vpcService:    vpcService,
 		hostService:   hostService,
+		ec2PrivateKey: ec2PrivateKey,
 	}
 
 	return s

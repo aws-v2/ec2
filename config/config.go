@@ -31,6 +31,7 @@ type Config struct {
 	AgentUrl string
 	MigrationsDir string 
 	PublicKey string
+	PrivateKey string
 }
 
 type LibvirtConfig struct {
@@ -70,12 +71,25 @@ type MinIOConfig struct {
 	SecretKey string
 	UseSSL    bool
 }
+func LoadKeyPair() []string {
+	return []string{
+		`-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACCb9O27Iw1d0uTJS8QZ1Hd1l54D7tWNJgchEqh+fF7xyAAAAJA1N0zJNTdM
+yQAAAAtzc2gtZWQyNTUxOQAAACCb9O27Iw1d0uTJS8QZ1Hd1l54D7tWNJgchEqh+fF7xyA
+AAAED5fX1U0S1jTMBuVxVvMzWrRERHpS6qEcTQafq8+9Mga5v07bsjDV3S5MlLxBnUd3WX
+ngPu1Y0mByESqH58XvHIAAAAC2VjMi1zZXJ2aWNlAQI=
+-----END OPENSSH PRIVATE KEY-----`,
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv07bsjDV3S5MlLxBnUd3WXngPu1Y0mByESqH58XvHI ec2-service",
+	}
 
+}
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		PublicKey:"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv07bsjDV3S5MlLxBnUd3WXngPu1Y0mByESqH58XvHI ec2-service",
+		PrivateKey:LoadKeyPair()[0],
+		PublicKey:LoadKeyPair()[1],
 		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
 		MigrationsDir :getEnv("MIGRATIONS_PATH", "./migrations"),
 		DB: DBConfig{

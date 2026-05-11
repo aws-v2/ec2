@@ -157,7 +157,7 @@ func main() {
 	if err := systemKeyService.EnsureKeys(); err != nil {
 		slog.Warn("Failed to ensure system keys", "error", err)
 	}
-	systemPubKey, _ := systemKeyService.GetPublicKeyString()
+	// systemPubKey, _ := systemKeyService.GetPublicKeyString()
 
 	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
 	vpcRepo := repository.NewVPCRepository(db)
@@ -177,7 +177,7 @@ func main() {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
 
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService)
+	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)

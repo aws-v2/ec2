@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
-	"os"
+	// "os"
 	"strings"
 
 	"fmt"
@@ -271,47 +271,64 @@ combinedKeys := strings.Join(keys, "\n")
 log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
 
 
+var remoteHostUser string
+if instance.HostID != "" {
+    if h, err := s.hostService.GetHost(instance.HostID); err == nil && h != nil {
+        remoteHostUser = h.SSHUser
+    }
+}
+if remoteHostUser == "" {
+    remoteHostUser = "root"
+}
 
 
+	// var remoteHostUser string
+	// var remoteHostKey string
+	// if instance.HostID != "" {
+	// 	h, _ := s.hostService.GetHost(instance.HostID)
+	// 	if h != nil {
+	// 		remoteHostUser = h.SSHUser
+	// 		remoteHostKey = h.SSHPrivateKey
+	// 		if remoteHostKey != "" {
+	// 			log.Printf("[VM] Using SSH private key from host record for %s", instance.HostID)
+	// 		} else {
+	// 			log.Printf("[VM] [WARN] No SSH private key found in host record for %s", instance.HostID)
+	// 		}
+	// 	} else {
+	// 		log.Printf("[VM] [WARN] Host record not found for %s", instance.HostID)
+	// 	}
+	// }
+	// if remoteHostUser == "" {
+	// 	remoteHostUser = "x6617274696" // Global fallback
+	// }
 
-	var remoteHostUser string
-	var remoteHostKey string
-	if instance.HostID != "" {
-		h, _ := s.hostService.GetHost(instance.HostID)
-		if h != nil {
-			remoteHostUser = h.SSHUser
-			remoteHostKey = h.SSHPrivateKey
-			if remoteHostKey != "" {
-				log.Printf("[VM] Using SSH private key from host record for %s", instance.HostID)
-			} else {
-				log.Printf("[VM] [WARN] No SSH private key found in host record for %s", instance.HostID)
-			}
-		} else {
-			log.Printf("[VM] [WARN] Host record not found for %s", instance.HostID)
-		}
-	}
-	if remoteHostUser == "" {
-		remoteHostUser = "x6617274696" // Global fallback
-	}
+	// vmID, err := s.libvirtClient.CreateAndStartVM(
+	// 	remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName,
+	// 	privateIP, gateway, instanceToken, profile, manifest.Parameters, backingTemplate,
+	// )
 
 	vmID, err := s.libvirtClient.CreateAndStartVM(
-		remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName,
-		privateIP, gateway, instanceToken, profile, manifest.Parameters, backingTemplate,
-	)
+    remoteHostIP, remoteHostUser, s.ec2PrivateKey, // ← ec2 key here
+    instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName,
+    privateIP, gateway, instanceToken, profile, manifest.Parameters, backingTemplate,
+)
+
+
+
 	if err != nil {
 		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
 		if remoteHostIP != "" {
 			args := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
-			if remoteHostKey != "" {
-				f, err := os.CreateTemp("", "id_rsa_cleanup_*")
-				if err == nil {
-					f.WriteString(remoteHostKey)
-					f.Close()
-					os.Chmod(f.Name(), 0600)
-					args = append(args, "-i", f.Name())
-					defer os.Remove(f.Name())
-				}
-			}
+			// if remoteHostKey != "" {
+			// 	f, err := os.CreateTemp("", "id_rsa_cleanup_*")
+			// 	if err == nil {
+			// 		f.WriteString(remoteHostKey)
+			// 		f.Close()
+			// 		os.Chmod(f.Name(), 0600)
+			// 		args = append(args, "-i", f.Name())
+			// 		defer os.Remove(f.Name())
+			// 	}
+			// }
 			exec.Command("ssh", append(args, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", absNew)...).Run()
 		} else {
 			exec.Command("rm", "-f", newDiskPath).Run()
@@ -329,7 +346,7 @@ log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName
 
 	if err := s.repo.Update(instance); err != nil {
 		log.Printf("[VM] Failed to update instance %s in DB: %v", instance.ID, err)
-		s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName)
+		s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, s.ec2PrivateKey, instance.VMName)
 		if remoteHostIP != "" {
 			// Effort-only cleanup
 			exec.Command("ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "rm", "-f", newDiskPath).Run()
