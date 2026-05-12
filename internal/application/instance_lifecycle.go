@@ -448,4 +448,40 @@ func (s *InstanceService) createVMAsync(
 		instance.ID,
 		remoteHostIP,
 	)
+
+
+
+
+
+
+
+
+
+	log.Printf(
+		"---------------------------------",
+	)
+
+// s.sseBroker.Push(instance.ID, string(payload))
+
+
+// after VM starts — that's it, EC2's job is done
+
+
+
+// ---------------------------------------------------
+// STEP 7 — PUBLISH VM READY EVENT
+// ---------------------------------------------------
+
+
+
+
+
+
+
+agentWS := fmt.Sprintf("ws://%s:%d", remoteHostIP, s.agentPort)
+
+if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
+    log.Printf("[VM] failed to publish provisioned event: %v", err)
+}
+
 }

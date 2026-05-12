@@ -19,7 +19,7 @@ const (
 
 // Publisher defines the interface for publishing lifecycle events.
 type Publisher interface {
-	PublishInstanceEvent(eventType string, instance *domain.Instance) error
+	PublishInstanceEvent(eventType string, instance *domain.Instance, agentWS string, sessionID string) error
 	GetDefaultVPC(tenantID string) (string, string, error)
 	ValidateVPC(tenantID, vpcID string) (bool, error)
 	AttachResource(tenantID, instanceID, vpcID string) (string, error)
@@ -88,7 +88,7 @@ func (p *NATSPublisher) Close() {
 // FIX 2: Retry with backoff instead of a single fire-and-forget Publish call.
 //
 //	A single failed publish silently dropped the registration event.
-func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance) error {
+func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance, agentWS string, sessionID string) error {
 	if p == nil || p.nc == nil {
 		return fmt.Errorf("NATS publisher or connection not initialized")
 	}
@@ -113,10 +113,14 @@ func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.
 		InstanceID:    instance.ID,
 		EventType:     eventType,
 		Timestamp:     time.Now().Format(time.RFC3339),
+		SessionID:sessionID,
+
 		Payload: domain.InstanceLifecyclePayload{
 			IPAddress:   instance.IP, // ← was empty before when DHCP hadn't resolved yet
 			VPCID:       instance.VPCID,
 			ServicePort: 22,
+
+			AgentWS: agentWS,
 			Metadata: domain.InstanceMetadata{
 				InstanceType: "t3.medium",
 				AMIID:        instance.Image,

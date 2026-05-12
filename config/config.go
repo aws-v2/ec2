@@ -32,6 +32,7 @@ type Config struct {
 	MigrationsDir string 
 	PublicKey string
 	PrivateKey string
+	AgentPort int
 }
 
 type LibvirtConfig struct {
@@ -88,6 +89,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		AgentPort: getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:LoadKeyPair()[0],
 		PublicKey:LoadKeyPair()[1],
 		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),

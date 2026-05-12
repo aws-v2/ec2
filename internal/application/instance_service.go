@@ -33,6 +33,7 @@ type InstanceService struct {
 	ec2PrivateKey string
 	//  agentClient *vpcpkg.AgentClient
 	   httpClient *http.Client
+	   agentPort int
 
 }
 
@@ -47,7 +48,7 @@ func NewInstanceService(
 	vpcService *vpcpkg.Service,
 	hostService *HostService,
 	ec2PrivateKey string,
-	// agentClient *vpcpkg.AgentClient,
+	agentPort int,
 ) *InstanceService {
 
 	return &InstanceService{
@@ -61,10 +62,12 @@ func NewInstanceService(
 		vpcService:    vpcService,
 		hostService:   hostService,
 		ec2PrivateKey: ec2PrivateKey,
-		// agentClient:   agentClient, // ✅ FIX HERE
 		 httpClient: &http.Client{
             Timeout: 10 * time.Second,
+			
         },
+		agentPort: agentPort,
+
 	}
 }
 
@@ -196,7 +199,7 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStopped, instance)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStopped, instance, "","")
 	}
 
 	return nil
@@ -261,7 +264,7 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 	// Publish INSTANCE_STARTED event
 	if s.publisher != nil {
 		instance.Status = domain.StatusRunning
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "","")
 	}
 
 	return nil

@@ -67,6 +67,10 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 	dto.SendSuccess(c, http.StatusOK, "Instance retrieved successfully", instance)
 }
 
+
+ 
+
+
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
     userID := c.GetString("userID")
     if userID == "" {
