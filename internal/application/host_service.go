@@ -13,7 +13,7 @@ type HostService struct {
 	mu   sync.Mutex
 	lastSelectionOffset int
 	 ec2PublicKey string // loaded from env/config at startup
-}// domain/host.go (add alongside HeartbeatRequest)
+}
 
 type HeartbeatResponse struct {
     EC2PublicKey string `json:"ec2_public_key"`

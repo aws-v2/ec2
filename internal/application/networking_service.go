@@ -8,9 +8,9 @@ import (
 	"time"
 
 	domain "ec2-api/internal/domain/instance"
-	interfaces "ec2-api/internal/interfaces"
+	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
-	libvirt  "ec2-api/internal/infra/libvirt"
+	interfaces "ec2-api/internal/interfaces"
 	vpcpkg "ec2-api/internal/vpcpkg"
 )
 
@@ -291,16 +291,12 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		remoteHostKey,
 		instance.VMName,
 		diskPath,
+		gateway,
 		instance.CPU,
 		instance.RAM,
 		combinedKeys,
 		bridgeName,
 		privateIP,
-		gateway,
-		"",  // no metrics token needed for VPC migration
-		"",  // no profile for VPC migration
-		nil, // no parameters for VPC migration
-		"",  // no backing template for VPC-hop
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
