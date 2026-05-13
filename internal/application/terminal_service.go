@@ -224,6 +224,9 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 )
 
 
+
+
+
 	if err != nil {
 		return nil, fmt.Errorf("dial agent %s: %w", agentWS, err)
 	}
