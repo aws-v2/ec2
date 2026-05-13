@@ -22,6 +22,7 @@ import (
 
 type InstanceService struct {
 	repo          interfaces.InstanceRepository
+	hostRepo          interfaces.HostRepository
 	sgService     interfaces.SecurityGroupService
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
@@ -39,6 +40,7 @@ type InstanceService struct {
 
 func NewInstanceService(
 	repo interfaces.InstanceRepository,
+	hostRepo interfaces.HostRepository,
 	sgService interfaces.SecurityGroupService,
 	libvirt *libvirt.LibvirtClient,
 	systemPubKey string,
@@ -53,6 +55,7 @@ func NewInstanceService(
 
 	return &InstanceService{
 		repo:          repo,
+		hostRepo:  hostRepo, 
 		sgService:     sgService,
 		libvirtClient: libvirt,
 		systemPubKey:  systemPubKey,
@@ -155,7 +158,11 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
  
 
 
+// type InsatanceDetailsResponse struct{
+// 	Instance domain.Instance `json:"instance"`
+// 	HostIP string `json:"host_ip"`
 
+// }
 
 func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, error) {
 	instance, err := s.repo.FindByID(id)
@@ -165,6 +172,11 @@ func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, erro
 	if instance.UserID != userID && userID != "" {
 		return nil, dto.ErrInstanceNotFound // or forbidden
 	}
+	host,err := s.hostRepo.GetByID(instance.HostID)
+	if err != nil {
+		return nil, err
+	}
+	instance.HostID =host.IP
 	return instance, nil
 }
 

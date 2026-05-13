@@ -141,8 +141,9 @@ func main() {
 	var templateRepo interfaces.TemplateRepository
 	var fleetRepo interfaces.FleetRepository
 	var hostRepo interfaces.HostRepository
+	hostRepo = repository.NewHostRepository(db.DB)
 
-	instanceRepo = repository.NewInstanceRepository(db,cfg)
+	instanceRepo = repository.NewInstanceRepository(db,cfg, hostRepo)
 	volumeRepo = repository.NewVolumeRepository(db)
 	snapshotRepo = repository.NewSnapshotRepository(db)
 	sshKeyRepo = repository.NewSSHKeyRepository(db)
@@ -150,7 +151,6 @@ func main() {
 	sgRepo = repository.NewSecurityGroupRepository(db)
 	templateRepo = repository.NewTemplateRepository(db)
 	fleetRepo = repository.NewFleetRepository(db)
-	hostRepo = repository.NewHostRepository(db.DB)
 
 	// Initialize System Key Service
 	systemKeyService := application.NewSystemKeyService(imagesDir) // Store keys near images
@@ -176,7 +176,7 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort)
+	instanceService := application.NewInstanceService(instanceRepo,hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
