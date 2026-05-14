@@ -10,6 +10,7 @@ import (
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
 	"ec2-api/internal/vpcpkg"
+	"errors"
 	"net/http"
 
 	"fmt"
@@ -112,7 +113,7 @@ type SSHKeyPair struct {
 	PrivateKeyPEM string // stored in DB → fed to agent at terminal time
 	PublicKeyAuth string // "ssh-ed25519 AAAA..." → fed to cloud-init authorized_keys
 }
-
+var ErrNoActiveHosts = errors.New("no active hosts found")
 
 // CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
@@ -146,7 +147,9 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		hostID = bestHost.ID
 		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
 	} else {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
+		return nil, ErrNoActiveHosts
 	}
 
 
