@@ -65,7 +65,8 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 		LIMIT $2
 	`
 	// Assume heartbeats within last 5 minutes are active
-	threshold := time.Now().Add(-5 * time.Minute)
+	// threshold := time.Now().Add(-5 * time.Minute)
+		threshold := time.Now().Add(-12 * time.Hour)
 	rows, err := r.db.Query(query, threshold, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query best hosts: %w", err)

@@ -89,10 +89,14 @@ func (p *NATSPublisher) Close() {
 //
 //	A single failed publish silently dropped the registration event.
 func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance, agentWS string, sessionID string) error {
+	fmt.Printf("---------------------------------------")
+	
 	if p == nil || p.nc == nil {
-		return fmt.Errorf("NATS publisher or connection not initialized")
-	}
 
+		
+	return fmt.Errorf("NATS publisher or connection not initialized")
+	}
+ 
 	// ── FIX 1: Guard — never send INSTANCE_STARTED with an empty IP ──────────
 	// Root cause: VM hadn't received an IP yet when the event was published,
 	// so the network service received IPAddress="" and rejected with ErrInvalidPayload.

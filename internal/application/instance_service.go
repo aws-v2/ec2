@@ -120,18 +120,25 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		return nil, err
 	}
  
 	// Step 2: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		
 		return nil, err
+
 	}
 
 	// Step 2.5: Select best host
 	bestHost, err := s.hostService.SelectBestHost()
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 	}
 	hostID := ""
@@ -148,6 +155,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 3: Persist the record and launch VM creation asynchronously
 	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken,bestHost)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
 		return nil, err
 	}
 	instance.HostID = hostID
@@ -211,7 +219,7 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStopped, instance, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "","")
 	}
 
 	return nil

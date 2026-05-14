@@ -44,6 +44,7 @@ const (
 	EventInstanceStopped = "INSTANCE_STOPPED"
 	EventHealthUpdate    = "HEALTH_UPDATE"
 	EventProvisioningProgress = "PROVISIONING_PROGRESS"
+	EventInstanceError = "INSTANCE_ERROR"
 	 EventInstanceProvisioned = "INSTANCE_PROVISIONED"
 )
 

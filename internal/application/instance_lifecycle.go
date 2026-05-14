@@ -119,6 +119,8 @@ func (s *InstanceService) persistAndLaunch(
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
@@ -156,12 +158,16 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[NETWORK] marshal error: %v", err)
 		return false, err
 	}
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[NETWORK] request build error: %v", err)
 		return false, err
 	}
@@ -170,6 +176,8 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[NETWORK] agent call failed (ignored): %v", err)
 		return false, nil // 👈 IMPORTANT: do NOT fail pipeline
 	}
@@ -320,6 +328,8 @@ func (s *InstanceService) createVMAsync(
 	err := s.buildOverlay(instance.ID, absBase, absOverlay)
 	if err != nil {
 		log.Printf("[VM] overlay creation failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
@@ -355,6 +365,8 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] cloud-init creation failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
@@ -376,7 +388,9 @@ func (s *InstanceService) createVMAsync(
 	)
 
 	if err != nil {
-		log.Printf("[VM] overlay transfer failed: %v", err)
+		log.Printf("[VM] overlay transfer failed*: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
@@ -397,6 +411,8 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] iso transfer failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
@@ -427,6 +443,8 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] failed to start vm: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
@@ -439,6 +457,8 @@ func (s *InstanceService) createVMAsync(
 	instance.ProxmoxID = vmID
 
 	if err := s.repo.Update(instance); err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[VM] failed to update instance: %v", err)
 		return
 	}
