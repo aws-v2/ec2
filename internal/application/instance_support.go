@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -57,12 +58,11 @@ func min(a, b int) int {
 	return b
 }
  
-func (s *InstanceService) publishProgress(instanceID, stage, message string) {
-	if s.publisher != nil {
-		_ = s.publisher.PublishProvisioningProgress(instanceID, stage, message)
-	}
+func (s *InstanceService) publishProgress(instanceID, stage, message string, payload ...any) {
+    if s.publisher != nil {
+        _ = s.publisher.PublishProvisioningProgress(instanceID, stage, message, payload...)
+    }
 }
-
 
 
 
@@ -77,8 +77,8 @@ func (s *InstanceService) markTerminatedAndReleaseNetwork(instance *domain.Insta
 		exec.Command("rm", "-f", diskPath).Run()
 	}
 	// Release the IP back to the subnet pool
-	if s.publisher != nil && instance.VPCID != "" {
-		if err := s.publisher.ReleaseInstanceNetwork(instance.UserID, instance.ID, instance.VPCID); err != nil {
+	if s.vpcService != nil && instance.ID != "" {
+		if err := s.vpcService.ReleaseInstanceNetwork(context.Background(), instance.ID); err != nil {
 			log.Printf("[NETWORK] [WARN] Failed to release network for terminated instance %s: %v", instance.ID, err)
 		}
 	}

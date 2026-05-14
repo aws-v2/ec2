@@ -1,10 +1,9 @@
 package transport
 
 import (
-	"net/http"
+	"net/http" 
 
 	"ec2-api/internal/application"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -46,6 +45,8 @@ func (h *FleetHandler) GetOverview(c *gin.Context) {
 		"data":   overview,
 	})
 }
+
+ 
 
 func (h *FleetHandler) GetEvents(c *gin.Context) {
 	userID := c.GetString("userID")

@@ -1,8 +1,15 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/instance"
+	"encoding/json"
+	"net/http"
+	"os"
+
+	// "os"
 	"strings"
 
 	"fmt"
@@ -20,7 +27,7 @@ import (
 func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID string) (
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken string, err error,
 ) {
-	
+
 	baseImageName, ok := imageMap[req.Image]
 	if !ok {
 		available := make([]string, 0, len(imageMap))
@@ -55,26 +62,25 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 	vpcID, privateIP, gateway, bridgeName string, err error,
 ) {
 	log.Printf("[NETWORK] Preparing network for instance %s", instanceID)
- 
+
 	// Get or create the default VPC for this user
 	defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
 	}
 	log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", defaultVPC.ID, defaultVPC.BridgeName, instanceID)
- 
+
 	// Allocate an IP within that VPC
 	network, err := s.vpcService.AllocateInstanceNetwork(ctx, userID, instanceID, defaultVPC.ID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
 	}
- 
+
 	log.Printf("[NETWORK] [OK] Network ready for instance %s — IP: %s, gateway: %s, bridge: %s",
 		instanceID, network.PrivateIP, network.Gateway, network.BridgeName)
- 
+
 	return network.VPCID, network.PrivateIP, network.Gateway, network.BridgeName, nil
 }
- 
 
 // persistAndLaunch generates the SSH key pair, writes the instance record to
 // the DB with the pre-allocated IP, then fires off async VM creation.
@@ -82,7 +88,7 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 func (s *InstanceService) persistAndLaunch(
 	req *domain.CreateInstanceRequest,
 	userID, instanceID, vmName, newDiskPath, baseImagePath,
-	bridgeName, privateIP, gateway, vpcID, instanceToken string,
+	bridgeName, privateIP, gateway, vpcID, instanceToken string,bestHost *host.Host,
 ) (*domain.Instance, error) {
 	keyPair, err := GenerateSSHKeyPair()
 	if err != nil {
@@ -107,21 +113,37 @@ func (s *InstanceService) persistAndLaunch(
 		VPCID:         vpcID,
 	}
 
-
-
-
-
-
 	if err := s.repo.Create(instance); err != nil {
-		if s.publisher != nil && privateIP != "" {
-			if releaseErr := s.publisher.ReleaseInstanceNetwork(userID, instanceID, vpcID); releaseErr != nil {
+		if s.vpcService != nil && privateIP != "" {
+			if releaseErr := s.vpcService.ReleaseInstanceNetwork(context.Background(), instanceID); releaseErr != nil {
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken,keyPair)
+	fmt.Println("**************sss***Network reconciled for instance***********%v", bestHost)
+
+ 
+
+_, _ = s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
+	VPCID:   vpcID,
+	Bridge:  host.BridgeConfig{
+		Name:bridgeName,
+		Gateway:gateway,
+		CIDR: "",
+	},
+	IP:      privateIP,
+	Gateway: gateway,
+})
+
+
+
+
+fmt.Println("*****************Network reconciled for instance***********", instanceID)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair)
 
 	// Return the full key so the caller can hand it back to the user once
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
@@ -130,139 +152,356 @@ func (s *InstanceService) persistAndLaunch(
 
 
 
+func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkReconcileRequest) (bool, error) {
+
+	url := fmt.Sprintf("http://%s:9030/reconcile/network", agentIP)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		log.Printf("[NETWORK] marshal error: %v", err)
+		return false, err
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		log.Printf("[NETWORK] request build error: %v", err)
+		return false, err
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		log.Printf("[NETWORK] agent call failed (ignored): %v", err)
+		return false, nil // 👈 IMPORTANT: do NOT fail pipeline
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		log.Printf("[NETWORK] agent returned %d (ignored)", resp.StatusCode)
+		return false, nil // 👈 still ignore
+	}
+
+	log.Printf("[NETWORK] reconciliation successful for %s", agentIP)
+	return true, nil
+}
+
+func (s *InstanceService) buildOverlay(
+	instanceID string,
+	baseImagePath string,
+	overlayPath string,
+) error {
+
+	log.Printf("[VM][%s] building overlay: base=%s overlay=%s",
+		instanceID, baseImagePath, overlayPath)
+
+	cmd := exec.Command(
+		"qemu-img", "create",
+		"-f", "qcow2",
+		"-F", "qcow2",
+		"-b", baseImagePath,
+		overlayPath,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(
+			"[overlay][%s] failed: %w output=%s",
+			instanceID, err, string(output),
+		)
+	}
+
+	return nil
+}
+
+
+
+
+
+func (s *InstanceService) transferOverlayToHost(
+	hostIP string,
+	hostUser string,
+	privateKey string,
+	localOverlayPath string,
+	remoteOverlayPath string,
+) error {
+
+	formattedKey := strings.ReplaceAll(privateKey, "\\n", "\n")
+	formattedKey = strings.TrimSpace(formattedKey) + "\n" // 👈 fix
+
+	keyFile, err := os.CreateTemp("", "id_rsa_*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(keyFile.Name())
+
+	if _, err := keyFile.Write([]byte(formattedKey)); err != nil {
+		return err
+	}
+
+	keyFile.Close()
+
+	if err := os.Chmod(keyFile.Name(), 0600); err != nil {
+		return err
+	}
+
+	fileInfo, err := os.Stat(localOverlayPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat overlay file: %w", err)
+	}
+	sizeMB := float64(fileInfo.Size()) / (1024 * 1024)
+	log.Printf("[transferOverlayToHost] transferring %s -> %s@%s:%s | size: %.2f MB (%d bytes)",
+		localOverlayPath, hostUser, hostIP, remoteOverlayPath, sizeMB, fileInfo.Size())
+
+	args := []string{
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "BatchMode=yes",
+		"-i", keyFile.Name(),
+		localOverlayPath,
+		fmt.Sprintf("%s@%s:%s", hostUser, hostIP, remoteOverlayPath),
+	}
+
+	cmd := exec.Command("scp", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("scp failed: %w output=%s", err, string(output))
+	}
+
+	return nil
+}
+
+
+
+
+
+
 func (s *InstanceService) createVMAsync(
 	instance *domain.Instance,
 	req *domain.CreateInstanceRequest,
-	baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken string,
+	baseImagePath,
+	newDiskPath,
+	bridgeName,
+	privateIP,
+	gateway,
+	instanceToken string,
 	keyPair *SSHKeyPair,
 ) {
-	profile := req.Profile
-	manifest := req.Manifest
-	arn := req.ARN
+	// ---------------------------------------------------
+	// Resolve host
+	// ---------------------------------------------------
 
-	absBase, _ := filepath.Abs(baseImagePath)
-	absNew, _ := filepath.Abs(newDiskPath)
+	var remoteHostIP string
+	var remoteHostUser string
 
-	// ── Step 1: Clone base disk ───────────────────────────────────────────────
-	s.publishProgress(instance.ID, StageCloningDisk, "Cloning base image to new instance disk...")
-	cmd := exec.Command("qemu-img", "create", "-f", "qcow2",
-		"-F", "qcow2", "-b", absBase, absNew)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("[VM] Failed to clone disk for %s: %v\nOutput: %s", instance.VMName, err, string(output))
-		s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to clone disk: %v", err))
-		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
-		return
-	}
-
-	// ── Step 1.5: Payload Injection (Pre-mounted disk modification) ──────────
-	// For gamelift, we still use host-side injection for legacy compatibility.
-	// For ai-worker, we now use SageMaker-like simulation where the VM handles its own preparation.
-	if profile == "gamelift" {
-		if err := s.injectPayloadIntoDisk(instance, profile, manifest, arn,absNew); err != nil {
-			log.Printf("[VM] [%s] Injection failed for9 %s: %v", profile, instance.VMName, err)
-			s.publishProgress(instance.ID, StageFailed, fmt.Sprintf("Failed to inject payload: %v", err))
-			s.markTerminatedAndReleaseNetwork(instance, absNew)
-			return
+	if instance.HostID != "" {
+		host, err := s.hostService.GetHost(instance.HostID)
+		if err == nil && host != nil {
+			remoteHostIP = host.IP
+			remoteHostUser = host.SSHUser
 		}
 	}
 
-
-	// ── Step 2: Validate libvirt is available ─────────────────────────────────
-	if s.libvirtClient == nil {
-		log.Printf("[VM] libvirt client not initialized for %s", instance.VMName)
-		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
-		return
+	if remoteHostUser == "" {
+		remoteHostUser = "root"
 	}
-// // ── Step 1.75: Generate SSH key pair for instance ─────────────────────────
-// keyPair, err := GenerateSSHKeyPair()
 
+	// ---------------------------------------------------
+	// Absolute paths
+	// ---------------------------------------------------
 
+	absBase, _ := filepath.Abs(baseImagePath)
+	absOverlay, _ := filepath.Abs(newDiskPath)
 
-// if err != nil {
-//     log.Printf("[VM] Failed to generate SSH key pair for %s: %v", instance.VMName, err)
-//     s.publishProgress(instance.ID, StageFailed, "Failed to generate SSH keys")
-//     s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
-//     return
-// }
+	// ---------------------------------------------------
+	// STEP 1 — BUILD OVERLAY
+	// ---------------------------------------------------
 
+	log.Printf("[VM] building overlay %s", absOverlay)
 
- 
-
-	log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
-
-	// ── Step 3: Create and start VM with pre-allocated static IP ─────────────
-	// privateIP and gateway are passed into CreateAndStartVM which writes them
-	// into the cloud-init network-config. The VM boots already knowing its IP.
-	// waitForVMIP is no longer needed since the IP is statically configured.
-	s.publishProgress(instance.ID, StageStartingVM, "Defining and starting the virtual machine...")
-	keys := []string{}
-for _, key := range []string{keyPair.PublicKeyAuth, s.systemPubKey} {
-    key = strings.TrimSpace(key)
-    key = strings.ReplaceAll(key, "\n", "")
-    key = strings.ReplaceAll(key, "\r", "")
-    if key != "" {
-        keys = append(keys, key)
-    }
-}
-
-// ✅ Build a newline-joined string — matches what createCloudInitISO expects
-combinedKeys := strings.Join(keys, "\n")
-
-log.Printf("[VM] Creating VM %s with static IP %s on bridge %s", instance.VMName, privateIP, bridgeName)
-
-
-
-
-
-vmID, err := s.libvirtClient.CreateAndStartVM(
-    instance.VMName, absNew, req.CPU, req.RAM, combinedKeys, bridgeName, // ✅ correct var
-    privateIP, gateway, instanceToken, profile, manifest.Parameters,
-)
+	err := s.buildOverlay(instance.ID, absBase, absOverlay)
 	if err != nil {
-		log.Printf("[VM] Failed to create VM %s: %v", instance.VMName, err)
-		exec.Command("rm", "-f", newDiskPath).Run()
-		s.markTerminatedAndReleaseNetwork(instance, "")
+		log.Printf("[VM] overlay creation failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
 
-	// ── Step 4: Persist running state ────────────────────────────────────────
-	// IP is already set on the instance from CreateInstance — just update
-	// status, public IP, and the libvirt VM ID.
+	// ---------------------------------------------------
+	// STEP 2 — BUILD CLOUD INIT ISO
+	// ---------------------------------------------------
+
+	keys := []string{}
+
+	for _, key := range []string{
+		keyPair.PublicKeyAuth,
+		s.systemPubKey,
+	} {
+		key = strings.TrimSpace(key)
+
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+
+	combinedKeys := strings.Join(keys, "\n")
+
+	isoPath, cleanupFn, err := s.libvirtClient.CreateCloudInitISO(
+		instance.VMName,
+		combinedKeys,
+		privateIP,
+		gateway,
+		instanceToken,
+		req.Profile,
+		req.Manifest.Parameters,
+	)
+
+	if err != nil {
+		log.Printf("[VM] cloud-init creation failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
+		return
+	}
+
+	defer cleanupFn()
+
+	log.Printf("[VM] cloud-init iso created %s", isoPath)
+
+	// ---------------------------------------------------
+	// STEP 3 — TRANSFER OVERLAY
+	// ---------------------------------------------------
+
+	err = s.transferOverlayToHost(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+		absOverlay,
+		absOverlay,
+	)
+
+	if err != nil {
+		log.Printf("[VM] overlay transfer failed*: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
+		return
+	}
+
+	log.Printf("[VM] overlay transferred")
+
+	// ---------------------------------------------------
+	// STEP 4 — TRANSFER CLOUD INIT ISO
+	// ---------------------------------------------------
+
+	err = s.transferOverlayToHost(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+		isoPath,
+		isoPath,
+	)
+
+	if err != nil {
+		log.Printf("[VM] iso transfer failed: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
+		return
+	}
+
+	log.Printf("[VM] iso transferred")
+
+	// ---------------------------------------------------
+	// STEP 5 — START VM
+	// ---------------------------------------------------
+
+	vmID, err := s.libvirtClient.CreateAndStartVM(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+
+		instance.VMName,
+
+		absOverlay,
+		isoPath,
+
+		req.CPU,
+		req.RAM,
+
+		bridgeName,
+		privateIP,
+		gateway,
+	)
+
+	if err != nil {
+		log.Printf("[VM] failed to start vm: %v", err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
+		return
+	}
+
+	// ---------------------------------------------------
+	// STEP 6 — UPDATE INSTANCE
+	// ---------------------------------------------------
+
 	instance.Status = domain.StatusRunning
-	instance.PublicIP = s.libvirtClient.GetPublicIP(vmID)
 	instance.ProxmoxID = vmID
 
 	if err := s.repo.Update(instance); err != nil {
-		log.Printf("[VM] Failed to update instance %s in DB: %v", instance.ID, err)
-		s.libvirtClient.DeleteVM(instance.VMName)
-		exec.Command("rm", "-f", newDiskPath).Run()
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
+		log.Printf("[VM] failed to update instance: %v", err)
 		return
 	}
 
-	// ── Step 5: Notify Network Service that instance is live ──────────────────
-	// The network service already allocated the IP and recorded the reservation.
-	// This event tells it the VM actually booted so it can start health monitoring.
-	if s.publisher != nil {
-		if err := s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance); err != nil {
-			log.Printf("[NATS] [WARN] Failed to publish INSTANCE_STARTED for %s: %v", instance.ID, err)
-		}
-	}
+	log.Printf(
+		"[VM] instance %s running on host %s",
+		instance.ID,
+		remoteHostIP,
+	)
 
-	// ── Step 6: Auto-assign default security group ────────────────────────────
-	go func() {
-		sg, err := s.sgService.GetSecurityGroupByName("default")
-		if err == nil {
-			if err := s.sgService.AssignToInstance(instance.ID, sg.ID); err != nil {
-				log.Printf("[SG] Failed to auto-assign default SG to %s: %v", instance.ID, err)
-			} else {
-				log.Printf("[SG] ✓ Auto-assigned 'default' security group to %s", instance.ID)
-			}
-		} else {
-			log.Printf("[SG] Could not find 'default' SG for auto-assignment: %v", err)
-		}
-	}()
 
-	s.publishProgress(instance.ID, StageProvisioned, "Instance is now running and reachable.")
-	log.Printf("✓ VM %s created successfully (ID: %s, IP: %s, bridge: %s)",
-		instance.VMName, instance.ID, privateIP, bridgeName)
+
+
+
+
+
+
+
+	log.Printf(
+		"---------------------------------",
+	)
+
+// s.sseBroker.Push(instance.ID, string(payload))
+
+
+// after VM starts — that's it, EC2's job is done
+
+
+
+// ---------------------------------------------------
+// STEP 7 — PUBLISH VM READY EVENT
+// ---------------------------------------------------
+
+
+
+
+
+
+
+agentWS := fmt.Sprintf("ws://%s:%d", remoteHostIP, s.agentPort)
+
+if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
+    log.Printf("[VM] failed to publish provisioned event: %v", err)
+}
+
 }

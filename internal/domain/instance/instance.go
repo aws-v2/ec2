@@ -20,6 +20,9 @@ type InstanceLifecycleEvent struct {
 	EventType     string                  `json:"event_type"`
 	Timestamp     string                  `json:"timestamp"`
 	Payload       InstanceLifecyclePayload `json:"payload"`
+	AgentURL    string           `json:"agent_url,omitempty"`
+	SessionID string `json:"session_id"`
+
 }
 
 type InstanceLifecyclePayload struct {
@@ -27,6 +30,8 @@ type InstanceLifecyclePayload struct {
 	VPCID       string            `json:"vpc_id"`
 	ServicePort int               `json:"service_port"`
 	Metadata    InstanceMetadata `json:"metadata"`
+	AgentWS     string            `json:"agent_ws,omitempty"`
+
 }
 
 type InstanceMetadata struct {
@@ -39,6 +44,8 @@ const (
 	EventInstanceStopped = "INSTANCE_STOPPED"
 	EventHealthUpdate    = "HEALTH_UPDATE"
 	EventProvisioningProgress = "PROVISIONING_PROGRESS"
+	EventInstanceError = "INSTANCE_ERROR"
+	 EventInstanceProvisioned = "INSTANCE_PROVISIONED"
 )
 
 type ProvisioningProgressEvent struct {
@@ -47,6 +54,7 @@ type ProvisioningProgressEvent struct {
 	Stage      string `json:"stage"`
 	Message    string `json:"message"`
 	Timestamp  string `json:"timestamp"`
+	 Data       any    `json:"data,omitempty"`
 }
 
 type Instance struct {
@@ -68,6 +76,7 @@ type Instance struct {
 	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
 	UserID       string         `json:"user_id" db:"user_id"`
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
+	HostID       string         `json:"host_id" db:"host_id"`
 	SSH        string         `json:"ssh" db:"ssh"`
 }
 
@@ -78,7 +87,15 @@ type ProvisionInstanceEvent struct
 	UserID     string            `json:"user_id"`
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
+	SessionID string `json:"session_id"`
 
+
+
+}
+
+type ProvisionedRequesFinishedResponse struct{
+	VMID string `json:"vm_id"`
+	AgentURL  string `json:"agent_url"`
 
 }
 
@@ -110,6 +127,8 @@ type CreateInstanceRequest struct {
 	Profile    string            `json:"profile"`
 	Manifest GameManifest `json:"manifest"`
 	ARN string `json:arn`
+	SessionID string `json:"session_id"`
+
 }
 
 type CreateInstanceResponse struct {

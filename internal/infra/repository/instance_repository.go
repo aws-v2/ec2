@@ -15,14 +15,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	// "github.com/shirou/gopsutil/host"
 )
 
 type instanceRepository struct { // lowercase, unexported
 	db *sqlx.DB
 	cfg *config.Config
+	hostRepo interfaces.HostRepository
+
 }
-func NewInstanceRepository(db *sqlx.DB, cfg *config.Config) interfaces.InstanceRepository { // return interface
-	return &instanceRepository{db: db, cfg:& *cfg}
+func NewInstanceRepository(db *sqlx.DB, cfg *config.Config, hostRepo interfaces.HostRepository) interfaces.InstanceRepository { // return interface
+	return &instanceRepository{db: db, cfg: cfg, hostRepo: hostRepo}
 }
 func (r *instanceRepository) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
 	query := `
@@ -142,8 +145,9 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		    storage_size = $7,
 		    storage_type = $8,
 		    device_name = $9,
-		    vpc_id = $10
-		WHERE id = $11
+		    vpc_id = $10,
+		    host_id = $11
+		WHERE id = $12
 	`
 	_, err := r.db.Exec(query,
 		instance.Status,
@@ -156,6 +160,7 @@ func (r *instanceRepository) Update(instance *domain.Instance) error {
 		instance.StorageType,
 		instance.DeviceName,
 		instance.VPCID,
+		instance.HostID,
 		instance.ID,
 	)
 	return err
@@ -166,14 +171,14 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		public_sshkey, private_sshkey,
 		status, ip, public_ip, proxmox_id, 
 		created_at, user_id, root_volume_id, 
-		storage_size, storage_type, device_name, vpc_id
+		storage_size, storage_type, device_name, vpc_id, host_id
 	) 
 	VALUES (
 		$1, $2, $3, $4, $5, 
 		$6, $7,
 		$8, $9, $10, $11, 
 		$12, $13, $14, 
-		$15, $16, $17, $18
+		$15, $16, $17, $18, $19
 	)`
 
 	instance.CreatedAt = time.Now()
@@ -198,6 +203,7 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		instance.StorageType,
 		instance.DeviceName,
 		instance.VPCID,
+		instance.HostID,
 	)
 
 	return err
@@ -280,6 +286,7 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 	const agentPort = 9030
 
 	instance, err := r.FindByID(instanceID)
+
 	if err != nil {
 		return nil, fmt.Errorf("GetInstanceInfo: %w, forinstance %s", err,instanceID)
 	}
@@ -288,7 +295,10 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 		return nil, fmt.Errorf("GetInstanceInfo: instance %s not found for user %s", instanceID, userID)
 	}
 
-	agentHost := instance.PublicIP
+host, err := r.hostRepo.GetByID(instance.HostID)
+
+
+	agentHost := host.IP
 	if agentHost == "" {
 		agentHost = instance.IP // fall back to private IP
 	}
@@ -296,12 +306,14 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 
 
 	return &domain.InstanceInfo{
-		VMHost:  fmt.Sprintf("http://%s:%d", agentHost, agentPort),
-		AgentURL:  r.cfg.AgentUrl,
+		// VMHost:  fmt.Sprintf("http://%s:%d", agentHost, agentPort),
+		VMHost:host.ID,
+		// AgentURL:  r.cfg.AgentUrl,
+		AgentURL:  fmt.Sprintf("ws://%s:%d", agentHost, agentPort),
 		
 		VMIP:      instance.IP,
 		VMSSHPort: 22,
-		SSHUser:   "root",
+		SSHUser:   host.SSHUser,
 		SSHKey:    instance.PrivateSshKey,
 	}, nil
 }

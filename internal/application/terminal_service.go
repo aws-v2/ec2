@@ -163,13 +163,51 @@ func NewTerminalService(repo interfaces.InstanceRepository) *TerminalService {
 // an open_terminal command, and returns a live AgentSession.
 //
 // The caller must call session.Close() when the terminal is done.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*AgentSession, error) {
 	info, err := svc.instances.GetInstanceInfo(instanceID, userID)
+
 	if err != nil {
 		return nil, fmt.Errorf("instance lookup %q: %w", instanceID, err)
 	}
 
-
+// websocket De
 	// Build the WebSocket URL from whatever scheme the caller stored.
 	agentWS:= info.AgentURL
 	if err != nil {
@@ -178,7 +216,17 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 
 	log.Printf("[terminal-service] dialling agent at %s for instance %s", agentWS, instanceID)
 
-	conn, _, err := websocket.DefaultDialer.Dial(agentWS, nil)
+	// conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(agentWS ,"%s/terminal"), nil)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+    fmt.Sprintf("%s/terminal", agentWS),
+    nil,
+)
+
+
+
+
+
 	if err != nil {
 		return nil, fmt.Errorf("dial agent %s: %w", agentWS, err)
 	}
@@ -217,6 +265,21 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 	log.Printf("[terminal-service] session %s opened for instance %s", sessionID, instanceID)
 	return sess, nil
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

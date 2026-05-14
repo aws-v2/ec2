@@ -140,8 +140,10 @@ func main() {
 	var sgRepo interfaces.SecurityGroupRepository
 	var templateRepo interfaces.TemplateRepository
 	var fleetRepo interfaces.FleetRepository
+	var hostRepo interfaces.HostRepository
+	hostRepo = repository.NewHostRepository(db.DB)
 
-	instanceRepo = repository.NewInstanceRepository(db,cfg)
+	instanceRepo = repository.NewInstanceRepository(db,cfg, hostRepo)
 	volumeRepo = repository.NewVolumeRepository(db)
 	snapshotRepo = repository.NewSnapshotRepository(db)
 	sshKeyRepo = repository.NewSSHKeyRepository(db)
@@ -155,11 +157,17 @@ func main() {
 	if err := systemKeyService.EnsureKeys(); err != nil {
 		slog.Warn("Failed to ensure system keys", "error", err)
 	}
-	systemPubKey, _ := systemKeyService.GetPublicKeyString()
+	// systemPubKey, _ := systemKeyService.GetPublicKeyString()
+
+	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
+	vpcRepo := repository.NewVPCRepository(db)
+	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
+
+	hostService := application.NewHostService(hostRepo,cfg.PublicKey)
 
 	// 3. Initialize Application Layer (Services)
 	slog.Info("Initializing services...")
-	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher)
+	networkingService := application.NewNetworkingService(ipRepo, sgRepo, instanceRepo, libvirtClient, natsPublisher, vpcService, hostService)
 	if err := networkingService.SeedDefaultSecurityGroup(); err != nil {
 		slog.Warn("Failed to seed default security group", "error", err)
 	}
@@ -168,12 +176,9 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
-	vpcRepo := repository.NewVPCRepository(db)
-	vpcService := vpcpkg.NewVpcService(vpcRepo,vpcProvisioner)
-	instanceService := application.NewInstanceService(instanceRepo, networkingService, libvirtClient, systemPubKey, imagesDir, natsPublisher, minioAdapter,vpcService)
+	instanceService := application.NewInstanceService(instanceRepo,hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
-	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient)
+	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
 	terminalService := application.NewTerminalService(instanceRepo)
@@ -205,6 +210,7 @@ func main() {
 	terminalHandler := transport.NewTerminalHandler(terminalService)
 	fleetHandler := transport.NewFleetHandler(fleetService)
 	docsHandler := transport.NewDocsHandler(docsService)
+	hostHandler := transport.NewHostHandler(hostService)
 
 	// 5. Setup Router
 	router := gin.Default()
@@ -215,7 +221,7 @@ func main() {
 		c.JSON(httpd.StatusOK, gin.H{"status": "UP"})
 	})
 
-	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler)
+	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler)
 
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()

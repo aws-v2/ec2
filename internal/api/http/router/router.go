@@ -18,15 +18,25 @@ func SetupRoutes(r *gin.Engine,
 	templateHandler *transport.TemplateHandler, 
 	terminalHandler *transport.TerminalHandler,
 	fleetHandler *transport.FleetHandler,
-	docsHandler *transport.DocsHandler) {
+	docsHandler *transport.DocsHandler,
+	hostHandler *transport.HostHandler) {
 	
+ 
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
 	fleet.Use(middleware.AuthMiddleware())
 	{
 		fleet.GET("/overview", fleetHandler.GetOverview)
 		fleet.GET("/events", fleetHandler.GetEvents)
+		// fleet.GET("/instances/:instanceId/events", fleetHandler.StreamInstanceEvents)
+
 	}
+
+
+
+
+
+
 
 	// Documentation Endpoints (public, no auth)
 	computeDocs := r.Group("/api/v1/compute/docs")
@@ -35,10 +45,21 @@ func SetupRoutes(r *gin.Engine,
 		computeDocs.GET("/:slug", docsHandler.GetPublicDoc)
 	}
 	
+
+
+
+
+
+
+
 	// Compute API
 	compute := r.Group("/api/v1/compute")
 	compute.Use(middleware.AuthMiddleware())
+
 	{
+		compute.POST("/hosts/heartbeat", hostHandler.HandleHeartbeat)
+
+	
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
 	}
 

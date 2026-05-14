@@ -163,6 +163,7 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		Manifest: event.Manifest,
 		// pa
 		ARN: event.StorageARN,
+		SessionID: event.SessionID,
 	}
 
 	// Defaults

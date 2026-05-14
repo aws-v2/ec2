@@ -3,8 +3,14 @@ package interfaces
 import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
-
+	hostdomain "ec2-api/internal/domain/host"
 )
+
+type HostRepository interface {
+	Update(host *hostdomain.Host) error
+	GetBestHosts(limit int) ([]*hostdomain.Host, error)
+	GetByID(id string) (*hostdomain.Host, error)
+}
 
 type InstanceRepository interface {
 	Create(instance *domain.Instance) error

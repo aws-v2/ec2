@@ -36,4 +36,16 @@ var schema11 string
 //go:embed 012_add_vpc_id_to_instances.sql
 var schema12 string
 
-var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12
+//go:embed 013_add_hosts_table.sql
+var schema13 string
+
+//go:embed 014_add_host_id_to_instances.sql
+var schema14 string
+
+//go:embed 015_add_ssh_user_to_hosts.sql
+var schema15 string
+
+//go:embed 016_add_available_templates_to_hosts.sql
+var schema16 string
+
+var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12 + "\n" + schema13 + "\n" + schema14 + "\n" + schema15 + "\n" + schema16
