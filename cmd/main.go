@@ -163,7 +163,7 @@ func main() {
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
 
-	hostService := application.NewHostService(hostRepo,cfg.PublicKey)
+	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher)
 
 	// 3. Initialize Application Layer (Services)
 	slog.Info("Initializing services...")

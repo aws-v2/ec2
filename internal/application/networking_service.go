@@ -19,12 +19,12 @@ type NetworkingService struct {
 	sgRepo       interfaces.SecurityGroupRepository
 	instanceRepo interfaces.InstanceRepository
 	libvirt      *libvirt.LibvirtClient
-	publisher    messaging.Publisher
+	publisher     *messaging.NATSPublisher
 	vpcService   *vpcpkg.Service
 	hostService  *HostService
 }
 
-func NewNetworkingService(ipRepo interfaces.IPRepository, sgRepo interfaces.SecurityGroupRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher messaging.Publisher, vpcService *vpcpkg.Service, hostService *HostService) *NetworkingService {
+func NewNetworkingService(ipRepo interfaces.IPRepository, sgRepo interfaces.SecurityGroupRepository, instanceRepo interfaces.InstanceRepository, libvirt *libvirt.LibvirtClient, publisher  *messaging.NATSPublisher, vpcService *vpcpkg.Service, hostService *HostService) *NetworkingService {
 	return &NetworkingService{
 		ipRepo:       ipRepo,
 		sgRepo:       sgRepo,
