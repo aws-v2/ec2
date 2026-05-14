@@ -124,7 +124,6 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
-	fmt.Println("**************sss***Network reconciled for instance***********%v", bestHost)
 
  
 
