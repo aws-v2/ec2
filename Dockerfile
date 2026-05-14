@@ -13,27 +13,29 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-# We need CGO_ENABLED=1 because we use libvirt.org/go/libvirt
+# Build the application (CGO required for libvirt)
 RUN CGO_ENABLED=1 GOOS=linux go build -o ec2-api ./cmd
 
-ENV LOG_LEVEL=info
-ENV LOG_FORMAT=json
-
-# Stage 2: Final
+# Stage 2: Final runtime image
 FROM alpine:latest
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates libvirt-libs qemu-img cdrkit
+# Runtime dependencies (IMPORTANT: openssh-client provides scp/ssh)
+RUN apk add --no-cache \
+    ca-certificates \
+    libvirt-libs \
+    qemu-img \
+    cdrkit \
+    openssh-client
 
-# Copy the binary from the builder stage
+# Copy binary + assets
 COPY --from=builder /app/ec2-api .
 COPY --from=builder /app/docs ./docs
 COPY --from=builder /app/migrations ./migrations
-# Expose the application port
+
+# Expose API port
 EXPOSE 8088
 
-# Run the application
+# Run application
 CMD ["./ec2-api"]
