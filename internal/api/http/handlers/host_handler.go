@@ -18,16 +18,17 @@ func NewHostHandler(service *application.HostService) *HostHandler {
 }
 
 func (h *HostHandler) HandleHeartbeat(c *gin.Context) {
-	var req domain.HeartbeatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.SendError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
-		return
-	}
+    var req domain.HeartbeatRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        dto.SendError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+        return
+    }
 
-	if err := h.service.HandleHeartbeat(req); err != nil {
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+    resp, err := h.service.HandleHeartbeat(req)
+    if err != nil {
+        dto.SendError(c, http.StatusInternalServerError, err.Error())
+        return
+    }
 
-	dto.SendSuccess(c, http.StatusOK, "Heartbeat recorded", nil)
+    dto.SendSuccess(c, http.StatusOK, "Heartbeat recorded", resp)
 }

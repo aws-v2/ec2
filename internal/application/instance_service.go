@@ -3,12 +3,14 @@ package application
 import (
 	"context"
 	dto "ec2-api/internal/domain/dto"
+	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/instance"
 	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
 	"ec2-api/internal/vpcpkg"
+	"net/http"
 
 	"fmt"
 	"log"
@@ -20,6 +22,7 @@ import (
 
 type InstanceService struct {
 	repo          interfaces.InstanceRepository
+	hostRepo          interfaces.HostRepository
 	sgService     interfaces.SecurityGroupService
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
@@ -28,10 +31,16 @@ type InstanceService struct {
 	minioAdapter  *storage.MinIOAdapter
 	vpcService    *vpcpkg.Service   // ← replaces publisher
 	hostService   *HostService
+	ec2PrivateKey string
+	//  agentClient *vpcpkg.AgentClient
+	   httpClient *http.Client
+	   agentPort int
+
 }
 
 func NewInstanceService(
 	repo interfaces.InstanceRepository,
+	hostRepo interfaces.HostRepository,
 	sgService interfaces.SecurityGroupService,
 	libvirt *libvirt.LibvirtClient,
 	systemPubKey string,
@@ -40,9 +49,13 @@ func NewInstanceService(
 	minioAdapter *storage.MinIOAdapter,
 	vpcService *vpcpkg.Service,
 	hostService *HostService,
+	ec2PrivateKey string,
+	agentPort int,
 ) *InstanceService {
-	s := &InstanceService{
+
+	return &InstanceService{
 		repo:          repo,
+		hostRepo:  hostRepo, 
 		sgService:     sgService,
 		libvirtClient: libvirt,
 		systemPubKey:  systemPubKey,
@@ -51,9 +64,14 @@ func NewInstanceService(
 		minioAdapter:  minioAdapter,
 		vpcService:    vpcService,
 		hostService:   hostService,
-	}
+		ec2PrivateKey: ec2PrivateKey,
+		 httpClient: &http.Client{
+            Timeout: 10 * time.Second,
+			
+        },
+		agentPort: agentPort,
 
-	return s
+	}
 }
 
 const (
@@ -102,18 +120,25 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		return nil, err
 	}
  
 	// Step 2: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		
 		return nil, err
+
 	}
 
 	// Step 2.5: Select best host
 	bestHost, err := s.hostService.SelectBestHost()
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 	}
 	hostID := ""
@@ -123,10 +148,14 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	} else {
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
 	}
+
+
+	log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
  
 	// Step 3: Persist the record and launch VM creation asynchronously
-	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken)
+	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken,bestHost)
 	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
 		return nil, err
 	}
 	instance.HostID = hostID
@@ -137,7 +166,11 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
  
 
 
+// type InsatanceDetailsResponse struct{
+// 	Instance domain.Instance `json:"instance"`
+// 	HostIP string `json:"host_ip"`
 
+// }
 
 func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, error) {
 	instance, err := s.repo.FindByID(id)
@@ -147,6 +180,11 @@ func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, erro
 	if instance.UserID != userID && userID != "" {
 		return nil, dto.ErrInstanceNotFound // or forbidden
 	}
+	host,err := s.hostRepo.GetByID(instance.HostID)
+	if err != nil {
+		return nil, err
+	}
+	instance.HostID =host.IP
 	return instance, nil
 }
 
@@ -181,7 +219,7 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStopped, instance)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "","")
 	}
 
 	return nil
@@ -246,7 +284,7 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 	// Publish INSTANCE_STARTED event
 	if s.publisher != nil {
 		instance.Status = domain.StatusRunning
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "","")
 	}
 
 	return nil
@@ -360,103 +398,218 @@ func (s *InstanceService) GetMetrics(id, userID string) (*domain.InstanceMetrics
 
 	return metrics, nil
 }
+func (s *InstanceService) AssignVPC(
+	ctx context.Context,
+	userID,
+	instanceID,
+	newVPCID string,
+) error {
 
-// AssignVPC performs a coordinated VPC migration for an instance.
-func (s *InstanceService) AssignVPC(ctx context.Context, userID, instanceID, newVPCID string) error {
-	// 1. Fetch Instance
+	// ---------------------------------------------------
+	// Load instance
+	// ---------------------------------------------------
+
 	instance, err := s.GetInstance(instanceID, userID)
 	if err != nil {
 		return err
 	}
 
 	oldVPCID := instance.VPCID
+
 	if oldVPCID == newVPCID {
-		return fmt.Errorf("instance is already in VPC %s", newVPCID)
+		return fmt.Errorf(
+			"instance already in vpc %s",
+			newVPCID,
+		)
 	}
 
-	log.Printf("[VPC-HOP] Starting migration for instance %s from VPC %s to %s", instanceID, oldVPCID, newVPCID)
+	// ---------------------------------------------------
+	// Resolve host
+	// ---------------------------------------------------
 
-	var remoteHostIP, remoteHostUser, remoteHostKey string
+	var remoteHostIP string
+	var remoteHostUser string
+
 	if instance.HostID != "" {
 		host, _ := s.hostService.GetHost(instance.HostID)
+
 		if host != nil {
 			remoteHostIP = host.IP
 			remoteHostUser = host.SSHUser
-			remoteHostKey = host.SSHPrivateKey
 		}
 	}
 
-	// 2. Stop the Instance
-	log.Printf("[VPC-HOP] Stopping VM %s on host %s (user: %s)", instance.VMName, remoteHostIP, remoteHostUser)
-	if err := s.libvirtClient.StopVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
-		log.Printf("[VPC-HOP] Warning: StopVM failed: %v", err)
-		// Continue anyway as it might already be stopped
+	if remoteHostUser == "" {
+		remoteHostUser = "root"
 	}
 
-	// 3. Release Old Network
-	if oldVPCID != "" {
-		log.Printf("[VPC-HOP] Releasing old network for %s in VPC %s", instanceID, oldVPCID)
-		if err := s.vpcService.ReleaseInstanceNetwork(context.Background(), instanceID); err != nil {
-			log.Printf("[VPC-HOP] Warning: ReleaseInstanceNetwork failed: %v", err)
-		}
-	}
+	// ---------------------------------------------------
+	// Stop VM
+	// ---------------------------------------------------
 
-	// 4. Prepare New Network
-	log.Printf("[VPC-HOP] Preparing new network for %s in VPC %s", instanceID, newVPCID)
-	network, err := s.vpcService.AllocateInstanceNetwork(context.Background(), userID, instanceID, newVPCID)
+	err = s.libvirtClient.StopVM(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+		instance.VMName,
+	)
+
 	if err != nil {
-		return fmt.Errorf("failed to prepare new network: %w", err)
+		log.Printf("[VPC] stop vm failed: %v", err)
 	}
+
+	// ---------------------------------------------------
+	// Release old network
+	// ---------------------------------------------------
+
+	if oldVPCID != "" {
+		_ = s.vpcService.ReleaseInstanceNetwork(
+			context.Background(),
+			instance.ID,
+		)
+	}
+
+	// ---------------------------------------------------
+	// Allocate new network
+	// ---------------------------------------------------
+
+	network, err := s.vpcService.AllocateInstanceNetwork(
+		ctx,
+		userID,
+		instance.ID,
+		newVPCID,
+	)
+
+	if err != nil {
+		return err
+	}
+
 	privateIP := network.PrivateIP
 	gateway := network.Gateway
 	bridgeName := network.BridgeName
 
-	// 5. Update Instance Metadata
-	instance.VPCID = newVPCID
-	instance.IP = privateIP
-	// Note: bridgeName might be used in the XML reconfiguration
-	if err := s.repo.Update(instance); err != nil {
-		return fmt.Errorf("failed to update instance record: %w", err)
-	}
+	// ---------------------------------------------------
+	// Reconcile new network
+	// ---------------------------------------------------
 
-	// 6. Re-configure Libvirt XML & Restart
-	// We achieve this by deleting the old definition and creating a new one with same disk but new bridge
-	log.Printf("[VPC-HOP] Reconfiguring VM %s with new bridge %s and IP %s", instance.VMName, bridgeName, privateIP)
-	if err := s.libvirtClient.DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, instance.VMName); err != nil {
-		log.Printf("[VPC-HOP] Warning: DeleteVM (undefine) failed: %v", err)
-	}
+	_, _ = s.ReconcileNetwork(
+		remoteHostIP,
+		host.NetworkReconcileRequest{
+			VPCID: newVPCID,
+			Bridge: host.BridgeConfig{
+				Name:    bridgeName,
+				Gateway: gateway,
+			},
+			IP:      privateIP,
+			Gateway: gateway,
+		},
+	)
 
-	diskPath := filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", instance.VMName))
+	// ---------------------------------------------------
+	// Build cloud init ISO
+	// ---------------------------------------------------
 
 	combinedKeys := instance.PublicSSHKey
+
 	if s.systemPubKey != "" {
 		combinedKeys += "\n" + s.systemPubKey
 	}
 
+	isoPath, cleanupFn, err := s.libvirtClient.CreateCloudInitISO(
+		instance.VMName,
+		combinedKeys,
+		privateIP,
+		gateway,
+		"",
+		"default",
+		map[string]string{},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	defer cleanupFn()
+
+	// ---------------------------------------------------
+	// Transfer ISO
+	// ---------------------------------------------------
+
+	err = s.transferOverlayToHost(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+		isoPath,
+		isoPath,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	// ---------------------------------------------------
+	// VM paths
+	// ---------------------------------------------------
+
+	diskPath := filepath.Join(
+		s.imagesDir,
+		fmt.Sprintf("%s.qcow2", instance.VMName),
+	)
+
+	// ---------------------------------------------------
+	// Delete old libvirt definition
+	// ---------------------------------------------------
+
+	_ = s.libvirtClient.DeleteVM(
+		remoteHostIP,
+		remoteHostUser,
+		s.ec2PrivateKey,
+		instance.VMName,
+	)
+
+	// ---------------------------------------------------
+	// Start VM
+	// ---------------------------------------------------
+
 	_, err = s.libvirtClient.CreateAndStartVM(
 		remoteHostIP,
 		remoteHostUser,
-		remoteHostKey,
+		s.ec2PrivateKey,
+
 		instance.VMName,
+
 		diskPath,
+		isoPath,
+
 		instance.CPU,
 		instance.RAM,
-		combinedKeys,
+
 		bridgeName,
 		privateIP,
 		gateway,
-		"",  // no metrics token needed for VPC-hop
-		"",  // no profile for VPC-hop
-		nil, // no parameters for VPC-hop
-		"",  // no backing template for VPC-hop
 	)
+
 	if err != nil {
-		return fmt.Errorf("failed to restart VM in new VPC: %w", err)
+		return err
 	}
 
-	instance.Status = domain.StatusRunning
-	_ = s.repo.UpdateStatus(instance.ID, domain.StatusRunning)
+	// ---------------------------------------------------
+	// Persist
+	// ---------------------------------------------------
 
-	log.Printf("[VPC-HOP] Successfully moved instance %s to VPC %s", instanceID, newVPCID)
+	instance.VPCID = newVPCID
+	instance.IP = privateIP
+	instance.Status = domain.StatusRunning
+
+	if err := s.repo.Update(instance); err != nil {
+		return err
+	}
+
+	log.Printf(
+		"[VPC] instance %s moved to %s",
+		instance.ID,
+		newVPCID,
+	)
+
 	return nil
 }

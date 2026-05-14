@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,135 +63,138 @@ func runCmdWithProgress(cmd *exec.Cmd) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-// CreateAndStartVM creates and starts a VM with a statically configured IP.
-// privateIP and gateway come from the network service — they are pre-allocated
-// before this function is called. The VM boots with this IP already configured
-// via cloud-init network-config, so waitForVMIP is no longer needed.
-func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHostKey, vmName, diskPath string, cpu, ram int, combinedKeys, bridgeName, privateIP, gateway, instanceToken, profile string, params map[string]string, backingTemplate string) (int, error) {
+
+func (l *LibvirtClient) CreateAndStartVM(
+	remoteHostIP string,
+	remoteHostUser string,
+	remoteHostKey string,
+
+	vmName string,
+
+	diskPath string,
+	isoPath string,
+
+	cpu int,
+	ram int,
+
+	bridgeName string,
+	privateIP string,
+	gateway string,
+) (int, error) {
+
+	// ---------------------------------------------------
+	// Network
+	// ---------------------------------------------------
+
 	if bridgeName == "" {
 		if err := l.EnsureDefaultNetwork(); err != nil {
 			return 0, fmt.Errorf("network setup failed: %w", err)
 		}
-	} else {
-		fmt.Printf("[Libvirt] Attaching VM %s to bridge %s\n", vmName, bridgeName)
 	}
 
-	// Create cloud-init ISO with static network config and metrics agent token baked in
-	isoPath, cleanupFn, err := l.createCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile, params)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create cloud-init ISO: %w", err)
-	}
-	defer cleanupFn()
+	// ---------------------------------------------------
+	// Build XML
+	// ---------------------------------------------------
 
-	xmlConfig := l.buildVMXML(vmName, diskPath, isoPath, cpu, ram, bridgeName, profile)
+	xmlConfig := l.buildVMXML(
+		vmName,
+		diskPath,
+		isoPath,
+		cpu,
+		ram,
+		bridgeName,
+		"default",
+	)
 
-	// Transfer disks and execute remotely if remoteHostIP is provided
+	// ---------------------------------------------------
+	// Connect to libvirt
+	// ---------------------------------------------------
+
 	conn := l.conn
-	if remoteHostIP != "" {
-		if remoteHostUser == "" {
-			remoteHostUser = "x6617274696" // Global fallback
-		}
 
-		sshArgs := []string{"-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
-		scpArgs := []string{"-v", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"}
-		var tempKeyPath string
-		if remoteHostKey != "" {
-			// Ensure actual newlines and trailing newline for OpenSSH
-			formattedKey := strings.ReplaceAll(remoteHostKey, "\\n", "\n")
-			if !strings.HasSuffix(formattedKey, "\n") {
-				formattedKey += "\n"
-			}
+if remoteHostIP != "" {
 
-			f, err := os.CreateTemp("", "id_rsa_*")
-			if err != nil {
-				return 0, fmt.Errorf("failed to create temp key file: %w", err)
-			}
-			defer os.Remove(f.Name())
-			if _, err := f.Write([]byte(formattedKey)); err != nil {
-				return 0, fmt.Errorf("failed to write temp key file: %w", err)
-			}
-			f.Close()
-			if err := os.Chmod(f.Name(), 0600); err != nil {
-				return 0, fmt.Errorf("failed to chmod temp key file: %w", err)
-			}
-			tempKeyPath = f.Name()
-			sshArgs = append(sshArgs, "-i", tempKeyPath)
-			scpArgs = append(scpArgs, "-i", tempKeyPath)
-			fmt.Printf("[Libvirt] [DEBUG] Using private key from temp file: %s (formatted length: %d)\n", tempKeyPath, len(formattedKey))
-		} else {
-			fmt.Printf("[Libvirt] [DEBUG] No private key provided for host %s, falling back to system default auth\n", remoteHostIP)
-		}
+    if remoteHostUser == "" {
+        remoteHostUser = "root"
+    }
 
-		fmt.Printf("[Libvirt] Transferring disks to remote host %s (user: %s)...\n", remoteHostIP, remoteHostUser)
+    // Write key to temp file
+    formattedKey := strings.TrimSpace(strings.ReplaceAll(remoteHostKey, "\\n", "\n")) + "\n"
 
-		// Ensure the remote directory exists
-		mkdirCmd := exec.Command("ssh", append(sshArgs, fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP), "mkdir", "-p", filepath.Dir(diskPath), filepath.Dir(isoPath))...)
-		if output, err := mkdirCmd.CombinedOutput(); err != nil {
-			return 0, fmt.Errorf("failed to create remote directories (output: %s): %w", string(output), err)
-		}
+    keyFile, err := os.CreateTemp("", "id_rsa_libvirt_*")
+    if err != nil {
+        return 0, fmt.Errorf("failed to create temp key file: %w", err)
+    }
+    defer os.Remove(keyFile.Name())
 
-		fmt.Printf("[1Libvirt] Copying disk %s (Overlay/Delta)...\n", diskPath)
+    if _, err := keyFile.Write([]byte(formattedKey)); err != nil {
+        keyFile.Close()
+        return 0, fmt.Errorf("failed to write key file: %w", err)
+    }
+    keyFile.Close()
 
-		scpDiskCmd := exec.Command("scp", append(scpArgs, diskPath, fmt.Sprintf("%s@%s:%s", remoteHostUser, remoteHostIP, diskPath))...)
-		fmt.Printf("[Libvirt] Running: %s\n", strings.Join(scpDiskCmd.Args, " "))
-		if output, err := scpDiskCmd.CombinedOutput(); err != nil {
-			return 0, fmt.Errorf("failed to scp disk to remote host (output: %s): %w", string(output), err)
-		}
+    if err := os.Chmod(keyFile.Name(), 0600); err != nil {
+        return 0, fmt.Errorf("failed to chmod key file: %w", err)
+    }
 
-		if backingTemplate != "" {
-			fmt.Printf("[Libvirt] Using remote template %s. Performing remote rebase.\n", backingTemplate)
-			remoteTemplatePath := filepath.Join("/var/lib/libvirt/templates", backingTemplate+".qcow2")
+    remoteURI := fmt.Sprintf(
+        "qemu+ssh://%s@%s/system?keyfile=%s&no_verify=1&sshauth=privkey",
+        remoteHostUser,
+        remoteHostIP,
+        keyFile.Name(), // 👈 was missing
+    )
 
-			// Remote rebase command to link the transferred delta to the agent's local template
-			rebaseCmd := exec.Command("ssh", append(sshArgs,
-				fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP),
-				"qemu-img", "rebase", "-u", "-b", remoteTemplatePath, diskPath)...)
+    remoteConn, err := libvirt.NewConnect(remoteURI)
+    if err != nil {
+        return 0, fmt.Errorf("failed to connect remote libvirt: %w", err)
+    }
+    defer remoteConn.Close()
 
-			if output, err := rebaseCmd.CombinedOutput(); err != nil {
-				return 0, fmt.Errorf("remote rebase failed: %w\nOutput: %s", err, string(output))
-			}
-			fmt.Printf("[Libvirt] Remote rebase successful for %s\n", vmName)
-		}
-		fmt.Println("-------------------end of phase two-----")
-
-		fmt.Printf("[Libvirt] Copying cloud-init ISO %s...\n", isoPath)
-		scpIsoCmd := exec.Command("scp", append(scpArgs, isoPath, fmt.Sprintf("%s@%s:%s", remoteHostUser, remoteHostIP, isoPath))...)
-		if output, err := scpIsoCmd.CombinedOutput(); err != nil {
-			return 0, fmt.Errorf("failed to scp iso to remote host (output: %s): %w", string(output), err)
-		}
-
-		// Connect to remote Libvirt
-		remoteURI := fmt.Sprintf("qemu+ssh://%s@%s/system?no_verify=1", remoteHostUser, remoteHostIP)
-		if tempKeyPath != "" {
-			remoteURI += fmt.Sprintf("&keyfile=%s", tempKeyPath)
-		}
-		fmt.Printf("[Libvirt] Connecting to remote libvirt: %s\n", remoteURI)
-		remoteConn, err := libvirt.NewConnect(remoteURI)
-		if err != nil {
-			return 0, fmt.Errorf("failed to connect to remote libvirt: %w", err)
-		}
-		defer remoteConn.Close()
-		conn = remoteConn
-	}
+    conn = remoteConn
+}
+	// ---------------------------------------------------
+	// Define VM
+	// ---------------------------------------------------
 
 	domain, err := conn.DomainDefineXML(xmlConfig)
 	if err != nil {
-		return 0, fmt.Errorf("failed to define domain: %w", err)
+		return 0, fmt.Errorf(
+			"failed to define vm: %w",
+			err,
+		)
 	}
 
+	// ---------------------------------------------------
+	// Start VM
+	// ---------------------------------------------------
+
 	if err := domain.Create(); err != nil {
-		domain.Undefine()
-		return 0, fmt.Errorf("failed to start VM: %w", err)
+		_ = domain.Undefine()
+
+		return 0, fmt.Errorf(
+			"failed to start vm: %w",
+			err,
+		)
 	}
+
+	// ---------------------------------------------------
+	// VM ID
+	// ---------------------------------------------------
 
 	id, err := domain.GetID()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get VM ID: %w", err)
+		return 0, fmt.Errorf(
+			"failed to get vm id: %w",
+			err,
+		)
 	}
 
-	// We no longer wait for DHCP — the IP was pre-allocated and is baked into
-	// cloud-init. The VM will boot with it immediately.
-	fmt.Printf("[Libvirt] VM %s started with static IP %s (bridge: %s) on host %s\n", vmName, privateIP, bridgeName, remoteHostIP)
+	log.Printf(
+		"[Libvirt] VM %s started on host %s with IP %s",
+		vmName,
+		remoteHostIP,
+		privateIP,
+	)
 
 	return int(id), nil
 }
@@ -203,7 +207,7 @@ func (l *LibvirtClient) CreateAndStartVM(remoteHostIP, remoteHostUser, remoteHos
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) createCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
+func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
