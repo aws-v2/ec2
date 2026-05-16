@@ -119,6 +119,7 @@ jobs:
               --env MINIO_USE_SSL=false \
               --env NATS_PREFIX=prod.v1 \
               --env AGENT_URL=ws://${HOST_GW}:9030/terminal \
+              -e API_GATEWAY=http://${{secrets.PROD_HOST}}:8080 \
               --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
               --env IMAGES_DIR=/var/lib/libvirt/images \
               qarani/ec2-api:prod-${{ github.sha }}
