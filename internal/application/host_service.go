@@ -94,7 +94,7 @@ func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.Rollout
 	// Always validate once upfront before touching any host
 	if err := s.validateS3URL(payload.URL); err != nil {
 
-		return nil, fmt.Errorf("s3 pre-flight failed, rollout aborted: %w for this url:", err, payload.URL)
+		return nil, fmt.Errorf("s3 pre-flight failed, rollout aborted: %w for this url: %s", err, payload.URL)
 	}
 
 	// Cancellable context — any goroutine can abort the entire rollout
