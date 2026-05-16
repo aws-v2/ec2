@@ -102,12 +102,12 @@ jobs:
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USER=nats-staging-user \
               -e NATS_PASSWORD=nats-staging-password \
-              -e IMAGES_DIR=/var/lib/libvirt/images \
+              -e IMAGES_DIR=/var/lib/libvirt/images \ 
               -e MINIO_ENDPOINT=minio-staging:9000 \
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
               -e MIGRATIONS_PATH=/app/migrations \
-              --env API_GATEWAY=http://SHOULD BE THE ACTUAL ADDRES, CANT USE DOCKER'S ORINTERNLS:8080 \
+              -e API_GATEWAY=http://${{secrets.STAGING_HOST}}:8080 \
               -e MINIO_USE_SSL=false \
               -e NATS_PREFIX=staging.v1 \
               --add-host=host.docker.internal:host-gateway \
