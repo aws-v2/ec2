@@ -33,6 +33,7 @@ type Config struct {
 	PublicKey string
 	PrivateKey string
 	AgentPort int
+	AgentUrlParts string
 }
 
 type LibvirtConfig struct {
@@ -89,6 +90,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		AgentUrlParts: getEnv("API_GATEWAY","http://localhost:8080"),
 		AgentPort: getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:LoadKeyPair()[0],
 		PublicKey:LoadKeyPair()[1],
