@@ -111,6 +111,75 @@ func (p *NATSPublisher) PublishCreateUploadURL(req interface{}) (string, error) 
 	return resp.UploadURL, nil
 }
 
+
+
+
+type agentPresignRequest struct {
+	UserID    string `json:"user_id"`
+	AssetID   string `json:"asset_id"`
+	AssetType string `json:"asset_type"`
+	Key       string `json:"key"` // direct key override
+}
+
+type agentPresignResponse struct {
+	DownloadURL string `json:"download_url"`
+}
+
+
+
+func (p *NATSPublisher) FetchAgentPresignedURL(userID string,version string) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher not initialized")
+	}
+	fileName := fmt.Sprintf("agent-prod-linux-amd64-%s", version) // matches CI binary name
+log.Println("pre*****dfre*****signedURL")
+
+	reqPayload := agentPresignRequest{
+		UserID:    userID,
+		AssetID:   fileName,
+		AssetType: "agent",
+		Key:       fileName,
+	}
+
+	data, err := json.Marshal(reqPayload)
+	if err != nil {
+		return "", fmt.Errorf("marshal presign request: %w", err)
+	}
+
+	subject := fmt.Sprintf("%s.s3.task.get_download_url", p.profile)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("nats request presigned url: %w", err)
+	}
+
+log.Println("pre*****34df*****signedURL")
+
+
+	var resp agentPresignResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return "", fmt.Errorf("unmarshal presign response: %w", err)
+	}
+log.Println("pre*****dfew*****signedURL")
+
+	if resp.DownloadURL == "" {
+		return "", fmt.Errorf("empty presigned url returned from s3")
+	}
+log.Println("pre*****df**ff***signedURL")
+
+	return resp.DownloadURL, nil
+}
+
+
+
+
+
+
+
+
+
+
+
 // PublishInstanceEvent publishes an instance lifecycle event to NATS.
 //
 // FIX 1: Guard against publishing INSTANCE_STARTED with an empty IP.

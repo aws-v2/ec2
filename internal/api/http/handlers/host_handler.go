@@ -6,6 +6,7 @@ import (
 	domain "ec2-api/internal/domain/host"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -18,6 +19,43 @@ type HostHandler struct {
 func NewHostHandler(service *application.HostService) *HostHandler {
 	return &HostHandler{service: service}
 }
+
+
+
+func (h *HostHandler) UpdateAgent(c *gin.Context) {
+	var req domain.RolloutUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+
+	req.UserID = c.GetString("userID")
+
+	// req.Bucket and req.FileName come from the JSON body
+	// req.Version is derived from the file name eg agent-1.0.2 → 1.0.2
+	if req.FileName != "" && req.Version == "" {
+		parts := strings.SplitN(req.FileName, "-", 2)
+		if len(parts) == 2 {
+			req.Version = parts[1]
+		}
+	}
+
+
+
+
+
+	summary, err := h.service.RolloutAgentUpdate(c.Request.Context(),req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, summary)
+}
+
+
+
 
 
 func (h *HostHandler) AddTemplate(c *gin.Context) {

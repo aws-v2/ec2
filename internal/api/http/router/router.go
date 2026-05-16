@@ -60,6 +60,7 @@ func SetupRoutes(r *gin.Engine,
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
 		compute.GET("/host/get-host-templates", hostHandler.GetHostTemplates)
 		compute.POST("/host/add-template", hostHandler.AddTemplate)
+		compute.POST("/host/update-agent", hostHandler.UpdateAgent)
 	}
 
 

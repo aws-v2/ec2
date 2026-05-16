@@ -107,6 +107,7 @@ jobs:
               -e MINIO_ACCESS_KEY=minio-staging-user \
               -e MINIO_SECRET_KEY=minio-staging-password \
               -e MIGRATIONS_PATH=/app/migrations \
+              --env API_GATEWAY=http://SHOULD BE THE ACTUAL ADDRES, CANT USE DOCKER'S ORINTERNLS:8080 \
               -e MINIO_USE_SSL=false \
               -e NATS_PREFIX=staging.v1 \
               --add-host=host.docker.internal:host-gateway \
