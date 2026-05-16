@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	domain "ec2-api/internal/domain/host"
 	"ec2-api/internal/interfaces"
@@ -17,6 +18,31 @@ type hostRepository struct {
 
 func NewHostRepository(db *sql.DB) interfaces.HostRepository {
 	return &hostRepository{db: db}
+}
+
+func (r *hostRepository) ListAll(ctx context.Context) ([]domain.Host, error) {
+	query := `SELECT id, hostname, ip, ssh_user, ssh_private_key, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates FROM hosts`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []domain.Host
+	for rows.Next() {
+		h := domain.Host{}
+		err := rows.Scan(
+			&h.ID, &h.Hostname, &h.IP, &h.SSHUser, &h.SSHPrivateKey,
+			&h.CPUTotal, &h.CPUUsed, &h.RAMTotal, &h.RAMFree,
+			&h.DiskTotal, &h.DiskFree, &h.Status, &h.LastHeartbeat,
+			pq.Array(&h.AvailableTemplates),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		hosts = append(hosts, h)
+	}
+	return hosts, nil
 }
 
 func (r *hostRepository) Update(host *domain.Host) error {

@@ -35,9 +35,6 @@ func SetupRoutes(r *gin.Engine,
 
 
 
-
-
-
 	// Documentation Endpoints (public, no auth)
 	computeDocs := r.Group("/api/v1/compute/docs")
 	{
@@ -61,7 +58,17 @@ func SetupRoutes(r *gin.Engine,
 
 	
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
+		compute.GET("/host/get-host-templates", hostHandler.GetHostTemplates)
+		compute.POST("/host/add-template", hostHandler.AddTemplate)
+		compute.POST("/host/update-agent", hostHandler.UpdateAgent)
 	}
+
+
+
+
+
+
+
 
 	api := r.Group("/api/v1/ec2")
 	api.Use(middleware.AuthMiddleware())

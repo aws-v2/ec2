@@ -28,7 +28,7 @@ type InstanceService struct {
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
 	imagesDir     string
-	publisher     messaging.Publisher
+	publisher      *messaging.NATSPublisher
 	minioAdapter  *storage.MinIOAdapter
 	vpcService    *vpcpkg.Service   // ← replaces publisher
 	hostService   *HostService
@@ -46,7 +46,7 @@ func NewInstanceService(
 	libvirt *libvirt.LibvirtClient,
 	systemPubKey string,
 	imagesDir string,
-	publisher messaging.Publisher,
+	publisher  *messaging.NATSPublisher,
 	minioAdapter *storage.MinIOAdapter,
 	vpcService *vpcpkg.Service,
 	hostService *HostService,

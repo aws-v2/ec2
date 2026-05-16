@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"time"
 )
 
@@ -42,4 +43,48 @@ type Repository interface {
 	Update(host *Host) error
 	GetBestHosts(limit int) ([]*Host, error)
 	GetByID(id string) (*Host, error)
+	ListAll(ctx context.Context) ([]Host, error)
+}
+
+
+
+
+
+type RolloutUpdateRequest struct {
+	UserID string `json:"user_id"`
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
+	Bucket string `json:"bucket"`
+	FileName string `json:"file_name"`
+}
+
+type UpdateResult struct {
+	HostID string `json:"host_id"`
+	Addr   string `json:"addr"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}
+
+type RolloutSummary struct {
+	Total   int            `json:"total"`
+	OK      int            `json:"ok"`
+	Failed  int            `json:"failed"`
+	Version string         `json:"version"`
+	Results []UpdateResult `json:"results"`
+	S3Error string `json:"error"`
+}
+type AgentUpdatePayload struct {
+	Version string `json:"version"`
+	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
+
+}
+
+
+
+
+type GetDownloadURLRequest struct{
+	UserID    string `json:"user_id"`
+	AssetType string `json:"asset_type"`
+	Key       string `json:"key"`
 }

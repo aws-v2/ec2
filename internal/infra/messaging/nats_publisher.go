@@ -22,11 +22,12 @@ type Publisher interface {
 	PublishInstanceEvent(eventType string, instance *domain.Instance, agentWS string, sessionID string) error
 	GetDefaultVPC(tenantID string) (string, string, error)
 	ValidateVPC(tenantID, vpcID string) (bool, error)
+	PublishDownloadTemplateURL(data []byte) (string, error)
 	AttachResource(tenantID, instanceID, vpcID string) (string, error)
 	DetachResource(tenantID, instanceID, vpcID string) error
 	ListVPCs(tenantID string) ([]domain.VPC, error)
 	CreateVPC(tenantID, vpcName, requestedBy string) error
-
+	PublishCreateUploadURL(req interface{}) (string, error)
 	PrepareInstanceNetwork(tenantID, instanceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
 	ReleaseInstanceNetwork(tenantID, instanceID, vpcID string) error
 	RequestInstanceToken(userID, instanceID string) (string, error)
@@ -35,7 +36,7 @@ type Publisher interface {
 	UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(tenantID, policyID string) error
 	PublishProvisioningProgress(instanceID, stage, message string, payload ...any) error
-	// PublishProvisioningProgress(instanceID, stage, message string) error
+	PublishCretePresignedURL(userID, templateARN string) error
 }
 
 type NATSPublisher struct {
@@ -77,6 +78,107 @@ func (p *NATSPublisher) Close() {
 		p.nc.Close()
 	}
 }
+
+func (p *NATSPublisher) PublishCreateUploadURL(req interface{}) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher not initialized")
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	subject := fmt.Sprintf("%s.s3.task.create_presigned_url", p.profile)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("nats request failed: %w", err)
+	}
+
+	var resp struct {
+		UploadURL string `json:"upload_url"`
+	}
+
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if resp.UploadURL == "" {
+		return "", fmt.Errorf("empty upload url returned")
+	}
+
+	return resp.UploadURL, nil
+}
+
+
+
+
+type agentPresignRequest struct {
+	UserID    string `json:"user_id"`
+	AssetID   string `json:"asset_id"`
+	AssetType string `json:"asset_type"`
+	Key       string `json:"key"` // direct key override
+}
+
+type agentPresignResponse struct {
+	DownloadURL string `json:"download_url"`
+}
+
+
+
+func (p *NATSPublisher) FetchAgentPresignedURL(userID string,version string) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher not initialized")
+	}
+	fileName := fmt.Sprintf("agent-prod-linux-amd64-%s", version) // matches CI binary name
+log.Println("pre*****dfre*****signedURL")
+
+	reqPayload := agentPresignRequest{
+		UserID:    userID,
+		AssetID:   fileName,
+		AssetType: "agent",
+		Key:       fileName,
+	}
+
+	data, err := json.Marshal(reqPayload)
+	if err != nil {
+		return "", fmt.Errorf("marshal presign request: %w", err)
+	}
+
+	subject := fmt.Sprintf("%s.s3.task.get_download_url", p.profile)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("nats request presigned url: %w", err)
+	}
+
+log.Println("pre*****34df*****signedURL")
+
+
+	var resp agentPresignResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return "", fmt.Errorf("unmarshal presign response: %w", err)
+	}
+log.Println("pre*****dfew*****signedURL")
+
+	if resp.DownloadURL == "" {
+		return "", fmt.Errorf("empty presigned url returned from s3")
+	}
+log.Println("pre*****df**ff***signedURL")
+
+	return resp.DownloadURL, nil
+}
+
+
+
+
+
+
+
+
+
+
 
 // PublishInstanceEvent publishes an instance lifecycle event to NATS.
 //
@@ -313,6 +415,40 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	log.Printf("[NATS] [RESPONSE] correlation_id=%s vpc_id=%s bridge_name=%s status=success", correlationID, response.VPCID, response.BridgeName)
 	return response.VPCID, response.BridgeName, nil
 }
+
+
+func (p *NATSPublisher) PublishDownloadTemplateURL(data []byte) (string, error) {
+	if p == nil || p.nc == nil {
+		return "", fmt.Errorf("NATS publisher not initialized")
+	}
+
+	subject := fmt.Sprintf("%s.s3.task.create_presign_download_url", p.profile)
+
+	log.Printf("[NATS] [REQUEST] subject=%s", subject)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var response struct {
+		URL string `json:"url"`
+	}
+
+	if err := json.Unmarshal(msg.Data, &response); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if response.URL == "" {
+		return "", fmt.Errorf("empty presigned url returned")
+	}
+
+	log.Printf("[NATS] [RESPONSE] success")
+
+	return response.URL, nil
+}
+
+
 
 // ValidateVPC checks if a VPC ID is valid for a given tenant.
 func (p *NATSPublisher) ValidateVPC(tenantID, vpcID string) (bool, error) {

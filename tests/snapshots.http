@@ -21,3 +21,10 @@ DELETE {{baseUrl}}/snapshots/{{snapshotId}}
 Accept: application/json
 
 ### Variables
+
+
+
+
+GET  http://localhost:8080/api/v1/s3/buckets/agent-binary-system/objects/agent-prod-linux-amd64-1.0.0?urlId=de883b0b-3014-4b58-9887-fa2a0d80c8c4&expires=1778931996&method=GET&signature=5dc6497c06695803f3e73eb5de9ca161aff56981f38c2a39bc910033096e97c2%201234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+Content-Type: application/json
+Accept: application/json

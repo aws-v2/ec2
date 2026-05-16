@@ -1,28 +1,40 @@
 package application
 
 import (
+	"bytes"
+	"context"
 	domain "ec2-api/internal/domain/host"
+	messaging "ec2-api/internal/infra/messaging"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type HostService struct {
-	repo domain.Repository
-	mu   sync.Mutex
+	repo                domain.Repository
+	mu                  sync.Mutex
 	lastSelectionOffset int
-	 ec2PublicKey string // loaded from env/config at startup
+	ec2PublicKey        string // loaded from env/config at startup
+	publisher           *messaging.NATSPublisher
+	agentUrlParts string
 }
 
 type HeartbeatResponse struct {
-    EC2PublicKey string `json:"ec2_public_key"`
+	EC2PublicKey string `json:"ec2_public_key"`
 }
 
-func NewHostService(repo domain.Repository, ec2PublicKey string) *HostService {
+func NewHostService(repo domain.Repository, ec2PublicKey string,
+	publisher *messaging.NATSPublisher,agentUrlParts string) *HostService {
 	return &HostService{
-		repo: repo,
+		repo:         repo,
 		ec2PublicKey: ec2PublicKey,
+		agentUrlParts:agentUrlParts,
+		publisher:    publisher,
 	}
 }
 
@@ -30,38 +42,254 @@ func (s *HostService) GetHost(id string) (*domain.Host, error) {
 	return s.repo.GetByID(id)
 }
 
+func (s *HostService) AddTemplate(
+	ctx context.Context,
+	userID, correlationID, templateARN, extension string,
+) (string, error) {
+
+	if extension == "" {
+		extension = ".zip"
+	}
+
+	req := struct {
+		TemplateID string `json:"template_id"`
+		UserID     string `json:"user_id"`
+		ARN        string `json:"arn"`
+		Extension  string `json:"extension"`
+	}{
+		TemplateID: templateARN,
+		UserID:     userID,
+		ARN:        templateARN,
+		Extension:  extension,
+	}
+
+	url, err := s.publisher.PublishCreateUploadURL(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create upload url: %w", err)
+	}
+
+	return url, nil
+}
+func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.RolloutUpdateRequest) (*domain.RolloutSummary, error) {
+	hosts, err := s.repo.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch hosts: %w", err)
+	}
+
+	presignedURL, err := s.publisher.FetchAgentPresignedURL(req.UserID, req.Version)
+	if err != nil {
+		return nil, fmt.Errorf("fetch agent presigned url: %w", err)
+	}
+
+	if req.SHA256 == "" {
+		req.SHA256 = "sha256-test"
+	}
+
+	payload := domain.AgentUpdatePayload{
+		Version: req.Version,
+		URL:     fmt.Sprintf("%s%s", s.agentUrlParts, presignedURL),
+		SHA256:  req.SHA256,
+	}
+
+	// Always validate once upfront before touching any host
+	if err := s.validateS3URL(payload.URL); err != nil {
+		return nil, fmt.Errorf("s3 pre-flight failed, rollout aborted: %w", err)
+	}
+
+	// Cancellable context — any goroutine can abort the entire rollout
+	rolloutCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		counter atomic.Int64        // counts dispatched goroutines
+		s3Err   atomic.Pointer[error] // stores first s3 failure seen mid-rollout
+	)
+
+	results := make(chan domain.UpdateResult, len(hosts))
+
+	for _, host := range hosts {
+		go func(host domain.Host) {
+			n := counter.Add(1)
+
+			// Re-validate S3 every 10th goroutine
+			if n%10 == 0 {
+				if err := s.validateS3URL(payload.URL); err != nil {
+					s3Err.CompareAndSwap(nil, &err) // store only the first error
+					cancel()                        // signal all other goroutines to stop
+				}
+			}
+
+			// Bail out if rollout was cancelled by a failed s3 check
+			if rolloutCtx.Err() != nil {
+				results <- domain.UpdateResult{
+					HostID: host.ID,
+					Addr:   host.IP,
+					OK:     false,
+					Error:  "rollout aborted: s3 became unreachable mid-flight",
+				}
+				return
+			}
+
+			err := s.pushUpdateToAgent(host.IP, payload)
+			res := domain.UpdateResult{HostID: host.ID, Addr: host.IP, OK: err == nil}
+			if err != nil {
+				res.Error = err.Error()
+			}
+			results <- res
+		}(host)
+	}
+
+	summary := &domain.RolloutSummary{Total: len(hosts), Version: req.Version}
+	for range hosts {
+		r := <-results
+		if r.OK {
+			summary.OK++
+		} else {
+			summary.Failed++
+		}
+		summary.Results = append(summary.Results, r)
+	}
+
+	// Surface the S3 mid-rollout error in the summary if one occurred
+	if p := s3Err.Load(); p != nil {
+		summary.S3Error = (*p).Error()
+	}
+
+	return summary, nil
+}
+
+func (s *HostService) validateS3URL(url string) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("build s3 request: %w", err)
+	}
+
+	req.Header.Set("Range", "bytes=0-0")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("s3 unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 401 = server is up but key not sent (agent sends its own key) — treat as reachable
+	// 404 = file missing, 5xx = server broken
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode >= 500 {
+		return fmt.Errorf("s3 unavailable: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+
+
+// func (s *HostService) pushUpdateToAgent(agentURL string, payload domain.AgentUpdatePayload) error {
+// 	body, err := json.Marshal(payload)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	hostIp:=body.hostIP
+// 	log.Println("pre**********signedURL", s.agentUrlParts)
+// 	s.agentUrlParts =http://placeholder:9030
+// 	fullUrl = fmt.Foamt s.agentUrlParts.replace("placeholder"hostIP,)/agentURL
+
+// 	resp, err := http.Post(fmt.Sprintf("%s/update/%s",s.agentUrlParts ,agentURL), "application/json", bytes.NewReader(body))
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer resp.Body.Close()
+
+// 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
+// 		return fmt.Errorf("agent returned %d", resp.StatusCode)
+// 	}
+
+// 	return nil
+// }
+
+
+
+
+func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdatePayload) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	// when the agent recieves the presigned urlit uses its api-keyto get and download file
+
+	url := fmt.Sprintf("http://%s:9030/update", hostIP)
+	log.Printf("[HostService] pushing update to agent at %s", url)
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("post to agent: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("agent returned %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (s *HostService) GetHostTemplates(ctx context.Context, userID, correlationID string) (string, error) {
+
+	templateARN := "default"
+
+	payload := map[string]string{
+		"user_id":        userID,
+		"correlation_id": correlationID,
+		"template_arn":   templateARN,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// ONLY responsibility: call publisher
+	url, err := s.publisher.PublishDownloadTemplateURL(data)
+	if err != nil {
+		return "", fmt.Errorf("failed to get presigned url: %w", err)
+	}
+
+	return url, nil
+}
+
 func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatResponse, error) {
-    sshUser := req.SSHUser
-    parts := strings.Split(req.Hostname, ":")
-    if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
-        log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
-        sshUser = parts[6]
-    }
+	sshUser := req.SSHUser
+	parts := strings.Split(req.Hostname, ":")
+	if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
+		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
+		sshUser = parts[6]
+	}
 
-    host := &domain.Host{
-        ID:                 req.HostID,
-        Hostname:           req.Hostname,
-        IP:                 req.IP,
-        SSHUser:            sshUser,
-        CPUTotal:           req.CPUTotal,
-        CPUUsed:            req.CPUUsed,
-        RAMTotal:           req.RAMTotal,
-        RAMFree:            req.RAMFree,
-        DiskTotal:          req.DiskTotal,
-        DiskFree:           req.DiskFree,
-        AvailableTemplates: req.AvailableTemplates,
-        SSHPrivateKey:      req.SSHPrivateKey,
-        Status:             "active",
-        LastHeartbeat:      time.Now(),
-    }
+	host := &domain.Host{
+		ID:                 req.HostID,
+		Hostname:           req.Hostname,
+		IP:                 req.IP,
+		SSHUser:            sshUser,
+		CPUTotal:           req.CPUTotal,
+		CPUUsed:            req.CPUUsed,
+		RAMTotal:           req.RAMTotal,
+		RAMFree:            req.RAMFree,
+		DiskTotal:          req.DiskTotal,
+		DiskFree:           req.DiskFree,
+		AvailableTemplates: req.AvailableTemplates,
+		SSHPrivateKey:      req.SSHPrivateKey,
+		Status:             "active",
+		LastHeartbeat:      time.Now(),
+	}
 
-    if err := s.repo.Update(host); err != nil {
-        return nil, err
-    }
+	if err := s.repo.Update(host); err != nil {
+		return nil, err
+	}
 
-    return &HeartbeatResponse{
-        EC2PublicKey: s.ec2PublicKey,
-    }, nil
+	return &HeartbeatResponse{
+		EC2PublicKey: s.ec2PublicKey,
+	}, nil
 }
 
 func (s *HostService) SelectBestHost() (*domain.Host, error) {

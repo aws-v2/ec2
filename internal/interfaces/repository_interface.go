@@ -10,6 +10,8 @@ type HostRepository interface {
 	Update(host *hostdomain.Host) error
 	GetBestHosts(limit int) ([]*hostdomain.Host, error)
 	GetByID(id string) (*hostdomain.Host, error)
+	ListAll(ctx context.Context) ([]hostdomain.Host, error)
+
 }
 
 type InstanceRepository interface {

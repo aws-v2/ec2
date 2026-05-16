@@ -104,6 +104,7 @@ jobs:
               --env NATS_URL=nats://nats-prod:4222 \
               --env NATS_USER=nats-prod-user \
               --env NATS_PASSWORD=nats-prod-password \
+              --env API_GATEWAY=http://SHOULD BE THE ACTUAL ADDRES, CANT USE DOCKER'S ORINTERNLS:8080 \
               --env NATS_SUBJECT_PREFIX=prod.v1 \
               --env EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
               --env EUREKA_APP_NAME=EC2-SERVICE \
