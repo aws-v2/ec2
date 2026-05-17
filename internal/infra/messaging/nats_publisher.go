@@ -127,12 +127,11 @@ type agentPresignResponse struct {
 
 
 
-func (p *NATSPublisher) FetchAgentPresignedURL(userID string,version string) (string, error) {
+func (p *NATSPublisher) FetchAgentPresignedURL(userID string,version string,fileName string) (string, error) {
 	if p == nil || p.nc == nil {
 		return "", fmt.Errorf("NATS publisher not initialized")
 	}
-	fileName := fmt.Sprintf("agent-prod-linux-amd64-%s", version) // matches CI binary name
-log.Println("pre*****dfre*****signedURL")
+	// fileName := fmt.Sprintf("agent-%s", version) // matches CI binary name
 
 	reqPayload := agentPresignRequest{
 		UserID:    userID,
@@ -140,6 +139,8 @@ log.Println("pre*****dfre*****signedURL")
 		AssetType: "agent",
 		Key:       fileName,
 	}
+log.Printf("pre*****dfre*****signedURL1 %v",reqPayload)
+
 
 	data, err := json.Marshal(reqPayload)
 	if err != nil {

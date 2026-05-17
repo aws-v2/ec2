@@ -2,8 +2,10 @@ package interfaces
 
 import (
 	"context"
-	domain "ec2-api/internal/domain/instance"
 	hostdomain "ec2-api/internal/domain/host"
+	domain "ec2-api/internal/domain/instance"
+
+	"github.com/google/uuid"
 )
 
 type HostRepository interface {
@@ -12,6 +14,16 @@ type HostRepository interface {
 	GetByID(id string) (*hostdomain.Host, error)
 	ListAll(ctx context.Context) ([]hostdomain.Host, error)
 
+}
+
+
+type RolloutRepository interface {
+    CreateRollout(ctx context.Context, r domain.AgentRollout) error
+    UpdateRolloutSummary(ctx context.Context, rolloutID uuid.UUID, ok, failed int, s3Err string) error
+
+    InsertUpdateStatus(ctx context.Context, s domain.AgentUpdateStatus) error
+    UpdateStatusByHostAndVersion(ctx context.Context, hostID uuid.UUID, version, status string) error // called on agent ping
+    GetStatusByRollout(ctx context.Context, rolloutID uuid.UUID) ([]domain.AgentUpdateStatus, error)
 }
 
 type InstanceRepository interface {
