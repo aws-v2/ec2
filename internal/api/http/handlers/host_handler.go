@@ -20,6 +20,16 @@ func NewHostHandler(service *application.HostService) *HostHandler {
 	return &HostHandler{service: service}
 }
 
+//    run: |
+//           curl -X POST \
+//             "http://${STAGING_CONTROL_PLANE}/api/v1/compute/host/update-agent" \
+//             -H "X-Api-Key: ${API_KEY}" \
+//             -H "Content-Type: application/json" \
+//             -d '{
+//               "bucket": "agent-binary-system",
+//               "file_name": "agent-${{ steps.version.outputs.VERSION }}"
+//             }'
+
 
 
 func (h *HostHandler) UpdateAgent(c *gin.Context) {
@@ -31,7 +41,8 @@ func (h *HostHandler) UpdateAgent(c *gin.Context) {
 
 
 	req.UserID = c.GetString("userID")
-
+	
+	
 	// req.Bucket and req.FileName come from the JSON body
 	// req.Version is derived from the file name eg agent-1.0.2 → 1.0.2
 	if req.FileName != "" && req.Version == "" {

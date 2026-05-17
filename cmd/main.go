@@ -162,8 +162,9 @@ func main() {
 	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
+	rolloutRepo := repository.NewRolloutRepo(db)
 
-	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts)
+	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo)
 
 	// 3. Initialize Application Layer (Services)
 	slog.Info("Initializing services...")
