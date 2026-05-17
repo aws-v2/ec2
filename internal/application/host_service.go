@@ -25,8 +25,8 @@ type HostService struct {
 	lastSelectionOffset int
 	ec2PublicKey        string // loaded from env/config at startup
 	publisher           *messaging.NATSPublisher
-	agentUrlParts string
-	rolloutRepo interfaces.RolloutRepository
+	agentUrlParts       string
+	rolloutRepo         interfaces.RolloutRepository
 }
 
 type HeartbeatResponse struct {
@@ -34,13 +34,13 @@ type HeartbeatResponse struct {
 }
 
 func NewHostService(repo domain.Repository, ec2PublicKey string,
-	publisher *messaging.NATSPublisher,agentUrlParts string, rolloutRepo interfaces.RolloutRepository) *HostService {
+	publisher *messaging.NATSPublisher, agentUrlParts string, rolloutRepo interfaces.RolloutRepository) *HostService {
 	return &HostService{
-		repo:         repo,
-		ec2PublicKey: ec2PublicKey,
-		agentUrlParts:agentUrlParts,
-		publisher:    publisher,
-		rolloutRepo:rolloutRepo,
+		repo:          repo,
+		ec2PublicKey:  ec2PublicKey,
+		agentUrlParts: agentUrlParts,
+		publisher:     publisher,
+		rolloutRepo:   rolloutRepo,
 	}
 }
 
@@ -77,120 +77,117 @@ func (s *HostService) AddTemplate(
 	return url, nil
 }
 
-
-
-
 func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.RolloutUpdateRequest) (*domain.RolloutSummary, error) {
-    hosts, err := s.repo.ListAll(ctx)
-    if err != nil {
-        return nil, fmt.Errorf("fetch hosts: %w", err)
-    }
+	hosts, err := s.repo.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch hosts: %w", err)
+	}
 
-    presignedURL, err := s.publisher.FetchAgentPresignedURL(req.UserID, req.Version, req.FileName)
-    if err != nil {
-        return nil, fmt.Errorf("fetch agent presigned url: %w", err)
-    }
+	presignedURL, err := s.publisher.FetchAgentPresignedURL(req.UserID, req.Version, req.FileName)
+	if err != nil {
+		return nil, fmt.Errorf("fetch agent presigned url: %w", err)
+	}
 
-    if req.SHA256 == "" {
-        req.SHA256 = "sha256-test"
-    }
+	if req.SHA256 == "" {
+		req.SHA256 = "sha256-test"
+	}
 
-    payload := domain.AgentUpdatePayload{
-        Version: req.Version,
-        URL:     fmt.Sprintf("%s%s", s.agentUrlParts, presignedURL),
-        SHA256:  req.SHA256,
-    }
+	payload := domain.AgentUpdatePayload{
+		Version: req.Version,
+		URL:     fmt.Sprintf("%s%s", s.agentUrlParts, presignedURL),
+		SHA256:  req.SHA256,
+	}
 
-    if err := s.validateS3URL(payload.URL); err != nil {
-        return nil, fmt.Errorf("s3 pre-flight failed, rollout aborted: %w for this url: %s", err, payload.URL)
-    }
+	if err := s.validateS3URL(payload.URL); err != nil {
+		return nil, fmt.Errorf("s3 pre-flight failed, rollout aborted: %w for this url: %s", err, payload.URL)
+	}
 
-    // --- Save rollout metadata ---
-    rolloutID := uuid.New()
-    if err := s.rolloutRepo.CreateRollout(ctx, agentDomain.AgentRollout{
-        ID:          rolloutID,
-        Version:     req.Version,
-        FileName:    req.FileName,
-        SHA256:      req.SHA256,
-        URL:         payload.URL,
-        InitiatedBy: req.UserID,
-        Total:       len(hosts),
-    }); err != nil {
-        return nil, fmt.Errorf("save rollout metadata: %w", err)
-    }
+	// --- Save rollout metadata ---
+	rolloutID := uuid.New()
+	if err := s.rolloutRepo.CreateRollout(ctx, agentDomain.AgentRollout{
+		ID:          rolloutID,
+		Version:     req.Version,
+		FileName:    req.FileName,
+		SHA256:      req.SHA256,
+		URL:         payload.URL,
+		InitiatedBy: req.UserID,
+		Total:       len(hosts),
+	}); err != nil {
+		return nil, fmt.Errorf("save rollout metadata: %w", err)
+	}
 
-    // --- Insert pending status row for every host upfront ---
-    for _, host := range hosts {
-        _ = s.rolloutRepo.InsertUpdateStatus(ctx, agentDomain.AgentUpdateStatus{
-            ID:        uuid.New(),
-            RolloutID: rolloutID,
-         HostID: host.ID,
-            HostIP:    host.IP,
-        })
-    }
+	// --- Insert pending status row for every host upfront ---
+	for _, host := range hosts {
+		_ = s.rolloutRepo.InsertUpdateStatus(ctx, agentDomain.AgentUpdateStatus{
+			ID:        uuid.New(),
+			RolloutID: rolloutID,
+			HostID:    host.ID,
+			HostIP:    host.IP,
+		})
+	}
 
-    rolloutCtx, cancel := context.WithCancel(ctx)
-    defer cancel()
+	rolloutCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-    var (
-        counter atomic.Int64
-        s3Err   atomic.Pointer[error]
-    )
+	var (
+		counter atomic.Int64
+		s3Err   atomic.Pointer[error]
+	)
 
-    results := make(chan domain.UpdateResult, len(hosts))
+	results := make(chan domain.UpdateResult, len(hosts))
 
-    for _, host := range hosts {
-        go func(host domain.Host) {
-            n := counter.Add(1)
-            if n%10 == 0 {
-                if err := s.validateS3URL(payload.URL); err != nil {
-                    s3Err.CompareAndSwap(nil, &err)
-                    cancel()
-                }
-            }
+	for _, host := range hosts {
+		go func(host domain.Host) {
+			n := counter.Add(1)
+			if n%10 == 0 {
+				if err := s.validateS3URL(payload.URL); err != nil {
+					s3Err.CompareAndSwap(nil, &err)
+					cancel()
+				}
+			}
 
-            if rolloutCtx.Err() != nil {
-                results <- domain.UpdateResult{HostID: host.ID, Addr: host.IP, OK: false, Error: "rollout aborted: s3 became unreachable mid-flight"}
-                return
-            }
+			if rolloutCtx.Err() != nil {
+				results <- domain.UpdateResult{HostID: host.ID, Addr: host.IP, OK: false, Error: "rollout aborted: s3 became unreachable mid-flight"}
+				return
+			}
 
-            err := s.pushUpdateToAgent(host.IP, payload)
-            res := domain.UpdateResult{HostID: host.ID, Addr: host.IP, OK: err == nil}
+			err := s.pushUpdateToAgent(host.IP, payload)
+			res := domain.UpdateResult{HostID: host.ID, Addr: host.IP, OK: err == nil}
 
-            if err != nil {
-                res.Error = err.Error()
+			if err != nil {
+				res.Error = err.Error()
 				hostUUID, err1 := uuid.Parse(host.ID)
-if err1 != nil {
-    return
-}
-                // push failed — mark immediately, no need to wait for agent ping
-                _ = s.rolloutRepo.UpdateStatusByHostAndVersion(ctx, hostUUID, req.Version, "failed")
-            }
-            // if OK — stays "pending" until agent pings back
+				if err1 != nil {
+					return
+				}
+				// push failed — mark immediately, no need to wait for agent ping
+				_ = s.rolloutRepo.UpdateStatusByHostAndVersion(ctx, hostUUID, req.Version, "failed")
+			}
+			// if OK — stays "pending" until agent pings back
 
-            results <- res
-        }(host)
-    }
+			results <- res
+		}(host)
+	}
 
-    summary := &domain.RolloutSummary{Total: len(hosts), Version: req.Version}
-    for range hosts {
-        r := <-results
-        if r.OK {
-            summary.OK++
-        } else {
-            summary.Failed++
-        }
-        summary.Results = append(summary.Results, r)
-    }
+	summary := &domain.RolloutSummary{Total: len(hosts), Version: req.Version}
+	for range hosts {
+		r := <-results
+		if r.OK {
+			summary.OK++
+		} else {
+			summary.Failed++
+		}
+		summary.Results = append(summary.Results, r)
+	}
 
-    if p := s3Err.Load(); p != nil {
-        summary.S3Error = (*p).Error()
-    }
+	if p := s3Err.Load(); p != nil {
+		summary.S3Error = (*p).Error()
+	}
 
-    // Persist final counts
-    _ = s.rolloutRepo.UpdateRolloutSummary(ctx, rolloutID, summary.OK, summary.Failed, summary.S3Error)
+	// Persist final counts
+	_ = s.rolloutRepo.UpdateRolloutSummary(ctx, rolloutID, summary.OK, summary.Failed, summary.S3Error)
 
-    return summary, nil
+	return summary, nil
 }
 
 func (s *HostService) validateS3URL(url string) error {
@@ -217,8 +214,6 @@ func (s *HostService) validateS3URL(url string) error {
 	return nil
 }
 
-
-
 // func (s *HostService) pushUpdateToAgent(agentURL string, payload domain.AgentUpdatePayload) error {
 // 	body, err := json.Marshal(payload)
 // 	if err != nil {
@@ -241,9 +236,6 @@ func (s *HostService) validateS3URL(url string) error {
 
 // 	return nil
 // }
-
-
-
 
 func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdatePayload) error {
 	body, err := json.Marshal(payload)

@@ -43,6 +43,7 @@ func (h *HostHandler) UpdateAgent(c *gin.Context) {
 	req.UserID = c.GetString("userID")
 	
 	
+	
 	// req.Bucket and req.FileName come from the JSON body
 	// req.Version is derived from the file name eg agent-1.0.2 → 1.0.2
 	if req.FileName != "" && req.Version == "" {
@@ -51,7 +52,6 @@ func (h *HostHandler) UpdateAgent(c *gin.Context) {
 			req.Version = parts[1]
 		}
 	}
-
 
 
 

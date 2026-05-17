@@ -20,7 +20,6 @@ type HostRepository interface {
 type RolloutRepository interface {
     CreateRollout(ctx context.Context, r domain.AgentRollout) error
     UpdateRolloutSummary(ctx context.Context, rolloutID uuid.UUID, ok, failed int, s3Err string) error
-
     InsertUpdateStatus(ctx context.Context, s domain.AgentUpdateStatus) error
     UpdateStatusByHostAndVersion(ctx context.Context, hostID uuid.UUID, version, status string) error // called on agent ping
     GetStatusByRollout(ctx context.Context, rolloutID uuid.UUID) ([]domain.AgentUpdateStatus, error)
