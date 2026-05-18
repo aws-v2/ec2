@@ -63,7 +63,6 @@ func runCmdWithProgress(cmd *exec.Cmd) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-
 func (l *LibvirtClient) CreateAndStartVM(
 	remoteHostIP string,
 	remoteHostUser string,
@@ -112,46 +111,46 @@ func (l *LibvirtClient) CreateAndStartVM(
 
 	conn := l.conn
 
-if remoteHostIP != "" {
+	if remoteHostIP != "" {
 
-    if remoteHostUser == "" {
-        remoteHostUser = "root"
-    }
+		if remoteHostUser == "" {
+			remoteHostUser = "root"
+		}
 
-    // Write key to temp file
-    formattedKey := strings.TrimSpace(strings.ReplaceAll(remoteHostKey, "\\n", "\n")) + "\n"
+		// Write key to temp file
+		formattedKey := strings.TrimSpace(strings.ReplaceAll(remoteHostKey, "\\n", "\n")) + "\n"
 
-    keyFile, err := os.CreateTemp("", "id_rsa_libvirt_*")
-    if err != nil {
-        return 0, fmt.Errorf("failed to create temp key file: %w", err)
-    }
-    defer os.Remove(keyFile.Name())
+		keyFile, err := os.CreateTemp("", "id_rsa_libvirt_*")
+		if err != nil {
+			return 0, fmt.Errorf("failed to create temp key file: %w", err)
+		}
+		defer os.Remove(keyFile.Name())
 
-    if _, err := keyFile.Write([]byte(formattedKey)); err != nil {
-        keyFile.Close()
-        return 0, fmt.Errorf("failed to write key file: %w", err)
-    }
-    keyFile.Close()
+		if _, err := keyFile.Write([]byte(formattedKey)); err != nil {
+			keyFile.Close()
+			return 0, fmt.Errorf("failed to write key file: %w", err)
+		}
+		keyFile.Close()
 
-    if err := os.Chmod(keyFile.Name(), 0600); err != nil {
-        return 0, fmt.Errorf("failed to chmod key file: %w", err)
-    }
+		if err := os.Chmod(keyFile.Name(), 0600); err != nil {
+			return 0, fmt.Errorf("failed to chmod key file: %w", err)
+		}
 
-    remoteURI := fmt.Sprintf(
-        "qemu+ssh://%s@%s/system?keyfile=%s&no_verify=1&sshauth=privkey",
-        remoteHostUser,
-        remoteHostIP,
-        keyFile.Name(), // 👈 was missing
-    )
+		remoteURI := fmt.Sprintf(
+			"qemu+ssh://%s@%s/system?keyfile=%s&no_verify=1&sshauth=privkey",
+			remoteHostUser,
+			remoteHostIP,
+			keyFile.Name(), // 👈 was missing
+		)
 
-    remoteConn, err := libvirt.NewConnect(remoteURI)
-    if err != nil {
-        return 0, fmt.Errorf("failed to connect remote libvirt: %w", err)
-    }
-    defer remoteConn.Close()
+		remoteConn, err := libvirt.NewConnect(remoteURI)
+		if err != nil {
+			return 0, fmt.Errorf("failed to connect remote libvirt: %w", err)
+		}
+		defer remoteConn.Close()
 
-    conn = remoteConn
-}
+		conn = remoteConn
+	}
 	// ---------------------------------------------------
 	// Define VM
 	// ---------------------------------------------------
