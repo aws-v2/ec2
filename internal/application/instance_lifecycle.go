@@ -88,7 +88,7 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 func (s *InstanceService) persistAndLaunch(
 	req *domain.CreateInstanceRequest,
 	userID, instanceID, vmName, newDiskPath, baseImagePath,
-	bridgeName, privateIP, gateway, vpcID, instanceToken string,bestHost *host.Host,
+	bridgeName, privateIP, gateway, vpcID, instanceToken string, bestHost *host.Host,
 ) (*domain.Instance, error) {
 	keyPair, err := GenerateSSHKeyPair()
 	if err != nil {
@@ -119,37 +119,49 @@ func (s *InstanceService) persistAndLaunch(
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
 	}
 
+	// Extract assets from manifest parameters
+	assets := []host.AssetConfig{}
+	if req.Manifest.Parameters != nil {
+		// Look for ASSET_URL, ASSET_PATH, ASSET_TARGET, ASSET_SHA256
+		if url, ok := req.Manifest.Parameters["ASSET_URL"]; ok {
+			asset := host.AssetConfig{
+				Name:   req.Manifest.Name,
+				URL:    url,
+				Path:   req.Manifest.Parameters["ASSET_PATH"],
+				Target: req.Manifest.Parameters["ASSET_TARGET"],
+				SHA256: req.Manifest.Parameters["ASSET_SHA256"],
+			}
+			if asset.Path == "" {
+				asset.Path = fmt.Sprintf("/var/lib/assets/%s", asset.Name)
+			}
+			assets = append(assets, asset)
+		}
+	}
 
- 
+	_, _ = s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
+		VPCID: vpcID,
+		Bridge: host.BridgeConfig{
+			Name:    bridgeName,
+			Gateway: gateway,
+			CIDR:    "",
+		},
+		IP:      privateIP,
+		Gateway: gateway,
+		Assets:  assets,
+	})
 
-_, _ = s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
-	VPCID:   vpcID,
-	Bridge:  host.BridgeConfig{
-		Name:bridgeName,
-		Gateway:gateway,
-		CIDR: "",
-	},
-	IP:      privateIP,
-	Gateway: gateway,
-})
-
-
-
-
-fmt.Println("*****************Network reconciled for instance***********", instanceID)
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair)
+	fmt.Println("*****************Network reconciled for instance***********", instanceID)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets)
 
 	// Return the full key so the caller can hand it back to the user once
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
 	return instance, nil
 }
-
-
 
 func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkReconcileRequest) (bool, error) {
 
@@ -157,7 +169,7 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		log.Printf("[NETWORK] marshal error: %v", err)
 		return false, err
@@ -165,7 +177,7 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		log.Printf("[NETWORK] request build error: %v", err)
 		return false, err
@@ -175,7 +187,7 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		log.Printf("[NETWORK] agent call failed (ignored): %v", err)
 		return false, nil // 👈 IMPORTANT: do NOT fail pipeline
@@ -219,10 +231,6 @@ func (s *InstanceService) buildOverlay(
 
 	return nil
 }
-
-
-
-
 
 func (s *InstanceService) transferOverlayToHost(
 	hostIP string,
@@ -276,21 +284,17 @@ func (s *InstanceService) transferOverlayToHost(
 	return nil
 }
 
-
-
-
-
-
 func (s *InstanceService) createVMAsync(
 	instance *domain.Instance,
 	req *domain.CreateInstanceRequest,
-	baseImagePath,
-	newDiskPath,
-	bridgeName,
-	privateIP,
-	gateway,
+	baseImagePath string,
+	newDiskPath string,
+	bridgeName string,
+	privateIP string,
+	gateway string,
 	instanceToken string,
 	keyPair *SSHKeyPair,
+	assets []host.AssetConfig,
 ) {
 	// ---------------------------------------------------
 	// Resolve host
@@ -327,7 +331,7 @@ func (s *InstanceService) createVMAsync(
 	err := s.buildOverlay(instance.ID, absBase, absOverlay)
 	if err != nil {
 		log.Printf("[VM] overlay creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -364,7 +368,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] cloud-init creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -388,7 +392,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] overlay transfer failed*: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -410,13 +414,37 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] iso transfer failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
 	}
 
 	log.Printf("[VM] iso transferred")
+
+	// ---------------------------------------------------
+	// STEP 4.5 — INJECT ASSETS
+	// ---------------------------------------------------
+
+	if len(assets) > 0 {
+		err = s.libvirtClient.InjectAssets(
+			remoteHostIP,
+			remoteHostUser,
+			s.ec2PrivateKey,
+			absOverlay,
+			assets,
+		)
+
+		if err != nil {
+			log.Printf("[VM] asset injection failed: %v", err)
+			go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
+
+			s.markTerminatedAndReleaseNetwork(instance, absOverlay)
+			return
+		}
+
+		log.Printf("[VM] assets injected successfully")
+	}
 
 	// ---------------------------------------------------
 	// STEP 5 — START VM
@@ -442,7 +470,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] failed to start vm: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -456,7 +484,7 @@ func (s *InstanceService) createVMAsync(
 	instance.ProxmoxID = vmID
 
 	if err := s.repo.Update(instance); err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
 
 		log.Printf("[VM] failed to update instance: %v", err)
 		return
@@ -468,39 +496,16 @@ func (s *InstanceService) createVMAsync(
 		remoteHostIP,
 	)
 
-
-
-
-
-
-
-
-
 	log.Printf(
 		"---------------------------------",
 	)
 
-// s.sseBroker.Push(instance.ID, string(payload))
+	agentWS := fmt.Sprintf("ws://%s:%d", remoteHostIP, s.agentPort)
 
-
-// after VM starts — that's it, EC2's job is done
-
-
-
-// ---------------------------------------------------
-// STEP 7 — PUBLISH VM READY EVENT
-// ---------------------------------------------------
-
-
-
-
-
-
-
-agentWS := fmt.Sprintf("ws://%s:%d", remoteHostIP, s.agentPort)
-
-if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
-    log.Printf("[VM] failed to publish provisioned event: %v", err)
-}
+	if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
+		log.Printf("[VM] failed to publish provisioned event: %v", err)
+	}
 
 }
+
+

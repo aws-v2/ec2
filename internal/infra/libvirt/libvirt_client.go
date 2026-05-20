@@ -15,6 +15,7 @@ import (
 	"time"
 
 	libvirt "libvirt.org/go/libvirt"
+	"ec2-api/internal/domain/host"
 )
 
 type LibvirtClient struct {
@@ -932,4 +933,80 @@ func (l *LibvirtClient) RestoreSnapshot(remoteHostIP, remoteHostUser, remoteHost
 	}
 
 	return nil
+}
+func (l *LibvirtClient) runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, command string) error {
+	if remoteHostIP == "" {
+		// Run locally
+		cmd := exec.Command("bash", "-c", command)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("local command failed: %w, output: %s", err, string(output))
+		}
+		return nil
+	}
+
+	if remoteHostUser == "" {
+		remoteHostUser = "root"
+	}
+
+	formattedKey := strings.ReplaceAll(remoteHostKey, "\\n", "\n")
+	if !strings.HasSuffix(formattedKey, "\n") {
+		formattedKey += "\n"
+	}
+
+	f, err := os.CreateTemp("", "id_rsa_ssh_*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+
+	if _, err := f.Write([]byte(formattedKey)); err != nil {
+		return err
+	}
+	f.Close()
+	os.Chmod(f.Name(), 0600)
+
+	args := []string{
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "BatchMode=yes",
+		"-i", f.Name(),
+		fmt.Sprintf("%s@%s", remoteHostUser, remoteHostIP),
+		command,
+	}
+
+	cmd := exec.Command("ssh", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("remote command failed: %w, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+func (l *LibvirtClient) InjectAssets(remoteHostIP, remoteHostUser, remoteHostKey, diskPath string, assets []host.AssetConfig) error {
+	if len(assets) == 0 {
+		return nil
+	}
+
+	log.Printf("[Libvirt] Injecting %d assets into disk %s on %s", len(assets), diskPath, remoteHostIP)
+
+	// Build virt-customize command
+	// virt-customize -a DISK --copy-in HOSTPATH:TARGETPATH
+	args := []string{"virt-customize", "-a", diskPath}
+
+	hasTarget := false
+	for _, asset := range assets {
+		if asset.Target != "" {
+			args = append(args, "--copy-in", fmt.Sprintf("%s:%s", asset.Path, asset.Target))
+			hasTarget = true
+		}
+	}
+
+	if !hasTarget {
+		log.Printf("[Libvirt] No target paths specified for assets, skipping injection")
+		return nil
+	}
+
+	cmdStr := strings.Join(args, " ")
+	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, cmdStr)
 }
