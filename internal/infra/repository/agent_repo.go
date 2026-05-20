@@ -28,7 +28,7 @@ func (r *RolloutRepo) CreateRollout(ctx context.Context, rollout domain.AgentRol
 	)
 	return err
 }
-
+  
 func (r *RolloutRepo) UpdateRolloutSummary(ctx context.Context, rolloutID uuid.UUID, ok, failed int, s3Err string) error {
 	_, err := r.db.ExecContext(ctx, `
         UPDATE agent_rollouts SET ok=$1, failed=$2, s3_error=NULLIF($3,'') WHERE id=$4`,
