@@ -112,12 +112,17 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 }
 
 
-
+type AssetConfig struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
 
 
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
  
-		fmt.Printf("[PROVISIONER]------------------>...event parameters: %v", event)
+		fmt.Printf("[PROVISIONER]------------------>...event parameters: %v", event.Manifest.Parameters)
 
 	// event.StorageARN = "arn:serw:s3::bdcc0db1-8a77-44a3-90d6-f7fcd604971e:bucket/gamelift_games"
 	
@@ -125,46 +130,38 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 	log.Printf("[PROVISIONER] initial parameters=%v", event)
 
 	// Merge STORAGE_ARN
-	if event.StorageARN == ""  {
-		log.Printf("[PROVISIONER] injecting STORAGE_ARN from event → %s", event.StorageARN)
-		return fmt.Errorf("STORAGE_ARN provided but not supported in this version: %s", event.StorageARN)
-	}
-
-	event.Manifest.Name="test"
-	event.Manifest.Version="1.0.0"
-
-	event.Manifest.MainScene="main.tscn"
-	event.Manifest.PlayerNode="Player"
-	event.Manifest.SyncNodes=[]domain.SyncNode{
-		{
-			Name: "SyncNode",
-			Type: "SyncNode",
-		},
-	}
-	event.Manifest.Parameters=map[string]string{
-		"param1": "value1",
-		"param2": "value2",
-	}
+	// if event.StorageARN == ""  {
+	// 	log.Printf("[PROVISIONER] injecting STORAGE_ARN from event → %s", event.StorageARN)
+	// 	return fmt.Errorf("STORAGE_ARN provided but not supported in this version: %s", event.StorageARN)
+	// }
+ 
 
 
 	// Merge HEADLESS_BIN
-	if event.Manifest.HeadlessBin == "" {
-		log.Printf("[PROVISIONER] injecting HEADLESS_BIN from event → %s", event.Manifest.HeadlessBin)
-		return fmt.Errorf("HEADLESS_BIN provided but not supported in this version: %s", event.Manifest.HeadlessBin)
-	}
+	// if event.Manifest.HeadlessBin == "" {
+	// 	log.Printf("[PROVISIONER] injecting HEADLESS_BIN from event → %s", event.Manifest.HeadlessBin)
+	// 	return fmt.Errorf("HEADLESS_BIN provided but not supported in this version: %s", event.Manifest.HeadlessBin)
+	// }
 
 
 	// Build request
-	req := &domain.CreateInstanceRequest{
-		Image:      "ubuntu-22.04",
-		CPU:        event.Specs["cpu"],
-		RAM:        event.Specs["ram"],
-		Profile:    event.Profile,
-		Manifest: event.Manifest,
-		// pa
-		ARN: event.StorageARN,
-		SessionID: event.SessionID,
-	}
+req := &domain.CreateInstanceRequest{
+    Image:     "ubuntu-22.04",
+    CPU:       event.Specs["cpu"],
+    RAM:       event.Specs["ram"],
+    Profile:   event.Profile,
+    Manifest:  event.Manifest,
+    ARN:       event.StorageARN,
+    SessionID: event.SessionID,
+    Assets: []domain.AssetConfigs{
+        {
+            Name:   event.Manifest.Name,
+            URL:    event.Manifest.Parameters["ASSET_URL"],
+            Path:   event.Manifest.Parameters["ASSET_PATH"],
+            SHA256: event.Manifest.Parameters["ASSET_SHA256"],
+        },
+    },
+}
 
 	// Defaults
 	if req.CPU == 0 {

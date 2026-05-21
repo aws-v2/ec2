@@ -125,15 +125,15 @@ func (s *InstanceService) persistAndLaunch(
 	}
 
 	// Extract assets from manifest parameters
-	assets := []host.AssetConfig{}
+	assets := []domain.AssetConfigs{}
 	if req.Manifest.Parameters != nil {
 		// Look for ASSET_URL, ASSET_PATH, ASSET_TARGET, ASSET_SHA256
 		if url, ok := req.Manifest.Parameters["ASSET_URL"]; ok {
-			asset := host.AssetConfig{
+			asset := domain.AssetConfigs{
 				Name:   req.Manifest.Name,
 				URL:    url,
 				Path:   req.Manifest.Parameters["ASSET_PATH"],
-				Target: req.Manifest.Parameters["ASSET_TARGET"],
+				// Target: req.Manifest.Parameters["ASSET_TARGET"],
 				SHA256: req.Manifest.Parameters["ASSET_SHA256"],
 			}
 			if asset.Path == "" {
@@ -294,7 +294,7 @@ func (s *InstanceService) createVMAsync(
 	gateway string,
 	instanceToken string,
 	keyPair *SSHKeyPair,
-	assets []host.AssetConfig,
+	assets []domain.AssetConfigs,
 ) {
 	// ---------------------------------------------------
 	// Resolve host

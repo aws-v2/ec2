@@ -14,8 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	domain "ec2-api/internal/domain/instance"
+
 	libvirt "libvirt.org/go/libvirt"
-	"ec2-api/internal/domain/host"
 )
 
 type LibvirtClient struct {
@@ -297,6 +298,8 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 	switch profile {
 	case "gamelift":
 		profileContent = `
+  - mkdir -p /var/lib/libvirt/game-files
+
   - path: /opt/game/start.sh
     permissions: '0755'
     content: |
@@ -309,6 +312,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
       [Unit]
       Description=Godot Game Server
       After=network-online.target
+
       [Service]
       Type=simple
       Environment="BACKEND_URL={{BACKEND_URL}}"
@@ -316,6 +320,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
       ExecStart=/opt/game/start.sh
       Restart=always
       RestartSec=10
+
       [Install]
       WantedBy=multi-user.target
 `
@@ -982,31 +987,49 @@ func (l *LibvirtClient) runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey
 
 	return nil
 }
+func (l *LibvirtClient) InjectAssets(
+	remoteHostIP, remoteHostUser, remoteHostKey, diskPath string,
+	assets []domain.AssetConfigs,
+) error {
 
-func (l *LibvirtClient) InjectAssets(remoteHostIP, remoteHostUser, remoteHostKey, diskPath string, assets []host.AssetConfig) error {
 	if len(assets) == 0 {
 		return nil
 	}
 
 	log.Printf("[Libvirt] Injecting %d assets into disk %s on %s", len(assets), diskPath, remoteHostIP)
+	log.Printf("[Libvirt] Injection diskPath %s", diskPath)
 
-	// Build virt-customize command
-	// virt-customize -a DISK --copy-in HOSTPATH:TARGETPATH
 	args := []string{"virt-customize", "-a", diskPath}
 
-	hasTarget := false
+	injected := 0
+
 	for _, asset := range assets {
-		if asset.Target != "" {
-			args = append(args, "--copy-in", fmt.Sprintf("%s:%s", asset.Path, asset.Target))
-			hasTarget = true
+		if asset.Path == "" {
+			continue
 		}
+
+		src := asset.Path
+		// --copy-in copies src INTO the destination directory,
+		// so dst must be the parent, not the full path.
+		dst := filepath.Dir(asset.Path)
+
+		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s",
+			src, dst, asset.URL, asset.SHA256,
+		)
+
+		// Quote the mkdir command so the shell passes it as a single argument
+		// to --run-command, preventing virt-customize from consuming the -p flag.
+		args = append(args, "--run-command", fmt.Sprintf("'mkdir -p %s'", dst))
+		args = append(args, "--copy-in", fmt.Sprintf("%s:%s", src, dst))
+		injected++
 	}
 
-	if !hasTarget {
-		log.Printf("[Libvirt] No target paths specified for assets, skipping injection")
+	if injected == 0 {
+		log.Printf("[Libvirt] No valid assets to inject, skipping")
 		return nil
 	}
 
 	cmdStr := strings.Join(args, " ")
+
 	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, cmdStr)
 }

@@ -88,10 +88,9 @@ type ProvisionInstanceEvent struct
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
 	SessionID string `json:"session_id"`
-
-
-
 }
+
+
 
 type ProvisionedRequesFinishedResponse struct{
 	VMID string `json:"vm_id"`
@@ -126,11 +125,18 @@ type CreateInstanceRequest struct {
 	RAM        int               `json:"ram" binding:"required"`
 	Profile    string            `json:"profile"`
 	Manifest GameManifest `json:"manifest"`
-	ARN string `json:arn`
+	ARN string `json:"arn"`
 	SessionID string `json:"session_id"`
+	Assets []AssetConfigs `json:"assets,omitempty"`
+	
 
 }
-
+type AssetConfigs struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
 type CreateInstanceResponse struct {
 	Image      string            `json:"image" binding:"required"`
 	CPU        int               `json:"cpu" binding:"required"`
