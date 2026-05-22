@@ -80,58 +80,45 @@ jobs:
             docker pull qarani/ec2-api:staging-${{ github.sha }}
             docker stop ec2-service-staging || true
             docker rm ec2-service-staging || true
-            docker service update \
-              --image qarani/ec2-api:prod-${{ github.sha }} \
-              --cap-add SYS_ADMIN \
-              --cap-add NET_ADMIN \
-              --cap-add SYS_PTRACE \
-              --device-add /dev/kvm \
-              --mount-add type=bind,source=/var/lib/libvirt/game-files,target=/var/lib/libvirt/game-files \
-              --mount-add type=bind,source=/boot,target=/boot,readonly \
-              --mount-add type=bind,source=/lib/modules,target=/lib/modules,readonly \
-              ec2-service-prod 2>/dev/null || \
-            docker service create \
-              --name ec2-service-prod \
-              --network aws-prod-network \
-              --publish published=8088,target=8088 \
-              --cap-add SYS_ADMIN \
-              --cap-add NET_ADMIN \
-              --cap-add SYS_PTRACE \
-              --security-opt apparmor=unconfined \
-              --mount type=bind,source=/var/lib/libvirt/images,target=/var/lib/libvirt/images \
-              --mount type=bind,source=/var/lib/libvirt/game-files,target=/var/lib/libvirt/game-files \
-              --mount type=bind,source=/var/run/libvirt/libvirt-sock,target=/var/run/libvirt/libvirt-sock \
-              --mount type=bind,source=/boot,target=/boot,readonly \
-              --mount type=bind,source=/lib/modules,target=/lib/modules,readonly \
-              --host host.docker.internal:host-gateway \
-              --env APP_PROFILE=prod \
-              --env SERVICE_NAME=ec2-service \
-              --env DB_HOST=postgres-prod \
-              --env DB_PORT=5432 \
-              --env DB_USER=postgres-prod-user \
-              --env DB_PASSWORD=postgres-prod-password \
-              --env DB_NAME=ec2_db \
-              --env DB_SSLMODE=disable \
-              --env NATS_URL=nats://nats-prod:4222 \
-              --env NATS_USER=nats-prod-user \
-              --env NATS_PASSWORD=nats-prod-password \
-              --env NATS_PREFIX=prod.v1 \
-              --env API_GATEWAY=http://${{secrets.PROD_HOST}}:8080 \
-              --env EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
-              --env EUREKA_APP_NAME=EC2-SERVICE \
-              --env EUREKA_HOSTNAME=ec2-service-prod \
-              --env EUREKA_IP_ADDR=127.0.0.1 \
-              --env EUREKA_VIP_ADDRESS=ec2-service \
-              --env EUREKA_INSTANCE_ID=ec2-service:8088 \
-              --env MINIO_ENDPOINT=minio-prod:9000 \
-              --env MINIO_ACCESS_KEY=minio-prod-user \
-              --env MINIO_SECRET_KEY=minio-prod-password \
-              --env MINIO_USE_SSL=false \
-              --env MIGRATIONS_PATH=/app/migrations \
-              --env IMAGES_DIR=/var/lib/libvirt/images \
-              --env AGENT_URL=ws://host.docker.internal:9030/terminal \
-              --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
-              qarani/ec2-api:prod-${{ github.sha }}
+            docker run -d --name ec2-service-staging \
+              --network aws-staging-network \
+              --privileged \
+              --device /dev/kvm:/dev/kvm \
+              -p 8088:8088 \
+              -v /var/lib/libvirt/images:/var/lib/libvirt/images \
+              -v /var/lib/libvirt/game-files:/var/lib/libvirt/game-files \
+              -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
+              -v /boot:/boot:ro \
+              -v /lib/modules:/lib/modules:ro \
+              --group-add 120 \
+              -e APP_PROFILE=staging \
+              -e SERVICE_NAME=ec2-service \
+              -e DB_HOST=postgres-staging \
+              -e EUREKA_HOSTNAME=ec2-service-staging \
+              -e EUREKA_IP_ADDR=127.0.0.1 \
+              -e DB_PORT=5432 \
+              -e DB_USER=postgres-staging-user \
+              -e LOG_LEVEL=info \
+              -e LOG_FORMAT=json \
+              -e DB_PASSWORD=postgres-staging-password \
+              -e DB_NAME=ec2_db1 \
+              -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
+              -e DB_SSLMODE=disable \
+              -e NATS_URL=nats://nats-staging:4222 \
+              -e NATS_USER=nats-staging-user \
+              -e NATS_PASSWORD=nats-staging-password \
+              -e IMAGES_DIR=/var/lib/libvirt/images \
+              -e MINIO_ENDPOINT=minio-staging:9000 \
+              -e MINIO_ACCESS_KEY=minio-staging-user \
+              -e MINIO_SECRET_KEY=minio-staging-password \
+              -e MIGRATIONS_PATH=/app/migrations \
+              -e API_GATEWAY=http://${{secrets.STAGING_HOST}}:8080 \
+              -e MINIO_USE_SSL=false \
+              -e NATS_PREFIX=staging.v1 \
+              --add-host=host.docker.internal:host-gateway \
+              -e AGENT_URL=ws://host.docker.internal:9030/terminal \
+              -e "LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock" \
+              qarani/ec2-api:staging-${{ github.sha }}
 
 
 

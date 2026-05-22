@@ -87,12 +87,31 @@ jobs:
             docker service update \
               --image qarani/ec2-api:prod-${{ github.sha }} \
               ec2-service-prod 2>/dev/null || \
+            docker service update \
+              --image qarani/ec2-api:prod-${{ github.sha }} \
+              --cap-add SYS_ADMIN \
+              --cap-add NET_ADMIN \
+              --cap-add SYS_PTRACE \
+              --device-add /dev/kvm \
+              --mount-add type=bind,source=/var/lib/libvirt/game-files,target=/var/lib/libvirt/game-files \
+              --mount-add type=bind,source=/boot,target=/boot,readonly \
+              --mount-add type=bind,source=/lib/modules,target=/lib/modules,readonly \
+              ec2-service-prod 2>/dev/null || \
+            
             docker service create \
               --name ec2-service-prod \
               --network aws-prod-network \
               --publish published=8088,target=8088 \
+              --cap-add SYS_ADMIN \
+              --cap-add NET_ADMIN \
+              --cap-add SYS_PTRACE \
+              --security-opt apparmor=unconfined \
               --mount type=bind,source=/var/lib/libvirt/images,target=/var/lib/libvirt/images \
+              --mount type=bind,source=/var/lib/libvirt/game-files,target=/var/lib/libvirt/game-files \
               --mount type=bind,source=/var/run/libvirt/libvirt-sock,target=/var/run/libvirt/libvirt-sock \
+              --mount type=bind,source=/boot,target=/boot,readonly \
+              --mount type=bind,source=/lib/modules,target=/lib/modules,readonly \
+              --host host.docker.internal:host-gateway \
               --env APP_PROFILE=prod \
               --env SERVICE_NAME=ec2-service \
               --env DB_HOST=postgres-prod \
@@ -104,8 +123,8 @@ jobs:
               --env NATS_URL=nats://nats-prod:4222 \
               --env NATS_USER=nats-prod-user \
               --env NATS_PASSWORD=nats-prod-password \
-              --env API_GATEWAY=http://SHOULD BE THE ACTUAL ADDRES, CANT USE DOCKER'S ORINTERNLS:8080 \
-              --env NATS_SUBJECT_PREFIX=prod.v1 \
+              --env NATS_PREFIX=prod.v1 \
+              --env API_GATEWAY=http://${{secrets.PROD_HOST}}:8080 \
               --env EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
               --env EUREKA_APP_NAME=EC2-SERVICE \
               --env EUREKA_HOSTNAME=ec2-service-prod \
@@ -114,12 +133,10 @@ jobs:
               --env EUREKA_INSTANCE_ID=ec2-service:8088 \
               --env MINIO_ENDPOINT=minio-prod:9000 \
               --env MINIO_ACCESS_KEY=minio-prod-user \
-              --env MIGRATIONS_PATH=/app/migrations \
               --env MINIO_SECRET_KEY=minio-prod-password \
               --env MINIO_USE_SSL=false \
-              --env NATS_PREFIX=prod.v1 \
-              --env AGENT_URL=ws://${HOST_GW}:9030/terminal \
-              -e API_GATEWAY=http://${{secrets.PROD_HOST}}:8080 \
-              --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
+              --env MIGRATIONS_PATH=/app/migrations \
               --env IMAGES_DIR=/var/lib/libvirt/images \
+              --env AGENT_URL=ws://host.docker.internal:9030/terminal \
+              --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
               qarani/ec2-api:prod-${{ github.sha }}
