@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	domain "ec2-api/internal/domain/instance"
-
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -118,29 +118,37 @@ type agentPresignRequest struct {
 	UserID    string `json:"user_id"`
 	AssetID   string `json:"asset_id"`
 	AssetType string `json:"asset_type"`
-	Key       string `json:"key"` // direct key override
+	CorrelationID       string `json:"correlation_id"` // direct key override
+	FileSha256       string `json:"sha256"` // direct key override
+	// Key       string `json:"key"` // direct key override
 }
 
 type agentPresignResponse struct {
 	DownloadURL string `json:"download_url"`
 }
 
-
-
-func (p *NATSPublisher) FetchAgentPresignedURL(userID string,version string,fileName string) (string, error) {
+func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256 string) (string, error) {
 	if p == nil || p.nc == nil {
 		return "", fmt.Errorf("NATS publisher not initialized")
 	}
-	// fileName := fmt.Sprintf("agent-%s", version) // matches CI binary name
+
+	correlationID := uuid.New().String()
 
 	reqPayload := agentPresignRequest{
-		UserID:    userID,
-		AssetID:   fileName,
-		AssetType: "agent",
-		Key:       fileName,
+		UserID:        userID,
+		AssetID:       fileName,
+		AssetType:     "agent",
+		CorrelationID: correlationID,
+		FileSha256:    sha256,
 	}
-log.Printf("pre*****dfre*****signedURL1 %v",reqPayload)
 
+	slog.Info("fetching agent presigned download URL",
+		"user_id", userID,
+		"file_name", fileName,
+		"version", version,
+		"sha256", sha256,
+		"correlation_id", correlationID,
+	)
 
 	data, err := json.Marshal(reqPayload)
 	if err != nil {
@@ -149,34 +157,50 @@ log.Printf("pre*****dfre*****signedURL1 %v",reqPayload)
 
 	subject := fmt.Sprintf("%s.s3.task.get_download_url", p.profile)
 
+	slog.Debug("publishing presign request via NATS",
+		"subject", subject,
+		"correlation_id", correlationID,
+	)
+
 	msg, err := p.nc.Request(subject, data, 5*time.Second)
 	if err != nil {
+		slog.Error("NATS request for presigned URL failed",
+			"subject", subject,
+			"correlation_id", correlationID,
+			"error", err,
+		)
 		return "", fmt.Errorf("nats request presigned url: %w", err)
 	}
 
-log.Println("pre*****34df*****signedURL")
-
+	slog.Debug("received NATS response for presigned URL",
+		"correlation_id", correlationID,
+		"response_size_bytes", len(msg.Data),
+	)
 
 	var resp agentPresignResponse
 	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		slog.Error("failed to unmarshal presign response",
+			"correlation_id", correlationID,
+			"error", err,
+		)
 		return "", fmt.Errorf("unmarshal presign response: %w", err)
 	}
-log.Println("pre*****dfew*****signedURL")
 
 	if resp.DownloadURL == "" {
+		slog.Error("s3 service returned empty presigned URL",
+			"correlation_id", correlationID,
+			"file_name", fileName,
+		)
 		return "", fmt.Errorf("empty presigned url returned from s3")
 	}
-log.Println("pre*****df**ff***signedURL")
+
+	slog.Info("presigned download URL fetched successfully",
+		"correlation_id", correlationID,
+		"file_name", fileName,
+	)
 
 	return resp.DownloadURL, nil
 }
-
-
-
-
-
-
-
 
 
 

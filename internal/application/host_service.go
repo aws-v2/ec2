@@ -83,7 +83,7 @@ func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.Rollout
 		return nil, fmt.Errorf("fetch hosts: %w", err)
 	}
 
-	presignedURL, err := s.publisher.FetchAgentPresignedURL(req.UserID, req.Version, req.FileName)
+	presignedURL, err := s.publisher.FetchAgentPresignedURL(req.UserID, req.Version, req.FileName, req.SHA256)
 	if err != nil {
 		return nil, fmt.Errorf("fetch agent presigned url: %w", err)
 	}
