@@ -124,7 +124,7 @@ type agentPresignRequest struct {
 }
 
 type agentPresignResponse struct {
-	DownloadURL string `json:"download_url"`
+	URL string `json:"url"`
 }
 
 func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256 string) (string, error) {
@@ -155,7 +155,7 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 		return "", fmt.Errorf("marshal presign request: %w", err)
 	}
 
-	subject := fmt.Sprintf("%s.s3.task.get_download_url", p.profile)
+	subject := fmt.Sprintf("%s.s3.task.create_presign_download_url", p.profile)
 
 	slog.Debug("publishing presign request via NATS",
 		"subject", subject,
@@ -186,12 +186,13 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 		return "", fmt.Errorf("unmarshal presign response: %w", err)
 	}
 
-	if resp.DownloadURL == "" {
+	if resp.URL == "" {
 		slog.Error("s3 service returned empty presigned URL",
 			"correlation_id", correlationID,
 			"file_name", fileName,
 		)
-		return "", fmt.Errorf("empty presigned url returned from s3")
+
+		return "", fmt.Errorf("empty presigned url returned from s3: %v", resp)
 	}
 
 	slog.Info("presigned download URL fetched successfully",
@@ -199,7 +200,7 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 		"file_name", fileName,
 	)
 
-	return resp.DownloadURL, nil
+	return resp.URL, nil
 }
 
 
