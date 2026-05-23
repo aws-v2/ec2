@@ -999,13 +999,10 @@ func (l *LibvirtClient) InjectAssets(
 	log.Printf("[Libvirt] Injecting %d assets into disk %s on %s", len(assets), diskPath, remoteHostIP)
 	log.Printf("[Libvirt] Injection diskPath %s", diskPath)
 
-	args := []string{
-		// Fix 1: set libguestfs env vars so supermin works in non-login SSH sessions
-		"LIBGUESTFS_BACKEND=direct",
-		"LIBGUESTFS_TMPDIR=/tmp",
-		"virt-customize",
-		"-a", diskPath,
-	}
+	// Build as a single string — joining a slice loses quoting for multi-word values
+	var cmdBuilder strings.Builder
+	cmdBuilder.WriteString("LIBGUESTFS_BACKEND=direct LIBGUESTFS_TMPDIR=/tmp ")
+	cmdBuilder.WriteString(fmt.Sprintf("virt-customize -a %s", diskPath))
 
 	injected := 0
 
@@ -1021,10 +1018,9 @@ func (l *LibvirtClient) InjectAssets(
 			src, dst, asset.URL, asset.SHA256,
 		)
 
-		// Fix 2: no single quotes — virt-customize receives the string directly,
-		// wrapping in quotes passes literal quote chars into the guest shell command.
-		args = append(args, "--run-command", fmt.Sprintf("mkdir -p %s", dst))
-		args = append(args, "--copy-in", fmt.Sprintf("%s:%s", src, dst))
+		// Quote the run-command value so the shell passes it as one token
+		cmdBuilder.WriteString(fmt.Sprintf(` --run-command "mkdir -p %s"`, dst))
+		cmdBuilder.WriteString(fmt.Sprintf(` --copy-in %s:%s`, src, dst))
 		injected++
 	}
 
@@ -1033,7 +1029,5 @@ func (l *LibvirtClient) InjectAssets(
 		return nil
 	}
 
-	cmdStr := strings.Join(args, " ")
-
-	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, cmdStr)
+	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, cmdBuilder.String())
 }
