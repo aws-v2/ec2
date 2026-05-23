@@ -999,11 +999,8 @@ func (l *LibvirtClient) InjectAssets(
 	log.Printf("[Libvirt] Injecting %d assets into disk %s on %s", len(assets), diskPath, remoteHostIP)
 	log.Printf("[Libvirt] Injection diskPath %s", diskPath)
 
-	// Build as a single string — joining a slice loses quoting for multi-word values
-	var cmdBuilder strings.Builder
-	cmdBuilder.WriteString("LIBGUESTFS_BACKEND=direct LIBGUESTFS_TMPDIR=/tmp ")
-	cmdBuilder.WriteString(fmt.Sprintf("virt-customize -a %s", diskPath))
-
+	// Build copy commands for each asset
+	var copyCommands strings.Builder
 	injected := 0
 
 	for _, asset := range assets {
@@ -1018,9 +1015,8 @@ func (l *LibvirtClient) InjectAssets(
 			src, dst, asset.URL, asset.SHA256,
 		)
 
-		// Quote the run-command value so the shell passes it as one token
-		cmdBuilder.WriteString(fmt.Sprintf(` --run-command "mkdir -p %s"`, dst))
-		cmdBuilder.WriteString(fmt.Sprintf(` --copy-in %s:%s`, src, dst))
+		copyCommands.WriteString(fmt.Sprintf("mkdir -p \"$MOUNT/%s\"\n", dst))
+		copyCommands.WriteString(fmt.Sprintf("cp -r \"%s\" \"$MOUNT/%s/\"\n", src, dst))
 		injected++
 	}
 
@@ -1029,5 +1025,56 @@ func (l *LibvirtClient) InjectAssets(
 		return nil
 	}
 
-	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, cmdBuilder.String())
+	// qemu-nbd approach: mount qcow2 directly, no libguestfs/supermin needed
+	script := fmt.Sprintf(`
+set -e
+
+# Load nbd kernel module
+modprobe nbd max_part=8 2>/dev/null || true
+
+# Find a free nbd device
+NBD=""
+for i in $(seq 0 15); do
+	if [ -b /dev/nbd$i ] && ! qemu-nbd --detect-zeroes=on /dev/nbd$i 2>/dev/null | grep -q "in use"; then
+		NBD="/dev/nbd$i"
+		break
+	fi
+done
+
+# Fallback: just use nbd0
+NBD="${NBD:-/dev/nbd0}"
+MOUNT="/mnt/_serwin_inject_$$"
+
+cleanup() {
+	umount "$MOUNT" 2>/dev/null || true
+	qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+	rmdir "$MOUNT" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+mkdir -p "$MOUNT"
+qemu-nbd --connect="$NBD" "%s"
+sleep 1
+
+# Try partitions in order: p2 (typical Ubuntu root), then p1
+MOUNTED=0
+for PART in "${NBD}p2" "${NBD}p1" "$NBD"; do
+	if mount "$PART" "$MOUNT" 2>/dev/null; then
+		MOUNTED=1
+		break
+	fi
+done
+
+if [ "$MOUNTED" -eq 0 ]; then
+	echo "[InjectAssets] Failed to mount any partition from %s"
+	exit 1
+fi
+
+# Copy assets
+%s
+
+echo "[InjectAssets] Injection complete"
+`, diskPath, diskPath, copyCommands.String())
+
+	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, script)
 }
