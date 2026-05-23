@@ -6,6 +6,7 @@ import (
 	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/instance"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 
@@ -120,20 +121,17 @@ func (s *InstanceService) persistAndLaunch(
 			}
 		}
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
-
-		return nil, fmt.Errorf("failed to save instance,:::::::::::: %w", err)
+		return nil, fmt.Errorf("failed to save instance: %w", err)
 	}
 
 	// Extract assets from manifest parameters
 	assets := []domain.AssetConfigs{}
 	if req.Manifest.Parameters != nil {
-		// Look for ASSET_URL, ASSET_PATH, ASSET_TARGET, ASSET_SHA256
 		if url, ok := req.Manifest.Parameters["ASSET_URL"]; ok {
 			asset := domain.AssetConfigs{
 				Name:   req.Manifest.Name,
 				URL:    url,
 				Path:   req.Manifest.Parameters["ASSET_PATH"],
-				// Target: req.Manifest.Parameters["ASSET_TARGET"],
 				SHA256: req.Manifest.Parameters["ASSET_SHA256"],
 			}
 			if asset.Path == "" {
@@ -143,7 +141,11 @@ func (s *InstanceService) persistAndLaunch(
 		}
 	}
 
-	_, _ = s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
+	// Reconcile network + asset download on agent.
+	// This is SYNCHRONOUS — we must not launch the VM until the agent
+	// confirms assets are on disk. ReconcileNetwork now returns a real
+	// error when assets are present and the call fails.
+	if _, err := s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
 		VPCID: vpcID,
 		Bridge: host.BridgeConfig{
 			Name:    bridgeName,
@@ -153,15 +155,22 @@ func (s *InstanceService) persistAndLaunch(
 		IP:      privateIP,
 		Gateway: gateway,
 		Assets:  assets,
-	})
+	}); err != nil {
+		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
+		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+		return nil, fmt.Errorf("network reconcile failed: %w", err)
+	}
 
-	fmt.Println("*****************Network reconciled for instance***********", instanceID)
+	log.Printf("[NETWORK] reconcile complete for instance %s — assets ready on host", instanceID)
+
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets)
 
-	// Return the full key so the caller can hand it back to the user once
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
 	return instance, nil
 }
+
+
 
 func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkReconcileRequest) (bool, error) {
 
@@ -170,7 +179,6 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 	body, err := json.Marshal(req)
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
-
 		log.Printf("[NETWORK] marshal error: %v", err)
 		return false, err
 	}
@@ -178,31 +186,37 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
-
 		log.Printf("[NETWORK] request build error: %v", err)
 		return false, err
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
-
-		log.Printf("[NETWORK] agent call failed (ignored): %v", err)
-		return false, nil // 👈 IMPORTANT: do NOT fail pipeline
+	// Use a long timeout — asset downloads can be large.
+	// The default client timeout (if set) may be too short and cause
+	// a silent false-nil return that races with InjectAssets.
+	reconcileClient := &http.Client{
+		Timeout: 10 * time.Minute,
 	}
 
+	resp, err := reconcileClient.Do(httpReq)
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")
+		log.Printf("[NETWORK] agent call failed: %v", err)
+		return false, fmt.Errorf("agent reconcile call failed: %w", err) // 👈 now a real error
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		log.Printf("[NETWORK] agent returned %d (ignored)", resp.StatusCode)
-		return false, nil // 👈 still ignore
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[NETWORK] agent returned %d: %s", resp.StatusCode, string(body))
+		return false, fmt.Errorf("agent reconcile returned %d: %s", resp.StatusCode, string(body)) // 👈 real error
 	}
 
 	log.Printf("[NETWORK] reconciliation successful for %s", agentIP)
 	return true, nil
 }
+
 
 func (s *InstanceService) buildOverlay(
 	instanceID string,
@@ -479,6 +493,7 @@ func (s *InstanceService) createVMAsync(
 	// ---------------------------------------------------
 	// STEP 6 — UPDATE INSTANCE
 	// ---------------------------------------------------
+
 
 	instance.Status = domain.StatusRunning
 	instance.ProxmoxID = vmID

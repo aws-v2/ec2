@@ -25,7 +25,7 @@ func NewAgentClient() *AgentClient {
 }
 
 
-func (a *AgentClient) ReconcileNetwork(agentIP string, req host.NetworkReconcileRequest) error {
+func (a *AgentClient) ReconcileNetwxork(agentIP string, req host.NetworkReconcileRequest) error {
 
     url := fmt.Sprintf("http://%s:8080/reconcile/network", agentIP)
 
