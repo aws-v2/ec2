@@ -999,7 +999,13 @@ func (l *LibvirtClient) InjectAssets(
 	log.Printf("[Libvirt] Injecting %d assets into disk %s on %s", len(assets), diskPath, remoteHostIP)
 	log.Printf("[Libvirt] Injection diskPath %s", diskPath)
 
-	args := []string{"virt-customize", "-a", diskPath}
+	args := []string{
+		// Fix 1: set libguestfs env vars so supermin works in non-login SSH sessions
+		"LIBGUESTFS_BACKEND=direct",
+		"LIBGUESTFS_TMPDIR=/tmp",
+		"virt-customize",
+		"-a", diskPath,
+	}
 
 	injected := 0
 
@@ -1009,17 +1015,15 @@ func (l *LibvirtClient) InjectAssets(
 		}
 
 		src := asset.Path
-		// --copy-in copies src INTO the destination directory,
-		// so dst must be the parent, not the full path.
 		dst := filepath.Dir(asset.Path)
 
 		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s",
 			src, dst, asset.URL, asset.SHA256,
 		)
 
-		// Quote the mkdir command so the shell passes it as a single argument
-		// to --run-command, preventing virt-customize from consuming the -p flag.
-		args = append(args, "--run-command", fmt.Sprintf("'mkdir -p %s'", dst))
+		// Fix 2: no single quotes — virt-customize receives the string directly,
+		// wrapping in quotes passes literal quote chars into the guest shell command.
+		args = append(args, "--run-command", fmt.Sprintf("mkdir -p %s", dst))
 		args = append(args, "--copy-in", fmt.Sprintf("%s:%s", src, dst))
 		injected++
 	}
