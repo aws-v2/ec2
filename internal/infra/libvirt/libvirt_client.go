@@ -1024,57 +1024,78 @@ func (l *LibvirtClient) InjectAssets(
 		log.Printf("[Libvirt] No valid assets to inject, skipping")
 		return nil
 	}
-
-	// qemu-nbd approach: mount qcow2 directly, no libguestfs/supermin needed
-	script := fmt.Sprintf(`
+script := fmt.Sprintf(`
 set -e
 
-# Load nbd kernel module
 modprobe nbd max_part=8 2>/dev/null || true
 
-# Find a free nbd device
-NBD=""
-for i in $(seq 0 15); do
-	if [ -b /dev/nbd$i ] && ! qemu-nbd --detect-zeroes=on /dev/nbd$i 2>/dev/null | grep -q "in use"; then
-		NBD="/dev/nbd$i"
-		break
-	fi
-done
-
-# Fallback: just use nbd0
-NBD="${NBD:-/dev/nbd0}"
+NBD="/dev/nbd0"
 MOUNT="/mnt/_serwin_inject_$$"
+FLAT="/tmp/_serwin_flat_$$.raw"   # RAW — no qcow2 metadata to confuse nbd reads
 
 cleanup() {
-	umount "$MOUNT" 2>/dev/null || true
-	qemu-nbd --disconnect "$NBD" 2>/dev/null || true
-	rmdir "$MOUNT" 2>/dev/null || true
+    umount "$MOUNT" 2>/dev/null || true
+    kpartx -dv "$NBD" 2>/dev/null || true
+    qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+    rmdir "$MOUNT" 2>/dev/null || true
+    rm -f "$FLAT"
 }
 trap cleanup EXIT
 
-mkdir -p "$MOUNT"
-qemu-nbd --connect="$NBD" "%s"
+echo "[InjectAssets] Flattening qcow2 -> raw..."
+qemu-img convert -f qcow2 -O raw "%s" "$FLAT"
+echo "[InjectAssets] Flatten complete: $(du -sh $FLAT | cut -f1)"
+
+# Ensure nbd slot is clean before use
+qemu-nbd --disconnect "$NBD" 2>/dev/null || true
 sleep 1
 
-# Try partitions in order: p2 (typical Ubuntu root), then p1
+mkdir -p "$MOUNT"
+qemu-nbd --connect="$NBD" --format=raw "$FLAT"
+sleep 3
+
+# Force kernel partition re-read
+blockdev --rereadpt "$NBD" 2>/dev/null || true
+kpartx -av "$NBD" 2>/dev/null || true
+sleep 2
+
+echo "[InjectAssets] Partition layout:"
+lsblk "$NBD"
+
 MOUNTED=0
-for PART in "${NBD}p2" "${NBD}p1" "$NBD"; do
-	if mount "$PART" "$MOUNT" 2>/dev/null; then
-		MOUNTED=1
-		break
-	fi
+for PART in "/dev/mapper/nbd0p2" "/dev/mapper/nbd0p1" "/dev/mapper/nbd0p3"; do
+    if [ -b "$PART" ]; then
+        echo "[InjectAssets] Trying $PART..."
+        if mount "$PART" "$MOUNT" 2>/dev/null; then
+            echo "[InjectAssets] Mounted $PART"
+            MOUNTED=1
+            break
+        fi
+    fi
 done
 
 if [ "$MOUNTED" -eq 0 ]; then
-	echo "[InjectAssets] Failed to mount any partition from %s"
-	exit 1
+    echo "[InjectAssets] Failed to mount. fdisk output:"
+    fdisk -l "$NBD" 2>/dev/null || true
+    exit 1
 fi
 
-# Copy assets
 %s
 
+umount "$MOUNT"
+MOUNTED=0
+
+echo "[InjectAssets] Writing back to qcow2..."
+kpartx -dv "$NBD" 2>/dev/null || true
+qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+sleep 1
+
+# Convert modified raw back to qcow2 (replaces original overlay)
+qemu-img convert -f raw -O qcow2 "$FLAT" "%s"
+
 echo "[InjectAssets] Injection complete"
-`, diskPath, diskPath, copyCommands.String())
+`, diskPath, copyCommands.String(), diskPath)
+
 
 	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, script)
 }
