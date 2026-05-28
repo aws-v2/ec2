@@ -163,8 +163,14 @@ func main() {
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
 	rolloutRepo := repository.NewRolloutRepo(db)
+	metricsRepo := repository.NewMetricsRepo(db,logger)
 
-	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo)
+	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo,metricsRepo)
+
+	// Initialize and start VM Metrics Monitor Worker
+	vmMonitorWorker := application.NewVMMonitorWorker(metricsRepo, hostService)
+	vmMonitorWorker.Start(1 * time.Minute) // Check every minute
+	defer vmMonitorWorker.Stop()
 
 	// 3. Initialize Application Layer (Services)
 	slog.Info("Initializing services...")

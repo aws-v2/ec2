@@ -522,20 +522,28 @@ ethernets:
 
 	return isoPath, cleanup, nil
 }
-
 func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKey string) (*libvirt.Connect, func(), error) {
+	log.Printf("[Libvirt][getConnection] called — remoteHostIP=%q remoteHostUser=%q hasKey=%v",
+		remoteHostIP, remoteHostUser, remoteHostKey != "")
+
 	if remoteHostIP == "" {
+		log.Printf("[Libvirt][getConnection] no remote IP provided — using local connection")
 		return l.conn, func() {}, nil
 	}
 
 	if remoteHostUser == "" {
-		remoteHostUser = "x6617274696" // Default fallback
+		remoteHostUser = "x6617274696"
+		log.Printf("[Libvirt][getConnection] no remote user provided — falling back to default user")
 	}
 
 	remoteURI := fmt.Sprintf("qemu+ssh://%s@%s/system?no_verify=1", remoteHostUser, remoteHostIP)
+	log.Printf("[Libvirt][getConnection] base URI built: %s", remoteURI)
+
 	var cleanupFuncs []func()
 
 	if remoteHostKey != "" {
+		log.Printf("[Libvirt][getConnection] SSH key provided — writing temp key file")
+
 		formattedKey := strings.ReplaceAll(remoteHostKey, "\\n", "\n")
 		if !strings.HasSuffix(formattedKey, "\n") {
 			formattedKey += "\n"
@@ -543,34 +551,50 @@ func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKe
 
 		f, err := os.CreateTemp("", "id_rsa_*")
 		if err != nil {
+			log.Printf("[Libvirt][getConnection] [ERROR] failed to create temp key file: %v", err)
 			return nil, nil, fmt.Errorf("failed to create temp key file for connection: %w", err)
 		}
+		log.Printf("[Libvirt][getConnection] temp key file created: %s", f.Name())
+
 		if _, err := f.Write([]byte(formattedKey)); err != nil {
+			log.Printf("[Libvirt][getConnection] [ERROR] failed to write temp key file %s: %v", f.Name(), err)
 			os.Remove(f.Name())
 			return nil, nil, fmt.Errorf("failed to write temp key file for connection: %w", err)
 		}
 		f.Close()
+
 		if err := os.Chmod(f.Name(), 0600); err != nil {
+			log.Printf("[Libvirt][getConnection] [ERROR] failed to chmod temp key file %s: %v", f.Name(), err)
 			os.Remove(f.Name())
 			return nil, nil, fmt.Errorf("failed to chmod temp key file for connection: %w", err)
 		}
+		log.Printf("[Libvirt][getConnection] temp key file chmod 0600 OK: %s", f.Name())
 
 		remoteURI += fmt.Sprintf("&keyfile=%s", f.Name())
+		log.Printf("[Libvirt][getConnection] final URI with keyfile: %s", remoteURI)
+
 		cleanupFuncs = append(cleanupFuncs, func() {
+			log.Printf("[Libvirt][getConnection] cleanup — removing temp key file: %s", f.Name())
 			os.Remove(f.Name())
 		})
+	} else {
+		log.Printf("[Libvirt][getConnection] no SSH key provided — connecting without keyfile")
 	}
 
-	fmt.Printf("[Libvirt] Connecting to remote libvirt: %s\n", remoteURI)
+	log.Printf("[Libvirt][getConnection] dialing remote libvirt at %s ...", remoteURI)
 	remoteConn, err := libvirt.NewConnect(remoteURI)
 	if err != nil {
+		log.Printf("[Libvirt][getConnection] [ERROR] failed to connect to remote libvirt at %s: %v", remoteURI, err)
 		for _, cf := range cleanupFuncs {
 			cf()
 		}
 		return nil, nil, fmt.Errorf("failed to connect to remote libvirt: %w", err)
 	}
 
+	log.Printf("[Libvirt][getConnection] [OK] connected to remote libvirt at %s", remoteURI)
+
 	return remoteConn, func() {
+		log.Printf("[Libvirt][getConnection] closing remote libvirt connection to %s", remoteHostIP)
 		remoteConn.Close()
 		for _, cf := range cleanupFuncs {
 			cf()

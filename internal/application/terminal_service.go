@@ -214,7 +214,7 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 		return nil, fmt.Errorf("agent url: %w", err)
 	}
 
-	log.Printf("[terminal-service] dialling agent at %s for instance %s", agentWS, instanceID)
+	log.Printf("[terminal-service] dialling agent at %s for instance %s, with ssh=%s", agentWS, instanceID, info.SSHKey)
 
 	// conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(agentWS ,"%s/terminal"), nil)
 
@@ -222,10 +222,6 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
     fmt.Sprintf("%s/terminal", agentWS),
     nil,
 )
-
-
-
-
 
 	if err != nil {
 		return nil, fmt.Errorf("dial agent %s: %w", agentWS, err)
@@ -243,7 +239,7 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 		SSHUser:   "ubuntu",
 		SSHKey:    info.SSHKey, // private key PEM
 	}
-	log.Printf("The && ssh key used in the terminal service %s for instance %s", info.SSHUser, instanceID)
+	log.Printf("The && ssh key used in the terminal service %s for instance %s is %s", openMsg.SSHUser, instanceID, openMsg.SSHKey)
 
 	if err := conn.WriteJSON(openMsg); err != nil {
 		conn.Close()

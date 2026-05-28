@@ -35,3 +35,24 @@ CREATE TABLE IF NOT EXISTS agent_update_statuses (
 CREATE INDEX IF NOT EXISTS idx_update_statuses_host_id    ON agent_update_statuses(host_id);
 CREATE INDEX IF NOT EXISTS idx_update_statuses_rollout_id ON agent_update_statuses(rollout_id);
 CREATE INDEX IF NOT EXISTS idx_update_statuses_status     ON agent_update_statuses(status);
+
+
+CREATE TABLE IF NOT EXISTS vm_metrics (
+    id TEXT PRIMARY KEY,
+
+    vm_id TEXT NOT NULL,
+    host_id TEXT NOT NULL,
+
+    cpu_used DOUBLE PRECISION,
+    memory_used DOUBLE PRECISION,
+
+    disk_read DOUBLE PRECISION,
+    disk_write DOUBLE PRECISION,
+
+    net_rx DOUBLE PRECISION,
+    net_tx DOUBLE PRECISION,
+
+    state TEXT,
+
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

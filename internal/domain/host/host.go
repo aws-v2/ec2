@@ -9,12 +9,12 @@ type Host struct {
 	ID            string    `json:"id"`
 	Hostname      string    `json:"hostname"`
 	IP            string    `json:"ip"`
-	CPUTotal      int       `json:"cpu_total"`
-	CPUUsed       int       `json:"cpu_used"`
-	RAMTotal      int       `json:"ram_total"` // in MB
-	RAMFree       int       `json:"ram_free"`  // in MB
-	DiskTotal     int       `json:"disk_total"` // in GB
-	DiskFree      int       `json:"disk_free"`  // in GB
+	CPUTotal      float64       `json:"cpu_total"`
+	CPUUsed       float64       `json:"cpu_used"`
+	RAMTotal      float64       `json:"ram_total"` // in MB
+	RAMFree       float64       `json:"ram_free"`  // in MB
+	DiskTotal     float64       `json:"disk_total"` // in GB
+	DiskFree      float64       `json:"disk_free"`  // in GB
 	Status        string    `json:"status"`    // active, inactive, maintenance
 	SSHUser       string    `json:"ssh_user"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
@@ -23,21 +23,51 @@ type Host struct {
 	SSHPrivateKey      string    `json:"ssh_private_key"`
 }
 
-type HeartbeatRequest struct {
-	HostID             string   `json:"host_id"`
-	Hostname           string   `json:"hostname"`
-	IP                 string   `json:"ip"`
-	CPUTotal           int      `json:"cpu_total"`
-	CPUUsed            int      `json:"cpu_used"`
-	RAMTotal           int      `json:"ram_total"`
-	RAMFree            int      `json:"ram_free"`
-	DiskTotal          int      `json:"disk_total"`
-	DiskFree           int      `json:"disk_free"`
-	AvailableTemplates []string `json:"available_templates"`
-	SSHPrivateKey      string   `json:"ssh_private_key"`
-	SSHUser       string    `json:"ssh_user"`
-
+type DomainStats struct {
+	VMID      string  `json:"vmid"`
+	HostID    string  `json:"hostid"`
+	CreatedAt time.Time `json:"created_at"`
+	Name      string  `json:"name"`
+	State     string  `json:"state"`
+	CPUUsed   float64 `json:"cpu_used"`   // Changed to float64
+	Memory    uint64  `json:"memory_kb"`  // Changed to uint64
+	DiskRead  uint64  `json:"disk_read"`  // Changed to uint64
+	DiskWrite uint64  `json:"disk_write"` // Changed to uint64
+	NetRx     uint64  `json:"net_rx"`     // Changed to uint64
+	NetTx     uint64  `json:"net_tx"`     // Changed to uint64
 }
+
+type VMActionTarget struct {
+	VMID   string
+	HostIP string
+	Action string // "sleep" or "terminate"
+}
+type HeartbeatRequest struct {
+	HostID             string        `json:"host_id"`
+	Hostname           string        `json:"hostname"`
+	IP                 string        `json:"ip"`
+	CPUTotal           float64       `json:"cpu_total"`
+	CPUUsed            float64       `json:"cpu_used"`
+	RAMTotal           float64       `json:"ram_total"`
+	RAMFree            float64       `json:"ram_free"`
+	DiskTotal          float64       `json:"disk_total"`
+	DiskFree           float64       `json:"disk_free"`
+	AvailableTemplates []string      `json:"available_templates"`
+	SSHPrivateKey      string        `json:"ssh_private_key"`
+	SSHUser            string        `json:"ssh_user"`
+	VMs                []DomainStats `json:"vms"`
+}
+
+// type DomainStats struct {
+// 	Name      string  `json:"name"`
+// 	State     string  `json:"state"`
+// 	CPUUsed   float64 `json:"cpu_used"`   // % or time
+// 	Memory    uint64  `json:"memory_kb"`  // KB
+// 	DiskRead  uint64  `json:"disk_read"`  // bytes
+// 	DiskWrite uint64  `json:"disk_write"` // bytes
+// 	NetRx     uint64  `json:"net_rx"`     // bytes
+// 	NetTx     uint64  `json:"net_tx"`     // bytes
+// }
 
 type Repository interface {
 	Update(host *Host) error
@@ -48,7 +78,11 @@ type Repository interface {
 
 
 
-
+type MetricsRepository interface {
+	// Ins
+	Insert(ctx context.Context, hostID string, metric DomainStats) error
+	GetVMsRequiringAction(ctx context.Context, sleepDuration, terminateDuration time.Duration) ([]VMActionTarget, error)
+}
 
 type RolloutUpdateRequest struct {
 	UserID string `json:"user_id"`

@@ -134,12 +134,15 @@ func (h *HostHandler) GetHostTemplates(c *gin.Context) {
 func (h *HostHandler) HandleHeartbeat(c *gin.Context) {
     var req domain.HeartbeatRequest
     if err := c.ShouldBindJSON(&req); err != nil {
+        // Log the specific unmarshaling error to the console
+        log.Printf("[host-handler] Heartbeat bind error: %v", err)
         dto.SendError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
         return
     }
 
     resp, err := h.service.HandleHeartbeat(req)
     if err != nil {
+        log.Printf("[host-handler] Heartbeat service error: %v", err)
         dto.SendError(c, http.StatusInternalServerError, err.Error())
         return
     }
