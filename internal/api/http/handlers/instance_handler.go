@@ -9,6 +9,7 @@ import (
 	domain "ec2-api/internal/domain/instance"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 
@@ -98,7 +99,9 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 func (h *InstanceHandler) StopInstance(c *gin.Context) {
 	id := c.Param("id")
 	userID := c.GetString("userID")
-	if err := h.service.StopInstance(id, userID); err != nil {
+	sessionID := uuid.New().String()
+
+	if err := h.service.StopInstance(id, userID, sessionID); err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
 			return
@@ -113,7 +116,8 @@ func (h *InstanceHandler) StopInstance(c *gin.Context) {
 func (h *InstanceHandler) StartInstance(c *gin.Context) {
 	id := c.Param("id")
 	userID := c.GetString("userID")
-	if err := h.service.StartInstance(id, userID); err != nil {
+	sessionID := uuid.New().String()
+	if err := h.service.StartInstance(id, userID, sessionID); err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
 			return

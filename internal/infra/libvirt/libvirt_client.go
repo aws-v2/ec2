@@ -81,6 +81,7 @@ func (l *LibvirtClient) CreateAndStartVM(
 	bridgeName string,
 	privateIP string,
 	gateway string,
+	profile string, // add this
 ) (int, error) {
 
 	// ---------------------------------------------------
@@ -104,7 +105,7 @@ func (l *LibvirtClient) CreateAndStartVM(
 		cpu,
 		ram,
 		bridgeName,
-		"default",
+		profile,
 	)
 
 	// ---------------------------------------------------
@@ -296,37 +297,66 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 	// ── Select Profile Template ──────────────────────────────────────────────
 	profileContent := ""
 	switch profile {
-	case "gamelift":
-		profileContent = `
-  - mkdir -p /var/lib/libvirt/game-files
-
+case "gamelift":
+    profileContent = `
   - path: /opt/game/start.sh
     permissions: '0755'
     content: |
       #!/bin/bash
-      cd "/opt/game/run/$(dirname "{{HEADLESS_BIN}}")"
-      ./"$(basename "{{HEADLESS_BIN}}")" --headless --env-port 8080
+      set -e
+
+      GAME_DIR="/var/lib/libvirt/game"
+      ZIP=$(find /var/lib/libvirt -maxdepth 1 -name "*game*" -name "*.zip" -o \
+                  -maxdepth 1 -name "*game*" ! -type d | head -1)
+
+      if [ -z "$ZIP" ]; then
+        echo "[game] no game zip found in /var/lib/libvirt" >&2
+        exit 1
+      fi
+
+      echo "[game] extracting $ZIP -> $GAME_DIR"
+      mkdir -p "$GAME_DIR"
+      unzip -o "$ZIP" -d "$GAME_DIR"
+
+      BIN=$(find "$GAME_DIR" -name "*.x86_64" | head -1)
+
+      if [ -z "$BIN" ]; then
+        echo "[game] no .x86_64 binary found after extraction" >&2
+        exit 1
+      fi
+
+      echo "[game] found binary: $BIN"
+      chmod +x "$BIN"
+
+      cd "$(dirname "$BIN")"
+      exec "./$( basename "$BIN")" --headless --env-port 8080
 
   - path: /etc/systemd/system/game-server.service
     content: |
       [Unit]
       Description=Godot Game Server
       After=network-online.target
+      Wants=network-online.target
 
       [Service]
       Type=simple
       Environment="BACKEND_URL={{BACKEND_URL}}"
-      WorkingDirectory=/opt/game/run
       ExecStart=/opt/game/start.sh
-      Restart=always
-      RestartSec=10
+      StandardOutput=journal
+      StandardError=journal
+      SyslogIdentifier=game-server
+      Restart=on-failure
+      RestartSec=5
 
       [Install]
       WantedBy=multi-user.target
 `
-		runCmd += "\n  - apt-get update && apt-get install -y libfontconfig1"
-		runCmd += "\n  - chmod +x /opt/game/start.sh"
-		runCmd += "\n  - systemctl enable game-server && systemctl start game-server"
+runCmd += "\n  - apt-get update"
+runCmd += "\n  - apt-get install -y libfontconfig1 unzip"
+runCmd += "\n  - chmod +x /opt/game/start.sh"
+runCmd += "\n  - systemctl daemon-reload"
+runCmd += "\n  - systemctl enable game-server"
+runCmd += "\n  - systemctl start game-server"
 
 	case "ai-worker":
 		profileContent = fmt.Sprintf(`
@@ -1035,8 +1065,8 @@ func (l *LibvirtClient) InjectAssets(
 		src := asset.Path
 		dst := filepath.Dir(asset.Path)
 
-		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s",
-			src, dst, asset.URL, asset.SHA256,
+		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s **ssetPath=%s",
+			src, dst, asset.URL, asset.SHA256, asset.Path,
 		)
 
 		copyCommands.WriteString(fmt.Sprintf("mkdir -p \"$MOUNT/%s\"\n", dst))

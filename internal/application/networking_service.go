@@ -297,6 +297,7 @@ func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error 
 		combinedKeys,
 		bridgeName,
 		privateIP,
+		"default",
 	)
 	if err != nil {
 		return fmt.Errorf("failed to restart VM in new VPC: %w", err)

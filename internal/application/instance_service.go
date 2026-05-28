@@ -121,7 +121,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
 
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 2: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
 		
 		return nil, err
 
@@ -138,7 +138,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 2.5: Select best host
 	bestHost, err := s.hostService.SelectBestHost()
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
 
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 	}
@@ -147,7 +147,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		hostID = bestHost.ID
 		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
 	} else {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
 		return nil, ErrNoActiveHosts
 	}
@@ -158,7 +158,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 3: Persist the record and launch VM creation asynchronously
 	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken,bestHost)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
 		return nil, err
 	}
 	instance.HostID = hostID
@@ -195,7 +195,7 @@ func (s *InstanceService) ListInstances(userID string) ([]*domain.Instance, erro
 	return s.repo.FindAll(userID)
 }
 
-func (s *InstanceService) StopInstance(id, userID string) error {
+func (s *InstanceService) StopInstance(id, userID string, sessionID string) error {
 	instance, err := s.GetInstance(id, userID)
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func (s *InstanceService) StopInstance(id, userID string) error {
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "",sessionID)
 	}
 
 	return nil
@@ -260,7 +260,7 @@ func (s *InstanceService) RestartInstance(instanceID, userID string) error {
 
 	return nil
 }
-func (s *InstanceService) StartInstance(id, userID string) error {
+func (s *InstanceService) StartInstance(id, userID string,  sessionID string) error {
 	instance, err := s.GetInstance(id, userID)
 	if err != nil {
 		return err
@@ -287,7 +287,7 @@ func (s *InstanceService) StartInstance(id, userID string) error {
 	// Publish INSTANCE_STARTED event
 	if s.publisher != nil {
 		instance.Status = domain.StatusRunning
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "","")
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "",sessionID)
 	}
 
 	return nil
@@ -590,6 +590,7 @@ func (s *InstanceService) AssignVPC(
 		bridgeName,
 		privateIP,
 		gateway,
+		"default",
 	)
 
 	if err != nil {
