@@ -112,6 +112,7 @@ func (s *InstanceService) persistAndLaunch(
 		CreatedAt:     time.Now(),
 		UserID:        userID,
 		VPCID:         vpcID,
+		SessionID:     req.SessionID,
 	}
 
 	if err := s.repo.Create(instance); err != nil {
@@ -155,6 +156,7 @@ func (s *InstanceService) persistAndLaunch(
 		IP:      privateIP,
 		Gateway: gateway,
 		Assets:  assets,
+		SessionID: req.SessionID,
 	}); err != nil {
 		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", "")

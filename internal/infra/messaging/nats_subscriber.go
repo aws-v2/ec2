@@ -76,6 +76,7 @@ func (s *NATSSubscriber) Start() error {
 			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal provision event: %v", err)
 			return
 		}
+		
 
 		log.Printf("[NATS-SUB] [INFO] Received provision event for profile: %s", event.Profile)
 

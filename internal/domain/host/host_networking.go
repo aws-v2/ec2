@@ -8,6 +8,8 @@ type NetworkReconcileRequest struct {
 	IP      string        `json:"ip"`
 	Gateway string        `json:"gateway"`
 	Assets  []domain.AssetConfigs `json:"assets,omitempty"`
+	SessionID string `json:"session_id"`
+
 }
 
 type AssetConfig struct {

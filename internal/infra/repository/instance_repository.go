@@ -171,14 +171,14 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		public_sshkey, private_sshkey,
 		status, ip, public_ip, proxmox_id, 
 		created_at, user_id, root_volume_id, 
-		storage_size, storage_type, device_name, vpc_id, host_id
+		storage_size, storage_type, device_name, vpc_id, host_id, session_id
 	) 
 	VALUES (
 		$1, $2, $3, $4, $5, 
 		$6, $7,
 		$8, $9, $10, $11, 
 		$12, $13, $14, 
-		$15, $16, $17, $18, $19
+		$15, $16, $17, $18, $19, $20
 	)`
 
 	instance.CreatedAt = time.Now()
@@ -204,6 +204,7 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		instance.DeviceName,
 		instance.VPCID,
 		instance.HostID,
+		instance.SessionID,
 	)
 
 	return err

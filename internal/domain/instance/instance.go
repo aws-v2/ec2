@@ -78,16 +78,17 @@ type Instance struct {
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
 	HostID       string         `json:"host_id" db:"host_id"`
 	SSH        string         `json:"ssh" db:"ssh"`
+	SessionID string `json:"session_id" db:"session_id"`
 }
 
 type ProvisionInstanceEvent struct 
 {
 	Profile    string            `json:"profile"`
 	Specs      map[string]int    `json:"specs"`
-	UserID     string            `json:"user_id"`
+	UserID     string            `json:"user_id" required`
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
-	SessionID string `json:"session_id"`
+	SessionID string `json:"session_id" required`
 }
 
 
