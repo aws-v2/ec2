@@ -2,6 +2,7 @@ package transport
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	application "ec2-api/internal/application"
@@ -59,7 +60,9 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 func (h *InstanceHandler) GetInstance(c *gin.Context) {
 	id := c.Param("id")
 	userID := c.GetString("userID")
+	sessionID := uuid.New().String()
 	instance, err := h.service.GetInstance(id, userID)
+	instance.SessionID=sessionID
 	if err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
@@ -68,7 +71,7 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
+log.Printf("thisis the session id==>%s", sessionID)
 	dto.SendSuccess(c, http.StatusOK, "Instance retrieved successfully", instance)
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"ec2-api/internal/interfaces"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -200,7 +199,7 @@ func NewTerminalService(repo interfaces.InstanceRepository) *TerminalService {
 
 
 
-func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*AgentSession, error) {
+func (svc *TerminalService) CreateAgentSession(instanceID, userID,sessionID,vmID,token string) (*AgentSession, error) {
 	info, err := svc.instances.GetInstanceInfo(instanceID, userID)
 
 	if err != nil {
@@ -209,17 +208,22 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 
 // websocket De
 	// Build the WebSocket URL from whatever scheme the caller stored.
-	agentWS:= info.AgentURL
+	agentWS:= fmt.Sprintf("%s/terminal?token=%s?session=%s?vm_id=%s?vm_ip=%s", info.AgentURL, token,sessionID,vmID,"10.0.1.169")
+
 	if err != nil {
 		return nil, fmt.Errorf("agent url: %w", err)
 	}
 
-	log.Printf("[terminal-service] dialling agent at %s for instance %s, with ssh=%s", agentWS, instanceID, info.SSHKey)
+	log.Printf("[terminal-service] dialling agent at %s for instance %s, with ssh=%s", agentWS, instanceID, agentWS)
 
 	// conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(agentWS ,"%s/terminal"), nil)
 
 	conn, _, err := websocket.DefaultDialer.Dial(
-    fmt.Sprintf("%s/terminal", agentWS),
+    fmt.Sprintf("%s", agentWS),
+
+
+
+
     nil,
 )
 
@@ -227,7 +231,6 @@ func (svc *TerminalService) CreateAgentSession(instanceID, userID string) (*Agen
 		return nil, fmt.Errorf("dial agent %s: %w", agentWS, err)
 	}
 
-	sessionID := uuid.NewString()
 
 	// Tell the agent to open an SSH connection to the target VM.
 	openMsg := agentMessage{

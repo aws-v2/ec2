@@ -23,20 +23,19 @@ import (
 
 type InstanceService struct {
 	repo          interfaces.InstanceRepository
-	hostRepo          interfaces.HostRepository
+	hostRepo      interfaces.HostRepository
 	sgService     interfaces.SecurityGroupService
 	libvirtClient *libvirt.LibvirtClient
 	systemPubKey  string
 	imagesDir     string
-	publisher      *messaging.NATSPublisher
+	publisher     *messaging.NATSPublisher
 	minioAdapter  *storage.MinIOAdapter
-	vpcService    *vpcpkg.Service   // ← replaces publisher
+	vpcService    *vpcpkg.Service // ← replaces publisher
 	hostService   *HostService
 	ec2PrivateKey string
 	//  agentClient *vpcpkg.AgentClient
-	   httpClient *http.Client
-	   agentPort int
-
+	httpClient *http.Client
+	agentPort  int
 }
 
 func NewInstanceService(
@@ -46,7 +45,7 @@ func NewInstanceService(
 	libvirt *libvirt.LibvirtClient,
 	systemPubKey string,
 	imagesDir string,
-	publisher  *messaging.NATSPublisher,
+	publisher *messaging.NATSPublisher,
 	minioAdapter *storage.MinIOAdapter,
 	vpcService *vpcpkg.Service,
 	hostService *HostService,
@@ -56,7 +55,7 @@ func NewInstanceService(
 
 	return &InstanceService{
 		repo:          repo,
-		hostRepo:  hostRepo, 
+		hostRepo:      hostRepo,
 		sgService:     sgService,
 		libvirtClient: libvirt,
 		systemPubKey:  systemPubKey,
@@ -66,12 +65,10 @@ func NewInstanceService(
 		vpcService:    vpcService,
 		hostService:   hostService,
 		ec2PrivateKey: ec2PrivateKey,
-		 httpClient: &http.Client{
-            Timeout: 10 * time.Second,
-			
-        },
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 		agentPort: agentPort,
-
 	}
 }
 
@@ -86,26 +83,25 @@ const (
 	StageFailed             = "FAILED"
 )
 
-
-
-
 var imageMap = map[string]string{
 	// Ubuntu LTS versions
-	"ubuntu-20.04": "ubuntu-20.04.qcow2",
-	"ubuntu-22.04": "ubuntu-22.04.qcow2",
-	"ubuntu-24.04": "ubuntu-24.04.qcow2",
+	"ubuntu-20.04":       "ubuntu-20.04.qcow2",
+	"ubuntu-22.04-blue":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04-green": "ubuntu-22.04.qcow2",
+	"ubuntu-22.04-grey":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04":  "ubuntu-22.04.qcow2",
+	"ubuntu-24.04":       "ubuntu-24.04.qcow2",
 	// Debian
-	"debian-11": "debian-11.qcow2",
-	"debian-12": "debian-12.qcow2",
-	"rocky-8":     "rocky-8.qcow2",
-	"rocky-9":     "rocky-9.qcow2",
-	"almalinux-8": "almalinux-8.qcow2",
-	"almalinux-9": "almalinux-9.qcow2",
-	"fedora-39": "fedora-39.qcow2",
-	"fedora-40": "fedora-40.qcow2",
+	"debian-11":       "debian-11.qcow2",
+	"debian-12":       "debian-12.qcow2",
+	"rocky-8":         "rocky-8.qcow2",
+	"rocky-9":         "rocky-9.qcow2",
+	"almalinux-8":     "almalinux-8.qcow2",
+	"almalinux-9":     "almalinux-9.qcow2",
+	"fedora-39":       "fedora-39.qcow2",
+	"fedora-40":       "fedora-40.qcow2",
 	"centos-stream-9": "centos-stream-9.qcow2",
 }
-
 
 // ─── SSH Key Pair ─────────────────────────────────────────────────────────────
 
@@ -113,32 +109,40 @@ type SSHKeyPair struct {
 	PrivateKeyPEM string // stored in DB → fed to agent at terminal time
 	PublicKeyAuth string // "ssh-ed25519 AAAA..." → fed to cloud-init authorized_keys
 }
+
 var ErrNoActiveHosts = errors.New("no active hosts found")
 
 // CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
+	switch req.Profile {
+	case "ai-worker":
+		req.Image = fmt.Sprintf("%s-grey", req.Image)
+	case "gamelift":
+		req.Image = fmt.Sprintf("%s-green", req.Image)
+	default:
+		req.Image = fmt.Sprintf("%s-grey", req.Image)
+
+	}
+ 
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
-
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
 		return nil, err
 	}
- 
+
 	// Step 2: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
-		
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
 		return nil, err
-
 	}
 
 	// Step 2.5: Select best host
 	bestHost, err := s.hostService.SelectBestHost()
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
 
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 	}
@@ -147,18 +151,19 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		hostID = bestHost.ID
 		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
 	} else {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
 		return nil, ErrNoActiveHosts
 	}
 
-
 	log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
- 
+
+	// --------------
+
 	// Step 3: Persist the record and launch VM creation asynchronously
-	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken,bestHost)
+	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "",req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
 		return nil, err
 	}
 	instance.HostID = hostID
@@ -166,8 +171,6 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	return instance, nil
 }
- 
-
 
 // type InsatanceDetailsResponse struct{
 // 	Instance domain.Instance `json:"instance"`
@@ -183,11 +186,11 @@ func (s *InstanceService) GetInstance(id, userID string) (*domain.Instance, erro
 	if instance.UserID != userID && userID != "" {
 		return nil, dto.ErrInstanceNotFound // or forbidden
 	}
-	host,err := s.hostRepo.GetByID(instance.HostID)
+	host, err := s.hostRepo.GetByID(instance.HostID)
 	if err != nil {
 		return nil, err
 	}
-	instance.HostID =host.IP
+	instance.HostID = host.IP
 	return instance, nil
 }
 
@@ -222,7 +225,7 @@ func (s *InstanceService) StopInstance(id, userID string, sessionID string) erro
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "",sessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", sessionID)
 	}
 
 	return nil
@@ -260,7 +263,7 @@ func (s *InstanceService) RestartInstance(instanceID, userID string) error {
 
 	return nil
 }
-func (s *InstanceService) StartInstance(id, userID string,  sessionID string) error {
+func (s *InstanceService) StartInstance(id, userID string, sessionID string) error {
 	instance, err := s.GetInstance(id, userID)
 	if err != nil {
 		return err
@@ -287,7 +290,7 @@ func (s *InstanceService) StartInstance(id, userID string,  sessionID string) er
 	// Publish INSTANCE_STARTED event
 	if s.publisher != nil {
 		instance.Status = domain.StatusRunning
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "",sessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "", sessionID)
 	}
 
 	return nil

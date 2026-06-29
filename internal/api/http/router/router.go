@@ -85,7 +85,7 @@ func SetupRoutes(r *gin.Engine,
 		api.DELETE("/instances/:id/tags/:key", instanceHandler.DeleteTag)
 		api.DELETE("/instances/:id", instanceHandler.DeleteInstance)
 		api.PUT("/instances/:id/vpc", networkingHandler.AssignVPC)
-		api.GET("/instances/:id/terminal", terminalHandler.HandleTerminal)
+		api.GET("/instances/:id/terminal/:session", terminalHandler.HandleTerminal)
 
 
 		// Instance control

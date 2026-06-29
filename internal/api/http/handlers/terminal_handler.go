@@ -35,13 +35,16 @@ type TerminalMessage struct {
 
 func (h *TerminalHandler) HandleTerminal(c *gin.Context) {
 	instanceID := c.Param("id")
+	sessionID := c.Param("session")
 	userID := c.GetString("userID")
+	token := c.GetString("token")
 
 	log.Printf("[TERMINAL] Handling request for instance: %s", instanceID)
+	log.Printf("[TERMINAL] Handling request for instance:-- %s", token)
 
 	// Resolve the agent session BEFORE upgrading to WebSocket so we can
 	// still return a proper HTTP error if the agent is unreachable / nil.
-	session, err := h.service.CreateAgentSession(instanceID, userID)
+	session, err := h.service.CreateAgentSession(instanceID, userID,sessionID, instanceID,token)
 	if err != nil {
 		log.Printf("[TERMINAL] Agent connection failed: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{

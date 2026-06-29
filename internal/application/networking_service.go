@@ -204,6 +204,9 @@ func (s *NetworkingService) ListVPCs(ctx context.Context, tenantID string) ([]do
 	if s.publisher == nil {
 		return nil, fmt.Errorf("network service publisher is not configured")
 	}
+
+
+	
 	return s.publisher.ListVPCs(tenantID)
 }
 

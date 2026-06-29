@@ -290,8 +290,8 @@ func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.
 			continue
 		}
 
-		log.Printf("[NATS] [SUCCESS] correlation_id=%s instance_id=%s event_type=%s ip=%s status=published",
-			correlationID, instance.ID, eventType, event.Payload.IPAddress)
+		log.Printf("[NATS] [SUCCESS] correlation_id=%s instance_id=%s event_type=%s ip=%s status=published for the subject %s ",
+			correlationID, instance.ID, eventType, event.Payload.IPAddress, p.subject)
 		return nil
 	}
 

@@ -359,6 +359,8 @@ runCmd += "\n  - systemctl enable game-server"
 runCmd += "\n  - systemctl start game-server"
 
 	case "ai-worker":
+		// Download andinstall the agentorget atemplete with the isntealledagent
+		// or pickatempletewith teh agent areadyintalled
 		profileContent = fmt.Sprintf(`
   - path: /opt/ml/config/minio
     content: |
@@ -731,6 +733,17 @@ func (l *LibvirtClient) StartVM(remoteHostIP, remoteHostUser, remoteHostKey, vmN
 
 	return nil
 }
+type ErrorDomain int
+type ErrorLevel int
+type ErrorNumber int
+
+type Error struct {
+	Code    ErrorNumber `json:"code"`
+	Domain  ErrorDomain
+	Message string
+	Level   ErrorLevel
+}
+
 
 func (l *LibvirtClient) DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, vmName string) error {
 	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
@@ -741,7 +754,9 @@ func (l *LibvirtClient) DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, vm
 
 	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
-		return err
+	
+		 
+		return fmt.Errorf("Domain not found")
 	}
 
 	// Force stop if running

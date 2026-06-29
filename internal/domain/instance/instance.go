@@ -45,7 +45,7 @@ const (
 	EventHealthUpdate    = "HEALTH_UPDATE"
 	EventProvisioningProgress = "PROVISIONING_PROGRESS"
 	EventInstanceError = "INSTANCE_ERROR"
-	 EventInstanceProvisioned = "INSTANCE_PROVISIONED"
+	EventInstanceProvisioned = "INSTANCE_PROVISIONED"
 )
 
 type ProvisioningProgressEvent struct {
@@ -77,8 +77,11 @@ type Instance struct {
 	UserID       string         `json:"user_id" db:"user_id"`
 	VPCID        string         `json:"vpc_id" db:"vpc_id"`
 	HostID       string         `json:"host_id" db:"host_id"`
+
 	SSH        string         `json:"ssh" db:"ssh"`
 	SessionID string `json:"session_id" db:"session_id"`
+	ImageVersion string  `json:"image_version" db:"image_version"`
+	ImageProfile string `json:"image_profile" db:"image_profile"`
 }
 
 type ProvisionInstanceEvent struct 

@@ -118,7 +118,19 @@ type AssetConfig struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
+func resolveImage(profile string) string {
+	switch profile {
 
+	case "ai-worker":
+		return "ubuntu-22.04-blue"
+
+	case "gamelift":
+		return "ubuntu-22.04-green"
+
+	default:
+		return "ubuntu-22.04-grey"
+	}
+}
 
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
  
@@ -145,23 +157,38 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 
 
 	// Build request
-req := &domain.CreateInstanceRequest{
-    Image:     "ubuntu-22.04",
-    CPU:       event.Specs["cpu"],
-    RAM:       event.Specs["ram"],
-    Profile:   event.Profile,
-    Manifest:  event.Manifest,
-    ARN:       event.StorageARN,
-    SessionID: event.SessionID,
-    Assets: []domain.AssetConfigs{
-        {
-            Name:   event.Manifest.Name,
-            URL:    event.Manifest.Parameters["ASSET_URL"],
-            Path:   event.Manifest.Parameters["ASSET_PATH"],
-            SHA256: event.Manifest.Parameters["ASSET_SHA256"],
-        },
-    },
-}
+image := resolveImage(event.Profile)
+
+log.Printf(
+	"[PROVISIONER] profile=%s resolved image=%s",
+	event.Profile,
+	image,
+)
+
+	assets := []domain.AssetConfigs{}
+	if event.Manifest.Parameters != nil {
+		assets = append(assets, domain.AssetConfigs{
+			Name:   event.Manifest.Name,
+			URL:    event.Manifest.Parameters["ASSET_URL"],
+			Path:   event.Manifest.Parameters["ASSET_PATH"],
+			SHA256: event.Manifest.Parameters["ASSET_SHA256"],
+		})
+	}
+
+	req := &domain.CreateInstanceRequest{
+		Image:     image,
+		CPU:       event.Specs["cpu"],
+		RAM:       event.Specs["ram"],
+		Profile:   event.Profile,
+		Manifest:  event.Manifest,
+		ARN:       event.StorageARN,
+		SessionID: event.SessionID,
+		Assets:    assets,
+	}
+
+
+
+
 
 	// Defaults
 	if req.CPU == 0 {
@@ -186,6 +213,10 @@ req := &domain.CreateInstanceRequest{
 	}
 
 	log.Printf("[PROVISIONER] invoking CreateInstance userID=%s", userID)
+
+
+
+
 
 	// Call core logic
 	instance, err := s.CreateInstance(ctx, req, userID)

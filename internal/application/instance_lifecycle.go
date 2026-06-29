@@ -46,13 +46,22 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 	vmName = fmt.Sprintf("vm-%s", instanceID)
 	newDiskPath = filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
-	if s.publisher != nil {
+	// ai-worker VMs do not need an IAM token — the IAM service may not even
+	// be subscribed on this NATS subject, so skip the request entirely to
+	// avoid a 5-second timeout that would abort provisioning before any
+	// lifecycle event is published.
+	if s.publisher != nil && req.Profile != "ai-worker" {
 		instanceToken, err = s.publisher.RequestInstanceToken(userID, instanceID)
 		if err != nil {
-			log.Printf("[IAM] [ERROR] Failed to get instance token for %s: %v", instanceID, err)
-			return "", "", "", "", "", fmt.Errorf("failed to get instance token: %w", err)
+			// Non-fatal: log and continue with an empty token so the VM can
+			// still be provisioned and the INSTANCE_PROVISIONED event fires.
+			log.Printf("[IAM] [WARN] Failed to get instance token for %s (profile=%s): %v — continuing without token", instanceID, req.Profile, err)
+			instanceToken = ""
+		} else {
+			log.Printf("[IAM] [OK] Received instance token for %s", instanceID)
 		}
-		log.Printf("[IAM] [OK] Received instance token for %s", instanceID)
+	} else if req.Profile == "ai-worker" {
+		log.Printf("[IAM] [SKIP] Skipping IAM token for ai-worker instance %s", instanceID)
 	}
 
 	return baseImagePath, instanceID, vmName, newDiskPath, instanceToken, nil
@@ -178,7 +187,18 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("network reconcile failed: %w", err)
 	}
 
-	log.Printf("[NETWORK] reconcile complete for instance %s — assets ready on host for this asset path %s", instanceID, assets[0].Path)
+assetPath := "<none>"
+if len(assets) > 0 {
+	assetPath = assets[0].Path
+}
+
+log.Printf(
+	"[NETWORK] reconcile complete for instance %s — asset path: %s",
+	instanceID,
+	assetPath,
+)
+
+
 
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets)
 
@@ -363,7 +383,7 @@ func (s *InstanceService) createVMAsync(
 	err := s.buildOverlay(instance.ID, absBase, absOverlay, instance.StorageSize)
 	if err != nil {
 		log.Printf("[VM] overlay creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -400,7 +420,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] cloud-init creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -424,7 +444,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] overlay transfer failed*: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -446,7 +466,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] iso transfer failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -469,7 +489,7 @@ func (s *InstanceService) createVMAsync(
 
 		if err != nil {
 			log.Printf("[VM] asset injection failed: %v", err)
-			go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+			go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
 
 			s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 			return
@@ -538,6 +558,11 @@ func (s *InstanceService) createVMAsync(
 
 	if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
 		log.Printf("[VM] failed to publish provisioned event: %v", err)
+	}
+
+	// Also publish INSTANCE_STARTED so lifecycle monitors know the VM is active and has an IP.
+	if err := s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, agentWS, req.SessionID); err != nil {
+		log.Printf("[VM] failed to publish started event: %v", err)
 	}
 
 }

@@ -56,3 +56,34 @@ CREATE TABLE IF NOT EXISTS vm_metrics (
 
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+
+
+
+CREATE TABLE IF NOT EXISTS vm_images (
+    id UUID PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+
+    profile TEXT NOT NULL,
+
+    color_code TEXT NOT NULL,
+
+    base_image TEXT NOT NULL,
+
+    version TEXT NOT NULL,
+
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+
+ALTER TABLE instances
+ADD COLUMN IF NOT EXISTS image_version TEXT DEFAULT '';
+
+
+
+ALTER TABLE instances
+ADD COLUMN IF NOT EXISTS image_profile TEXT DEFAULT '';
+
+
