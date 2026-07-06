@@ -11,7 +11,11 @@ func AuthMiddleware() gin.HandlerFunc {
         c.Set("userRole",   c.GetHeader("X-User-Role"))
         c.Set("authMethod", c.GetHeader("X-Auth-Method"))
         c.Set("token", c.GetHeader("X-Authorization"))
- 
+
+
         c.Next()
+ 
+
+
     }
 }

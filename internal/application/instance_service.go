@@ -117,11 +117,12 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	switch req.Profile {
 	case "ai-worker":
-		req.Image = fmt.Sprintf("%s-grey", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)
+
 	case "gamelift":
-		req.Image = fmt.Sprintf("%s-green", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)
 	default:
-		req.Image = fmt.Sprintf("%s-grey", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)
 
 	}
  
@@ -508,6 +509,7 @@ func (s *InstanceService) AssignVPC(
 			},
 			IP:      privateIP,
 			Gateway: gateway,
+			VMID: instanceID,
 		},
 	)
 

@@ -4,6 +4,8 @@ import domain "ec2-api/internal/domain/instance"
 
 type NetworkReconcileRequest struct {
 	VPCID   string        `json:"vpc_id"`
+	VMID   string        `json:"vm_id"`
+
 	Bridge  BridgeConfig  `json:"bridge"`
 	IP      string        `json:"ip"`
 	Gateway string        `json:"gateway"`

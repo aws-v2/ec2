@@ -180,6 +180,8 @@ func (s *InstanceService) persistAndLaunch(
 		Gateway: gateway,
 		Assets:  assets,
 		SessionID: req.SessionID,
+		VMID: instanceID,
+
 	}); err != nil {
 		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
