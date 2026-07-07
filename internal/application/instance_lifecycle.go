@@ -9,8 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-
-	// "os"
+	"ec2-api/internal/vpcpkg"
 	"strings"
 
 	"fmt"
@@ -21,14 +20,41 @@ import (
 
 	"github.com/google/uuid"
 )
+var imageMap = map[string]string{
+	// Ubuntu LTS versions
+	"ubuntu-20.04":       "ubuntu-20.04.qcow2",
+	"ubuntu-22.04-blue":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04-green": "ubuntu-22.04.qcow2",
+	"ubuntu-22.04-grey":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04":  "ubuntu-22.04.qcow2",
+	"ubuntu-24.04":       "ubuntu-24.04.qcow2",
+	// Debian
+	"debian-11":       "debian-11.qcow2",
+	"debian-12":       "debian-12.qcow2",
+	"rocky-8":         "rocky-8.qcow2",
+	"rocky-9":         "rocky-9.qcow2",
+	"almalinux-8":     "almalinux-8.qcow2",
+	"almalinux-9":     "almalinux-9.qcow2",
+	"fedora-39":       "fedora-39.qcow2",
+	"fedora-40":       "fedora-40.qcow2",
+	"centos-stream-9": "centos-stream-9.qcow2",
+}
 
 // prepareInstanceResources validates the requested image, ensures the base disk
-// exists on disk, generates the instance/VM identifiers, and fetches an IAM
+// exists on disk, 
+// generates the instance/VM identifiers, and 
+// fetches an IAM
 // token that the in-VM metrics agent will use to authenticate.
+
+// TODO: put the returns ina struct
+// type InstanceResourceResponse struct{
+	
+// }
+
 func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID string) (
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken string, err error,
 ) {
-
+	// Checks if we have that base image in servers files 
 	baseImageName, ok := imageMap[req.Image]
 	if !ok {
 		available := make([]string, 0, len(imageMap))
@@ -37,13 +63,16 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 		}
 		return "", "", "", "", "", fmt.Errorf("image %s not found. Available: %v", req.Image, available)
 	}
-	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
+	// s.imagesDir maps to this entry in config/config.go
+	// ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images")
+	// TODO: add an endpoint for the agentto download the base image if issues arise ,
+	baseImagePath = filepath.Join(s.imagesDir, baseImageName) 
 	if err = s.EnsureImageExists(req.Image, baseImagePath); err != nil {
 		return "", "", "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
 	}
 
 	instanceID = fmt.Sprintf("i-%s", uuid.New().String()[:8])
-	vmName = fmt.Sprintf("vm-%s", instanceID)
+	vmName = fmt.Sprintf("vm-%s", req.Name)
 	newDiskPath = filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
 	// ai-worker VMs do not need an IAM token — the IAM service may not even
@@ -68,17 +97,10 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 }
 
 // allocateInstanceNetwork now calls vpcService directly instead of NATS.
-func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, instanceID string) (
+func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, instanceID string, defaultVPC *vpcpkg.VPC) (
 	vpcID, privateIP, gateway, bridgeName string, err error,
 ) {
-	log.Printf("[NETWORK] Preparing network for instance %s", instanceID)
-
-	// Get or create the default VPC for this user
-	defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
-	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
-	}
-	log.Printf("[VPC] [OK] Got default VPC %s (bridge: %s) for instance %s", defaultVPC.ID, defaultVPC.BridgeName, instanceID)
+	log.Printf("[NETWORK] Preparing network for instance %s in VPC %s", instanceID, defaultVPC.ID)
 
 	// Allocate an IP within that VPC
 	network, err := s.vpcService.AllocateInstanceNetwork(ctx, userID, instanceID, defaultVPC.ID)

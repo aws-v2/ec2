@@ -11,6 +11,7 @@ type Repository interface {
 	ListVPCsByTenant(ctx context.Context, tenantID string) ([]*VPC, error)
 	CreateVPC(ctx context.Context, vpc *VPC) error
 	UpdateVPCStatus(ctx context.Context, vpcID, status string) error
+	UpdateVPCHost(ctx context.Context, vpcID, hostID string) error
 	DeleteVPC(ctx context.Context, vpcID string) error
 
 	// CIDR allocation — must run inside a serializable transaction to prevent races

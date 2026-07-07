@@ -295,10 +295,12 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
   - systemctl start metrics-agent`
 
 	// ── Select Profile Template ──────────────────────────────────────────────
+	userName :="ubuntu"
 	profileContent := ""
 	switch profile {
-case "gamelift":
-    profileContent = `
+	case "gamelift":
+		userName="gls"
+		profileContent = `
   - path: /opt/game/start.sh
     permissions: '0755'
     content: |
@@ -351,16 +353,17 @@ case "gamelift":
       [Install]
       WantedBy=multi-user.target
 `
-runCmd += "\n  - apt-get update"
-runCmd += "\n  - apt-get install -y libfontconfig1 unzip"
-runCmd += "\n  - chmod +x /opt/game/start.sh"
-runCmd += "\n  - systemctl daemon-reload"
-runCmd += "\n  - systemctl enable game-server"
-runCmd += "\n  - systemctl start game-server"
+		runCmd += "\n  - apt-get update"
+		runCmd += "\n  - apt-get install -y libfontconfig1 unzip"
+		runCmd += "\n  - chmod +x /opt/game/start.sh"
+		runCmd += "\n  - systemctl daemon-reload"
+		runCmd += "\n  - systemctl enable game-server"
+		runCmd += "\n  - systemctl start game-server"
 
 	case "ai-worker":
 		// Download andinstall the agentorget atemplete with the isntealledagent
 		// or pickatempletewith teh agent areadyintalled
+		userName="sgm"
 		profileContent = fmt.Sprintf(`
   - path: /opt/ml/config/minio
     content: |
@@ -454,6 +457,10 @@ runCmd += "\n  - systemctl start game-server"
 		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
 		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
 		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
+	case "rds":
+		userName ="rds"
+	case "lambda":
+		userName ="lambda"
 	default:
 		// Vanilla profile has no extra files or commands
 		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n", vmName)
@@ -462,8 +469,8 @@ runCmd += "\n  - systemctl start game-server"
 	userData := fmt.Sprintf(`#cloud-config
 ssh_pwauth: true
 users:
-  - name: ubuntu
-    plain_text_passwd: "ubuntu"
+  - name: %s
+    plain_text_passwd: "ubuntu!!"
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
     shell: /bin/bash
     lock_passwd: false
@@ -475,7 +482,7 @@ write_files:
 
 runcmd:
 %s
-`, keysYaml, writeFiles, profileContent, runCmd)
+`, userName,keysYaml, writeFiles, profileContent, runCmd )
 
 	// ── Replace basic placeholders ───────────────────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
@@ -733,6 +740,7 @@ func (l *LibvirtClient) StartVM(remoteHostIP, remoteHostUser, remoteHostKey, vmN
 
 	return nil
 }
+
 type ErrorDomain int
 type ErrorLevel int
 type ErrorNumber int
@@ -744,7 +752,6 @@ type Error struct {
 	Level   ErrorLevel
 }
 
-
 func (l *LibvirtClient) DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, vmName string) error {
 	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
 	if err != nil {
@@ -754,8 +761,7 @@ func (l *LibvirtClient) DeleteVM(remoteHostIP, remoteHostUser, remoteHostKey, vm
 
 	domain, err := conn.LookupDomainByName(vmName)
 	if err != nil {
-	
-		 
+
 		return fmt.Errorf("Domain not found")
 	}
 
@@ -1093,7 +1099,7 @@ func (l *LibvirtClient) InjectAssets(
 		log.Printf("[Libvirt] No valid assets to inject, skipping")
 		return nil
 	}
-script := fmt.Sprintf(`
+	script := fmt.Sprintf(`
 set -e
 
 modprobe nbd max_part=8 2>/dev/null || true
@@ -1164,7 +1170,6 @@ qemu-img convert -f raw -O qcow2 "$FLAT" "%s"
 
 echo "[InjectAssets] Injection complete"
 `, diskPath, copyCommands.String(), diskPath)
-
 
 	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, script)
 }

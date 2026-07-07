@@ -6,6 +6,7 @@ import (
 )
 
 type Host struct {
+	HostType string `json:"hosttype"`
 	ID            string    `json:"id"`
 	Hostname      string    `json:"hostname"`
 	IP            string    `json:"ip"`
@@ -43,6 +44,7 @@ type VMActionTarget struct {
 	Action string // "sleep" or "terminate"
 }
 type HeartbeatRequest struct {
+	HostType string `json:"hosttype"`
 	HostID             string        `json:"host_id"`
 	Hostname           string        `json:"hostname"`
 	IP                 string        `json:"ip"`
@@ -72,6 +74,7 @@ type HeartbeatRequest struct {
 type Repository interface {
 	Update(host *Host) error
 	GetBestHosts(limit int) ([]*Host, error)
+	GetBestHostsByType(limit int, targetType string) ([]*Host, error)
 	GetByID(id string) (*Host, error)
 	ListAll(ctx context.Context) ([]Host, error)
 }

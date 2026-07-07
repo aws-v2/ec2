@@ -29,10 +29,6 @@ func (s *Service) GetOrCreateDefaultVPC(ctx context.Context, tenantID string) (*
 		return nil, fmt.Errorf("failed to query default VPC: %w", err)
 	}
 	if vpc != nil {
-		// Ensure the physical network exists on this host (idempotent)
-		if err := s.provisioner.EnsureNetwork(vpc); err != nil {
-			return nil, fmt.Errorf("failed to ensure host network for existing VPC: %w", err)
-		}
 		return vpc, nil
 	}
 
@@ -52,11 +48,6 @@ func (s *Service) AllocateInstanceNetwork(ctx context.Context, tenantID, instanc
 	vpc, err := s.repo.GetVPCByID(ctx, vpcID)
 	if err != nil {
 		return nil, fmt.Errorf("VPC %s not found: %w", vpcID, err)
-	}
-
-	// Ensure the physical network is present on this host
-	if err := s.provisioner.EnsureNetwork(vpc); err != nil {
-		return nil, fmt.Errorf("failed to ensure host network: %w", err)
 	}
 
 	// Get already-used IPs so we don't collide
@@ -100,6 +91,11 @@ func (s *Service) ReleaseInstanceNetwork(ctx context.Context, instanceID string)
 	return nil
 }
 
+// UpdateVPCHost locks the VPC ownership to a new host ID
+func (s *Service) UpdateVPCHost(ctx context.Context, vpcID, hostID string) error {
+	return s.repo.UpdateVPCHost(ctx, vpcID, hostID)
+}
+
 // DeleteVPC tears down the VPC. Blocked if any instances are still running in it.
 func (s *Service) DeleteVPC(ctx context.Context, vpcID string) error {
 	count, err := s.repo.CountActiveInstances(ctx, vpcID)
@@ -108,10 +104,6 @@ func (s *Service) DeleteVPC(ctx context.Context, vpcID string) error {
 	}
 	if count > 0 {
 		return fmt.Errorf("VPC %s still has %d active instance(s) — terminate them first", vpcID, count)
-	}
-
-	if err := s.provisioner.DestroyNetwork(vpcID); err != nil {
-		return fmt.Errorf("failed to destroy host network for VPC %s: %w", vpcID, err)
 	}
 
 	if err := s.repo.DeleteVPC(ctx, vpcID); err != nil {
@@ -166,14 +158,7 @@ func (s *Service) createVPC(ctx context.Context, tenantID, name string, isDefaul
 		return nil, fmt.Errorf("failed to persist VPC record: %w", err)
 	}
 
-	// Create the physical network on the host
-	if err := s.provisioner.EnsureNetwork(vpc); err != nil {
-		// Roll back the DB record so the CIDR is freed
-		_ = s.repo.DeleteVPC(ctx, vpc.ID)
-		return nil, fmt.Errorf("failed to provision host network: %w", err)
-	}
-
-	// Mark active only after host network is confirmed
+	// Mark active immediately since host agent handles physical bridging at reconcile
 	if err := s.repo.UpdateVPCStatus(ctx, vpc.ID, VPCStatusActive); err != nil {
 		return nil, fmt.Errorf("failed to mark VPC active: %w", err)
 	}

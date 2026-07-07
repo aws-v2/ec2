@@ -159,7 +159,7 @@ func main() {
 	}
 	// systemPubKey, _ := systemKeyService.GetPublicKeyString()
 
-	vpcProvisioner := vpcpkg.NewVPCProvisioner(libvirtClient.Conn())
+	vpcProvisioner := vpcpkg.NewVPCProvisioner()
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
 	rolloutRepo := repository.NewRolloutRepo(db)

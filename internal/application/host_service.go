@@ -310,6 +310,7 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 	host := &domain.Host{
 		ID:                 req.HostID,
 		Hostname:           req.Hostname,
+		HostType: req.HostType,
 		IP:                 req.IP,
 		SSHUser:            sshUser,
 		CPUTotal:           req.CPUTotal,
@@ -357,19 +358,47 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 	}, nil
 }
 
-func (s *HostService) SelectBestHost() (*domain.Host, error) {
+
+func getHostPriorityList(profile string) []string {
+	switch profile {
+	case "ai-worker":
+		return []string{"workers", "grey", "games"}
+	case "gamelift":
+		return []string{"games", "grey", "workers"}
+	default:
+		return []string{"grey", "workers", "games"}
+	}
+}
+
+func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*domain.Host, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	hosts, err := s.repo.GetBestHosts(10)
-	if err != nil {
-		return nil, err
+	priorityList := getHostPriorityList(profile)
+
+	if preferredHostID != "" {
+		host, err := s.repo.GetByID(preferredHostID)
+		if err == nil && host != nil && host.Status == "active" {
+			for _, t := range priorityList {
+				if host.HostType == t {
+					// Strongly prefer the host where this VPC already lives.
+					return host, nil
+				}
+			}
+		}
 	}
 
-	if len(hosts) == 0 {
-		return nil, nil
+	for _, hostType := range priorityList {
+		hosts, err := s.repo.GetBestHostsByType(10, hostType)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(hosts) > 0 {
+			s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(hosts)
+			return hosts[s.lastSelectionOffset], nil
+		}
 	}
 
-	s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(hosts)
-	return hosts[s.lastSelectionOffset], nil
+	return nil, nil
 }

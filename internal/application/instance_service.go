@@ -83,25 +83,6 @@ const (
 	StageFailed             = "FAILED"
 )
 
-var imageMap = map[string]string{
-	// Ubuntu LTS versions
-	"ubuntu-20.04":       "ubuntu-20.04.qcow2",
-	"ubuntu-22.04-blue":  "ubuntu-22.04.qcow2",
-	"ubuntu-22.04-green": "ubuntu-22.04.qcow2",
-	"ubuntu-22.04-grey":  "ubuntu-22.04.qcow2",
-	"ubuntu-22.04":  "ubuntu-22.04.qcow2",
-	"ubuntu-24.04":       "ubuntu-24.04.qcow2",
-	// Debian
-	"debian-11":       "debian-11.qcow2",
-	"debian-12":       "debian-12.qcow2",
-	"rocky-8":         "rocky-8.qcow2",
-	"rocky-9":         "rocky-9.qcow2",
-	"almalinux-8":     "almalinux-8.qcow2",
-	"almalinux-9":     "almalinux-9.qcow2",
-	"fedora-39":       "fedora-39.qcow2",
-	"fedora-40":       "fedora-40.qcow2",
-	"centos-stream-9": "centos-stream-9.qcow2",
-}
 
 // ─── SSH Key Pair ─────────────────────────────────────────────────────────────
 
@@ -115,14 +96,16 @@ var ErrNoActiveHosts = errors.New("no active hosts found")
 // CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
+
 	switch req.Profile {
+
 	case "ai-worker":
-		req.Image = fmt.Sprintf("%s", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-green
 
 	case "gamelift":
-		req.Image = fmt.Sprintf("%s", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-blue
 	default:
-		req.Image = fmt.Sprintf("%s", req.Image)
+		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-grey
 
 	}
  
@@ -133,28 +116,46 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		return nil, err
 	}
 
-	// Step 2: Allocate networking — direct call, no NATS
-	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID)
+	// Step 2: VPC Placement & Host Selection
+	// ─── NEW PLACEMENT LOGIC ──────────────────────────────────────
+	
+	defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
+		return nil, fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
+	}
+	
+	bestHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 		return nil, err
 	}
 
-	// Step 2.5: Select best host
-	bestHost, err := s.hostService.SelectBestHost()
-	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
-
-		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
-	}
 	hostID := ""
 	if bestHost != nil {
 		hostID = bestHost.ID
-		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
+		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s with thsi ip: %s", bestHost.Hostname, hostID, instanceID, bestHost.IP)
 	} else {
 		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
 		return nil, ErrNoActiveHosts
+	}
+
+	// Always bind the VPC to the actively selected compute host lock-in
+	if bestHost.ID != defaultVPC.HostID {
+		if err := s.vpcService.UpdateVPCHost(ctx, defaultVPC.ID, bestHost.ID); err != nil {
+			log.Printf("[SCHEDULER] [WARN] Failed to update VPC HostID lock: %v", err)
+		}
+	}
+
+	// ─── END PLACEMENT LOGIC ──────────────────────────────────────
+
+	// Step 2.5: Allocate networking — direct call, no NATS
+	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID, defaultVPC)
+	if err != nil {
+		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
+		return nil, err
 	}
 
 	log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)

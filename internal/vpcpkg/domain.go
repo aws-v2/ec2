@@ -12,10 +12,13 @@ const (
 type VPC struct {
 	ID         string    `db:"id"`
 	Name       string    `db:"name"`
+
 	CIDRBlock  string    `db:"cidr_block"`
-	BridgeName string    `db:"bridge_name"`
 	GatewayIP  string    `db:"gateway_ip"`
+
+	BridgeName string    `db:"bridge_name"`
 	TenantID   string    `db:"tenant_id"`
+	HostID     string    `db:"host_id"`
 	Status     string    `db:"status"`
 	IsDefault  bool      `db:"is_default"`
 	CreatedAt  time.Time `db:"created_at"`

@@ -23,7 +23,7 @@ func NewVPCRepository(db *sqlx.DB) *VPCRepository {
 func (r *VPCRepository) GetDefaultVPC(ctx context.Context, tenantID string) (*vpc.VPC, error) {
 	var v vpc.VPC
 	err := r.db.GetContext(ctx, &v, `
-		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, status, is_default, created_at, updated_at
+		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, host_id, status, is_default, created_at, updated_at
 		FROM vpcs
 		WHERE tenant_id = $1 AND is_default = true AND status != 'deleted'
 		LIMIT 1
@@ -37,7 +37,7 @@ func (r *VPCRepository) GetDefaultVPC(ctx context.Context, tenantID string) (*vp
 func (r *VPCRepository) GetVPCByID(ctx context.Context, vpcID string) (*vpc.VPC, error) {
 	var v vpc.VPC
 	err := r.db.GetContext(ctx, &v, `
-		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, status, is_default, created_at, updated_at
+		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, host_id, status, is_default, created_at, updated_at
 		FROM vpcs
 		WHERE id = $1 AND status != 'deleted'
 	`, vpcID)
@@ -50,7 +50,7 @@ func (r *VPCRepository) GetVPCByID(ctx context.Context, vpcID string) (*vpc.VPC,
 func (r *VPCRepository) ListVPCsByTenant(ctx context.Context, tenantID string) ([]*vpc.VPC, error) {
 	var rows []*vpc.VPC
 	err := r.db.SelectContext(ctx, &rows, `
-		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, status, is_default, created_at, updated_at
+		SELECT id, name, cidr_block, bridge_name, gateway_ip, tenant_id, host_id, status, is_default, created_at, updated_at
 		FROM vpcs
 		WHERE tenant_id = $1 AND status != 'deleted'
 		ORDER BY created_at ASC
@@ -60,11 +60,11 @@ func (r *VPCRepository) ListVPCsByTenant(ctx context.Context, tenantID string) (
 
 func (r *VPCRepository) CreateVPC(ctx context.Context, v *vpc.VPC) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO vpcs (id, name, cidr_block, bridge_name, gateway_ip, tenant_id, status, is_default, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO vpcs (id, name, cidr_block, bridge_name, gateway_ip, tenant_id, host_id, status, is_default, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`,
 		v.ID, v.Name, v.CIDRBlock, v.BridgeName, v.GatewayIP,
-		v.TenantID, v.Status, v.IsDefault, v.CreatedAt, v.UpdatedAt,
+		v.TenantID, v.HostID, v.Status, v.IsDefault, v.CreatedAt, v.UpdatedAt,
 	)
 	return err
 }
@@ -73,6 +73,13 @@ func (r *VPCRepository) UpdateVPCStatus(ctx context.Context, vpcID, status strin
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE vpcs SET status = $1, updated_at = $2 WHERE id = $3
 	`, status, time.Now(), vpcID)
+	return err
+}
+
+func (r *VPCRepository) UpdateVPCHost(ctx context.Context, vpcID, hostID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE vpcs SET host_id = $1, updated_at = $2 WHERE id = $3
+	`, hostID, time.Now(), vpcID)
 	return err
 }
 

@@ -88,10 +88,10 @@ type ProvisionInstanceEvent struct
 {
 	Profile    string            `json:"profile"`
 	Specs      map[string]int    `json:"specs"`
-	UserID     string            `json:"user_id" required`
+	UserID     string            `json:"user_id"  `
 	StorageARN string            `json:"storage_arn"`
 	Manifest GameManifest `json:"manifest"`
-	SessionID string `json:"session_id" required`
+	SessionID string `json:"session_id"  `
 }
 
 
@@ -125,6 +125,7 @@ type InstanceSpecs struct {
 
 type CreateInstanceRequest struct {
 	Image      string            `json:"image" binding:"required"`
+	Name      string            `json:"name" binding:"required"`
 	CPU        int               `json:"cpu" binding:"required"`
 	RAM        int               `json:"ram" binding:"required"`
 	Profile    string            `json:"profile"`
