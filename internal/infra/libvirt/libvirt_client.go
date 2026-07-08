@@ -295,11 +295,11 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
   - systemctl start metrics-agent`
 
 	// ── Select Profile Template ──────────────────────────────────────────────
-	userName :="ubuntu"
+	userName := "ubuntu"
 	profileContent := ""
 	switch profile {
 	case "gamelift":
-		userName="gls"
+		userName = "gls"
 		profileContent = `
   - path: /opt/game/start.sh
     permissions: '0755'
@@ -363,7 +363,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 	case "ai-worker":
 		// Download andinstall the agentorget atemplete with the isntealledagent
 		// or pickatempletewith teh agent areadyintalled
-		userName="sgm"
+		userName = "sgm"
 		profileContent = fmt.Sprintf(`
   - path: /opt/ml/config/minio
     content: |
@@ -457,13 +457,35 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
 		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
 		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
-	// TOAI
-	// update the cloud init for rds, 
-	// thcloud init should include aline todownload andstart postgres server, 
+	// RDS profile: install and start a lightweight PostgreSQL instance
 	case "rds":
-		userName ="rds"
+		userName = "postgres"
+		// Allow configuring DB name/user/password via params: DB_NAME, DB_USER, DB_PASSWORD
+		profileContent = `
+  - path: /opt/rds/init-db.sh
+	permissions: '0755'
+	content: |
+	  #!/bin/bash
+	  set -e
+	  DB_NAME="{{DB_NAME}}"
+	  DB_USER="{{DB_USER}}"
+	  DB_PASSWORD="{{DB_PASSWORD}}"
+	  if [ -z "$DB_NAME" ] || [ "$DB_NAME" == "<nil>" ]; then DB_NAME="appdb"; fi
+	  if [ -z "$DB_USER" ] || [ "$DB_USER" == "<nil>" ]; then DB_USER="rds"; fi
+	  if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" == "<nil>" ]; then DB_PASSWORD="rds_pass"; fi
+
+	  # Create database and user (idempotent)
+	  sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME};" || true
+	  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
+	  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true
+`
+		// Install and start postgres in runcmd
+		runCmd += "\n  - apt-get update && apt-get install -y postgresql postgresql-contrib"
+		runCmd += "\n  - systemctl enable postgresql"
+		runCmd += "\n  - systemctl start postgresql"
+		runCmd += "\n  - /opt/rds/init-db.sh"
 	case "lambda":
-		userName ="lambda"
+		userName = "lambda"
 	default:
 		// Vanilla profile has no extra files or commands
 		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n of profile %s ", vmName, profile)
@@ -485,7 +507,7 @@ write_files:
 
 runcmd:
 %s
-`, userName,keysYaml, writeFiles, profileContent, runCmd )
+`, userName, keysYaml, writeFiles, profileContent, runCmd)
 
 	// ── Replace basic placeholders ───────────────────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
