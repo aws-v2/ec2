@@ -126,6 +126,9 @@ func resolveImage(profile string) string {
 
 	case "gamelift":
 		return "ubuntu-22.04-green"
+	
+	case "rds":
+		return "ubuntu-22.04-grey"
 
 	default:
 		return "ubuntu-22.04-grey"
@@ -178,6 +181,7 @@ log.Printf(
 	req := &domain.CreateInstanceRequest{
 		Image:     image,
 		CPU:       event.Specs["cpu"],
+		ResourceID: event.ResourceID,
 		RAM:       event.Specs["ram"],
 		Profile:   event.Profile,
 		Manifest:  event.Manifest,

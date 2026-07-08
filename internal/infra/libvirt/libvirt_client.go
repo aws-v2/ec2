@@ -457,13 +457,16 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
 		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
 		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
+	// TOAI
+	// update the cloud init for rds, 
+	// thcloud init should include aline todownload andstart postgres server, 
 	case "rds":
 		userName ="rds"
 	case "lambda":
 		userName ="lambda"
 	default:
 		// Vanilla profile has no extra files or commands
-		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n", vmName)
+		fmt.Printf("[Libvirt] Using Vanilla profile for VM %s\n of profile %s ", vmName, profile)
 	}
 
 	userData := fmt.Sprintf(`#cloud-config

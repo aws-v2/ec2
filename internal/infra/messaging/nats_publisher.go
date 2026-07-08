@@ -70,6 +70,7 @@ func NewNATSPublisher(url string, user string, password string, profile string) 
 		nc:      nc,
 		profile: profile,
 		subject: BuildSubject(profile, "instance", "lifecycle"),
+		// dev.v1.ec2.instance.lifecycle
 	}, nil
 }
 
@@ -111,15 +112,12 @@ func (p *NATSPublisher) PublishCreateUploadURL(req interface{}) (string, error) 
 	return resp.UploadURL, nil
 }
 
-
-
-
 type agentPresignRequest struct {
-	UserID    string `json:"user_id"`
-	AssetID   string `json:"asset_id"`
-	AssetType string `json:"asset_type"`
-	CorrelationID       string `json:"correlation_id"` // direct key override
-	FileSha256       string `json:"sha256"` // direct key override
+	UserID        string `json:"user_id"`
+	AssetID       string `json:"asset_id"`
+	AssetType     string `json:"asset_type"`
+	CorrelationID string `json:"correlation_id"` // direct key override
+	FileSha256    string `json:"sha256"`         // direct key override
 	// Key       string `json:"key"` // direct key override
 }
 
@@ -203,9 +201,6 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 	return resp.URL, nil
 }
 
-
-
-
 // PublishInstanceEvent publishes an instance lifecycle event to NATS.
 //
 // FIX 1: Guard against publishing INSTANCE_STARTED with an empty IP.
@@ -216,15 +211,32 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 // FIX 2: Retry with backoff instead of a single fire-and-forget Publish call.
 //
 //	A single failed publish silently dropped the registration event.
-func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.Instance, agentWS string, sessionID string) error {
+type RDSMetadata struct {
+	HostIp string `json:"host_ip"`
+	InstancePrivateIp string `json:"instance_private_ip"`
+	InstancePublicIp string `json:"instance_public_ip"`
+	ResourceID    string            `json:"resource_id"`
+
+
+}
+type GameliftMetadata struct {
+}
+type EC2Metadata struct {
+}
+type WorkerMetadata struct {
+}
+
+type InstanceMetadata struct {
+}
+
+func (p *NATSPublisher) PublishInstanceEvent(profile string, eventType string, instance *domain.Instance, agentWS string, sessionID string, stage,resourceID string) error {
 	fmt.Printf("---------------------------------------")
-	
+
 	if p == nil || p.nc == nil {
 
-		
-	return fmt.Errorf("NATS publisher or connection not initialized")
+		return fmt.Errorf("NATS publisher or connection not initialized")
 	}
- 
+
 	// ── FIX 1: Guard — never send INSTANCE_STARTED with an empty IP ──────────
 	// Root cause: VM hadn't received an IP yet when the event was published,
 	// so the network service received IPAddress="" and rejected with ErrInvalidPayload.
@@ -239,18 +251,43 @@ func (p *NATSPublisher) PublishInstanceEvent(eventType string, instance *domain.
 	}
 
 	correlationID := uuid.New().String()
+	var instancemeta interface{}
+	log.Printf("*X*X*X %s", profile)
+
+	if stage == domain.VMStarted {
+		switch profile {
+
+		case "rds", "yellow":
+			instancemeta = RDSMetadata{
+				InstancePrivateIp: instance.IP,
+				InstancePublicIp: instance.PublicIP,
+				ResourceID: resourceID,
+				
+				HostIp: instance.HostID,
+			}
+		case "gamelift", "gls", "blue":
+			instancemeta = GameliftMetadata{}
+		case "worker", "ai-worker", "green":
+			instancemeta = WorkerMetadata{}
+		default:
+			instancemeta = InstanceMetadata{}
+
+		}
+	}
 
 	event := domain.InstanceLifecycleEvent{
 		CorrelationID: correlationID,
 		InstanceID:    instance.ID,
 		EventType:     eventType,
 		Timestamp:     time.Now().Format(time.RFC3339),
-		SessionID:sessionID,
+		SessionID:     sessionID,
+		Stage:         stage,
 
 		Payload: domain.InstanceLifecyclePayload{
 			IPAddress:   instance.IP, // ← was empty before when DHCP hadn't resolved yet
 			VPCID:       instance.VPCID,
 			ServicePort: 22,
+			InstanceStartedMetadata: instancemeta,
 
 			AgentWS: agentWS,
 			Metadata: domain.InstanceMetadata{
@@ -442,7 +479,6 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	return response.VPCID, response.BridgeName, nil
 }
 
-
 func (p *NATSPublisher) PublishDownloadTemplateURL(data []byte) (string, error) {
 	if p == nil || p.nc == nil {
 		return "", fmt.Errorf("NATS publisher not initialized")
@@ -473,8 +509,6 @@ func (p *NATSPublisher) PublishDownloadTemplateURL(data []byte) (string, error) 
 
 	return response.URL, nil
 }
-
-
 
 // ValidateVPC checks if a VPC ID is valid for a given tenant.
 func (p *NATSPublisher) ValidateVPC(tenantID, vpcID string) (bool, error) {
@@ -896,33 +930,33 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 }
 
 func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message string, payload ...any) error {
-    if p == nil || p.nc == nil {
-        return fmt.Errorf("NATS publisher or connection not initialized")
-    }
+	if p == nil || p.nc == nil {
+		return fmt.Errorf("NATS publisher or connection not initialized")
+	}
 
-    event := domain.ProvisioningProgressEvent{
-        InstanceID: instanceID,
-        EventType:  domain.EventProvisioningProgress,
-        Stage:      stage,
-        Message:    message,
-        Timestamp:  time.Now().Format(time.RFC3339),
-    }
+	event := domain.ProvisioningProgressEvent{
+		InstanceID: instanceID,
+		EventType:  domain.EventProvisioningProgress,
+		Stage:      stage,
+		Message:    message,
+		Timestamp:  time.Now().Format(time.RFC3339),
+	}
 
-    // Attach struct payload only when explicitly provided
-    if len(payload) > 0 {
-        event.Data = payload[0]
-    }
+	// Attach struct payload only when explicitly provided
+	if len(payload) > 0 {
+		event.Data = payload[0]
+	}
 
-    data, err := json.Marshal(event)
-    if err != nil {
-        return fmt.Errorf("failed to marshal progress event: %w", err)
-    }
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal progress event: %w", err)
+	}
 
-    fmt.Printf("[NATS] [REQUEST*] subject=%s instance_id=%s stage=%s\n, with this data %v", p.subject, instanceID, stage, payload)
+	fmt.Printf("[NATS] [REQUEST*] subject=%s instance_id=%s stage=%s\n, with this data %v", p.subject, instanceID, stage, payload)
 
-    if err := p.nc.Publish(p.subject, data); err != nil {
-        return fmt.Errorf("failed to publish progress event: %w", err)
-    }
+	if err := p.nc.Publish(p.subject, data); err != nil {
+		return fmt.Errorf("failed to publish progress event: %w", err)
+	}
 
-    return p.nc.Flush()
+	return p.nc.Flush()
 }

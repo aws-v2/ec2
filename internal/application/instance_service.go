@@ -104,6 +104,10 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	case "gamelift":
 		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-blue
+	case "rds":
+		log.Printf("[SCHEDULER] rds profile",)
+		
+		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-yellow
 	default:
 		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-grey
 
@@ -112,7 +116,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID,domain.VMStoped,req.ResourceID)
 		return nil, err
 	}
 
@@ -121,13 +125,13 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	
 	defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID,domain.VMStoped,req.ResourceID)
 		return nil, fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
 	}
 	
 	bestHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.VMStoped,req.ResourceID)
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 		return nil, err
 	}
@@ -137,7 +141,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		hostID = bestHost.ID
 		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s with thsi ip: %s", bestHost.Hostname, hostID, instanceID, bestHost.IP)
 	} else {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.VMStoped,req.ResourceID)
 		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
 		return nil, ErrNoActiveHosts
 	}
@@ -154,7 +158,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 2.5: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID, defaultVPC)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID,domain.VMStoped,req.ResourceID)
 		return nil, err
 	}
 
@@ -165,7 +169,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// Step 3: Persist the record and launch VM creation asynchronously
 	instance, err := s.persistAndLaunch(req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped,req.ResourceID)
 		return nil, err
 	}
 	instance.HostID = hostID
@@ -227,7 +231,7 @@ func (s *InstanceService) StopInstance(id, userID string, sessionID string) erro
 
 	// Publish INSTANCE_STOPPED event
 	if s.publisher != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", sessionID)
+		go s.publisher.PublishInstanceEvent(instance.ImageProfile, domain.EventInstanceError, instance, "", sessionID,domain.VMStoped,"")
 	}
 
 	return nil
@@ -292,7 +296,7 @@ func (s *InstanceService) StartInstance(id, userID string, sessionID string) err
 	// Publish INSTANCE_STARTED event
 	if s.publisher != nil {
 		instance.Status = domain.StatusRunning
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, "", sessionID)
+		go s.publisher.PublishInstanceEvent(instance.ImageProfile,domain.EventInstanceStarted, instance, "", sessionID,domain.VMStarted,"")
 	}
 
 	return nil
@@ -501,6 +505,7 @@ func (s *InstanceService) AssignVPC(
 	// ---------------------------------------------------
 
 	_, _ = s.ReconcileNetwork(
+		instance.ImageProfile,
 		remoteHostIP,
 		host.NetworkReconcileRequest{
 			VPCID: newVPCID,

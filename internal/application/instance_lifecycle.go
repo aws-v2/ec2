@@ -5,11 +5,11 @@ import (
 	"context"
 	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/instance"
+	"ec2-api/internal/vpcpkg"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
-	"ec2-api/internal/vpcpkg"
 	"strings"
 
 	"fmt"
@@ -20,13 +20,14 @@ import (
 
 	"github.com/google/uuid"
 )
+
 var imageMap = map[string]string{
 	// Ubuntu LTS versions
 	"ubuntu-20.04":       "ubuntu-20.04.qcow2",
 	"ubuntu-22.04-blue":  "ubuntu-22.04.qcow2",
 	"ubuntu-22.04-green": "ubuntu-22.04.qcow2",
 	"ubuntu-22.04-grey":  "ubuntu-22.04.qcow2",
-	"ubuntu-22.04":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04":       "ubuntu-22.04.qcow2",
 	"ubuntu-24.04":       "ubuntu-24.04.qcow2",
 	// Debian
 	"debian-11":       "debian-11.qcow2",
@@ -41,20 +42,20 @@ var imageMap = map[string]string{
 }
 
 // prepareInstanceResources validates the requested image, ensures the base disk
-// exists on disk, 
-// generates the instance/VM identifiers, and 
+// exists on disk,
+// generates the instance/VM identifiers, and
 // fetches an IAM
 // token that the in-VM metrics agent will use to authenticate.
 
 // TODO: put the returns ina struct
 // type InstanceResourceResponse struct{
-	
+
 // }
 
 func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID string) (
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken string, err error,
 ) {
-	// Checks if we have that base image in servers files 
+	// Checks if we have that base image in servers files
 	baseImageName, ok := imageMap[req.Image]
 	if !ok {
 		available := make([]string, 0, len(imageMap))
@@ -66,13 +67,18 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 	// s.imagesDir maps to this entry in config/config.go
 	// ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images")
 	// TODO: add an endpoint for the agentto download the base image if issues arise ,
-	baseImagePath = filepath.Join(s.imagesDir, baseImageName) 
+	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
 	if err = s.EnsureImageExists(req.Image, baseImagePath); err != nil {
 		return "", "", "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
 	}
 
 	instanceID = fmt.Sprintf("i-%s", uuid.New().String()[:8])
+	if req.Name == "" {
+		req.Name = instanceID
+
+	}
 	vmName = fmt.Sprintf("vm-%s", req.Name)
+
 	newDiskPath = filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
 	// ai-worker VMs do not need an IAM token — the IAM service may not even
@@ -128,8 +134,6 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
 	}
 
-
-
 	instance := &domain.Instance{
 		ID:            instanceID,
 		VMName:        vmName,
@@ -147,16 +151,14 @@ func (s *InstanceService) persistAndLaunch(
 		VPCID:         vpcID,
 		SessionID:     req.SessionID,
 	}
-		if req.Profile != "" {
+	if req.Profile != "" {
 		if req.Profile == "gamelift" {
 			instance.StorageSize = 5
-		}else if req.Profile == "ai-worker" {
+		} else if req.Profile == "ai-worker" {
 			instance.StorageSize = 5
-		}else{
+		} else {
 			instance.StorageSize = 5
 		}
-
-
 
 	}
 
@@ -166,7 +168,7 @@ func (s *InstanceService) persistAndLaunch(
 				log.Printf("[NETWORK] [WARN] Failed to release IP for failed instance %s: %v", instanceID, releaseErr)
 			}
 		}
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.RepoCreateRecord,req.ResourceID)
 		return nil, fmt.Errorf("failed to save instance: %w", err)
 	}
 
@@ -191,38 +193,35 @@ func (s *InstanceService) persistAndLaunch(
 	// This is SYNCHRONOUS — we must not launch the VM until the agent
 	// confirms assets are on disk. ReconcileNetwork now returns a real
 	// error when assets are present and the call fails.
-	if _, err := s.ReconcileNetwork(bestHost.IP, host.NetworkReconcileRequest{
+	if _, err := s.ReconcileNetwork(req.Profile,bestHost.IP, host.NetworkReconcileRequest{
 		VPCID: vpcID,
 		Bridge: host.BridgeConfig{
 			Name:    bridgeName,
 			Gateway: gateway,
 			CIDR:    "",
 		},
-		IP:      privateIP,
-		Gateway: gateway,
-		Assets:  assets,
+		IP:        privateIP,
+		Gateway:   gateway,
+		Assets:    assets,
 		SessionID: req.SessionID,
-		VMID: instanceID,
-
+		VMID:      instanceID,
 	}); err != nil {
 		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoReConcile,req.ResourceID)
 		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 		return nil, fmt.Errorf("network reconcile failed: %w", err)
 	}
 
-assetPath := "<none>"
-if len(assets) > 0 {
-	assetPath = assets[0].Path
-}
+	assetPath := "<none>"
+	if len(assets) > 0 {
+		assetPath = assets[0].Path
+	}
 
-log.Printf(
-	"[NETWORK] reconcile complete for instance %s — asset path: %s",
-	instanceID,
-	assetPath,
-)
-
-
+	log.Printf(
+		"[NETWORK] reconcile complete for instance %s — asset path: %s",
+		instanceID,
+		assetPath,
+	)
 
 	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets)
 
@@ -230,22 +229,20 @@ log.Printf(
 	return instance, nil
 }
 
-
-
-func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkReconcileRequest) (bool, error) {
+func (s *InstanceService) ReconcileNetwork(profile, agentIP string, req host.NetworkReconcileRequest) (bool, error) {
 
 	url := fmt.Sprintf("http://%s:9030/reconcile/network", agentIP)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoCreateRecord,"")
 		log.Printf("[NETWORK] marshal error: %v", err)
 		return false, err
 	}
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.NetworkReconcile,"")
 		log.Printf("[NETWORK] request build error: %v", err)
 		return false, err
 	}
@@ -261,7 +258,7 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 
 	resp, err := reconcileClient.Do(httpReq)
 	if err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.NetworkReconcile,"")
 		log.Printf("[NETWORK] agent call failed: %v", err)
 		return false, fmt.Errorf("agent reconcile call failed: %w", err) // 👈 now a real error
 	}
@@ -277,26 +274,25 @@ func (s *InstanceService) ReconcileNetwork(agentIP string, req host.NetworkRecon
 	return true, nil
 }
 
-
 func (s *InstanceService) buildOverlay(
-    instanceID string,
-    baseImagePath string,
-    overlayPath string,
-    diskSizeGB int,
+	instanceID string,
+	baseImagePath string,
+	overlayPath string,
+	diskSizeGB int,
 ) error {
-    size := fmt.Sprintf("%dG", diskSizeGB)
-    if diskSizeGB <= 0 {
-        size = "20G"
-    }
+	size := fmt.Sprintf("%dG", diskSizeGB)
+	if diskSizeGB <= 0 {
+		size = "20G"
+	}
 
-    cmd := exec.Command(
-        "qemu-img", "create",
-        "-f", "qcow2",
-        "-F", "qcow2",
-        "-b", baseImagePath,
-        overlayPath,
-        size,
-    )
+	cmd := exec.Command(
+		"qemu-img", "create",
+		"-f", "qcow2",
+		"-F", "qcow2",
+		"-b", baseImagePath,
+		overlayPath,
+		size,
+	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf(
@@ -407,7 +403,7 @@ func (s *InstanceService) createVMAsync(
 	err := s.buildOverlay(instance.ID, absBase, absOverlay, instance.StorageSize)
 	if err != nil {
 		log.Printf("[VM] overlay creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, instance, "", req.SessionID, domain.CreateOverlay,req.ResourceID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -444,7 +440,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] cloud-init creation failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, instance, "", req.SessionID,domain.BuildCloudInit,req.ResourceID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -468,7 +464,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] overlay transfer failed*: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, instance, "", req.SessionID,domain.TransferOverlay,req.ResourceID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -490,7 +486,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] iso transfer failed: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, instance, "", req.SessionID,domain.TransferOverlay,req.ResourceID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -513,7 +509,7 @@ func (s *InstanceService) createVMAsync(
 
 		if err != nil {
 			log.Printf("[VM] asset injection failed: %v", err)
-			go s.publisher.PublishInstanceEvent(domain.EventInstanceError, instance, "", req.SessionID)
+			go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, instance, "", req.SessionID,domain.InjectOverlay,req.ResourceID)
 
 			s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 			return
@@ -547,7 +543,7 @@ func (s *InstanceService) createVMAsync(
 
 	if err != nil {
 		log.Printf("[VM] failed to start vm: %v", err)
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.StartVM,req.ResourceID)
 
 		s.markTerminatedAndReleaseNetwork(instance, absOverlay)
 		return
@@ -557,12 +553,11 @@ func (s *InstanceService) createVMAsync(
 	// STEP 6 — UPDATE INSTANCE
 	// ---------------------------------------------------
 
-
 	instance.Status = domain.StatusRunning
 	instance.ProxmoxID = vmID
 
 	if err := s.repo.Update(instance); err != nil {
-		go s.publisher.PublishInstanceEvent(domain.EventInstanceError, &domain.Instance{}, "", req.SessionID)
+		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.RepoUpadateRecord, req.ResourceID)
 
 		log.Printf("[VM] failed to update instance: %v", err)
 		return
@@ -575,20 +570,17 @@ func (s *InstanceService) createVMAsync(
 	)
 
 	log.Printf(
-		"---------------------------------",
-	)
+		"-----------------------8----------%s",req.ResourceID	)
 
 	agentWS := fmt.Sprintf("ws://%s:%d", remoteHostIP, s.agentPort)
 
-	if err := s.publisher.PublishInstanceEvent(domain.EventInstanceProvisioned, instance, agentWS, req.SessionID); err != nil {
+	if err := s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceProvisioned, instance, agentWS, req.SessionID,domain.VMProvisioned,req.ResourceID); err != nil {
 		log.Printf("[VM] failed to publish provisioned event: %v", err)
 	}
 
 	// Also publish INSTANCE_STARTED so lifecycle monitors know the VM is active and has an IP.
-	if err := s.publisher.PublishInstanceEvent(domain.EventInstanceStarted, instance, agentWS, req.SessionID); err != nil {
+	if err := s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceStarted, instance, agentWS, req.SessionID,domain.VMStarted, req.ResourceID); err != nil {
 		log.Printf("[VM] failed to publish started event: %v", err)
 	}
 
 }
-
-

@@ -12,13 +12,27 @@ const (
 	WaitForShutdown  InstanceStatus = "wait_for_shutdown"
 	StatusRestarting InstanceStatus = "Restarting"
 )
-
+	const(
+		RepoReConcile ="RECONCILE_REPO"
+		RepoCreateRecord ="CREATE_REPO_RECORD"
+		RepoUpadateRecord ="UPDATE_REPO_RECORD"
+		NetworkReconcile="NETWORK_RECONCILE"
+		CreateOverlay="CREATE_OVERLAY"
+		BuildCloudInit="BUILD_CLOUD_INIT"
+		TransferOverlay="TRANSFER_OVERLAY"
+		InjectOverlay="INJECT_ASSETS"
+		StartVM="START_VM"
+		VMProvisioned="VM_PROVISIONED"
+		VMStarted="INSTANCE_STARTED"
+		VMStoped="INSTANCE_STOPPED"
+	)
 // InstanceLifecycleEvent represents the event published to NATS for Network Service integration.
 type InstanceLifecycleEvent struct {
 	CorrelationID string                  `json:"correlation_id"`
 	InstanceID    string                  `json:"instance_id"`
 	EventType     string                  `json:"event_type"`
 	Timestamp     string                  `json:"timestamp"`
+	Stage     string                  `json:"stage"`
 	Payload       InstanceLifecyclePayload `json:"payload"`
 	AgentURL    string           `json:"agent_url,omitempty"`
 	SessionID string `json:"session_id"`
@@ -30,6 +44,7 @@ type InstanceLifecyclePayload struct {
 	VPCID       string            `json:"vpc_id"`
 	ServicePort int               `json:"service_port"`
 	Metadata    InstanceMetadata `json:"metadata"`
+	InstanceStartedMetadata interface{} `json:"instance_started_metadata"`
 	AgentWS     string            `json:"agent_ws,omitempty"`
 
 }
@@ -87,6 +102,7 @@ type Instance struct {
 type ProvisionInstanceEvent struct 
 {
 	Profile    string            `json:"profile"`
+	ResourceID    string            `json:"resource_id"`
 	Specs      map[string]int    `json:"specs"`
 	UserID     string            `json:"user_id"  `
 	StorageARN string            `json:"storage_arn"`
@@ -126,6 +142,8 @@ type InstanceSpecs struct {
 type CreateInstanceRequest struct {
 	Image      string            `json:"image" binding:"required"`
 	Name      string            `json:"name" binding:"required"`
+	ResourceID    string            `json:"resource_id"`
+
 	CPU        int               `json:"cpu" binding:"required"`
 	RAM        int               `json:"ram" binding:"required"`
 	Profile    string            `json:"profile"`

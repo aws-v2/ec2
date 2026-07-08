@@ -3,3 +3,7 @@
 -- host as the tenant's existing VPC, avoiding unnecessary network duplication.
 
 ALTER TABLE vpcs ADD COLUMN IF NOT EXISTS host_id TEXT NOT NULL DEFAULT '';
+
+
+
+--- create the database auth_db2,iam_db2
