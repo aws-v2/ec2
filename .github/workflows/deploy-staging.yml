@@ -90,6 +90,7 @@ jobs:
               -v /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock \
               -v /boot:/boot:ro \
               -v /lib/modules:/lib/modules:ro \
+              --restart unless-stopped \
               --group-add 120 \
               -e APP_PROFILE=staging \
               -e SERVICE_NAME=ec2-service \

@@ -362,11 +362,13 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 func getHostPriorityList(profile string) []string {
 	switch profile {
 	case "ai-worker":
-		return []string{"workers", "grey", "games"}
+		return []string{"workers", "grey", "games","rds"}
 	case "gamelift":
-		return []string{"games", "grey", "workers"}
+		return []string{"games", "grey", "workers","rds"}
+	case "rds":
+		return []string{"rds", "grey", "workers", "games"}
 	default:
-		return []string{"grey", "workers", "games"}
+		return []string{"grey", "workers", "games","rds"}
 	}
 }
 

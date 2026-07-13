@@ -142,7 +142,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s with thsi ip: %s", bestHost.Hostname, hostID, instanceID, bestHost.IP)
 	} else {
 		go s.publisher.PublishInstanceEvent(req.Profile,domain.EventInstanceError, &domain.Instance{}, "", req.SessionID,domain.VMStoped,req.ResourceID)
-		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally")
+		log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally for profile:%s", req.Profile)
 		return nil, ErrNoActiveHosts
 	}
 
