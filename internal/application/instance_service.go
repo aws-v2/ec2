@@ -36,6 +36,7 @@ type InstanceService struct {
 	//  agentClient *vpcpkg.AgentClient
 	httpClient *http.Client
 	agentPort  int
+	profileBaseImage map[string]string
 }
 
 func NewInstanceService(
@@ -51,6 +52,7 @@ func NewInstanceService(
 	hostService *HostService,
 	ec2PrivateKey string,
 	agentPort int,
+	profileBaseImage map[string]string,
 ) *InstanceService {
 
 	return &InstanceService{
@@ -69,6 +71,7 @@ func NewInstanceService(
 			Timeout: 10 * time.Second,
 		},
 		agentPort: agentPort,
+		profileBaseImage:profileBaseImage,
 	}
 }
 
@@ -93,25 +96,40 @@ type SSHKeyPair struct {
 
 var ErrNoActiveHosts = errors.New("no active hosts found")
 
+
+func resolveImage(profile string, profileBaseImage map[string]string) string {
+	// "vanilla":"ubuntu-22.04.18"
+
+		imagePrefix :=profileBaseImage[profile]
+
+
+	switch profile {
+	case "ai-worker":
+		return fmt.Sprintf("%s-blue", imagePrefix )
+	case "gamelift":
+		return fmt.Sprintf("%s-green", imagePrefix )
+	case "rds":
+		return fmt.Sprintf("%s-yellow", imagePrefix )
+	case "vanilla":
+		return fmt.Sprintf("%s-blue", imagePrefix )
+	default:
+		return fmt.Sprintf("%s-grey", imagePrefix )
+	}
+}
+
+type PrepareInstanceResources struct{
+	baseImagePath string
+	instanceID string
+	vmName string 
+	newDiskPath string
+	instanceToken string
+}
 // CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
+		log.Printf("[SCHEDULER] %s profile",req.Profile)
 
-	switch req.Profile {
-
-	case "ai-worker":
-		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-green
-
-	case "gamelift":
-		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-blue
-	case "rds":
-		log.Printf("[SCHEDULER] rds profile",)
-		
-		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-yellow
-	default:
-		req.Image = fmt.Sprintf("%s", req.Image)//ubuntu-22.04-grey
-
-	}
+		req.Image =resolveImage(req.Profile,s.profileBaseImage)
  
 	// Step 1: Validate image and acquire IAM token
 	baseImagePath, instanceID, vmName, newDiskPath, instanceToken, err := s.prepareInstanceResources(req, userID)

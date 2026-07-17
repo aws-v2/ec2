@@ -34,6 +34,8 @@ type Config struct {
 	PrivateKey string
 	AgentPort int
 	AgentUrlParts string
+	ProfileBaseImage map[string]string
+
 }
 
 type LibvirtConfig struct {
@@ -88,6 +90,16 @@ ngPu1Y0mByESqH58XvHIAAAAC2VjMi1zZXJ2aWNlAQI=
 }
 func Load() (*Config, error) {
 	_ = godotenv.Load()
+	profileBaseImage := make(map[string]string)
+
+	profileBaseImage["vanilla"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["ai-worker"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["gamelift"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["games"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["workers"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["lambda"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["s3"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["rds"] ="ubuntu-22.04:version:sha256"
 
 	cfg := &Config{
 		AgentUrlParts: getEnv("API_GATEWAY","http://localhost:8080"),
@@ -130,6 +142,8 @@ func Load() (*Config, error) {
 			SecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin123"),
 			UseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
 		},
+	ProfileBaseImage:profileBaseImage,
+
 	}
 
 	return cfg, nil

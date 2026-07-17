@@ -27,6 +27,7 @@ var imageMap = map[string]string{
 	"ubuntu-22.04-blue":  "ubuntu-22.04.qcow2",
 	"ubuntu-22.04-green": "ubuntu-22.04.qcow2",
 	"ubuntu-22.04-grey":  "ubuntu-22.04.qcow2",
+	"ubuntu-22.04:version:sha256-blue":  "ubuntu-worker.qcow2",
 	"ubuntu-22.04":       "ubuntu-22.04.qcow2",
 	"ubuntu-24.04":       "ubuntu-24.04.qcow2",
 	// Debian

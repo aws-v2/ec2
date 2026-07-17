@@ -3,6 +3,7 @@ package application
 import (
 	"bytes"
 	"context"
+	"ec2-api/config"
 	domain "ec2-api/internal/domain/host"
 	agentDomain "ec2-api/internal/domain/instance"
 	messaging "ec2-api/internal/infra/messaging"
@@ -28,6 +29,7 @@ type HostService struct {
 	agentUrlParts       string
 	rolloutRepo         interfaces.RolloutRepository
 	metricsRepo         domain.MetricsRepository
+	Cfg *config.Config
 }
 
 type HeartbeatResponse struct {
@@ -35,7 +37,7 @@ type HeartbeatResponse struct {
 }
 
 func NewHostService(repo domain.Repository, ec2PublicKey string,
-	publisher *messaging.NATSPublisher, agentUrlParts string, rolloutRepo interfaces.RolloutRepository, metricsRepo domain.MetricsRepository) *HostService {
+	publisher *messaging.NATSPublisher, agentUrlParts string, rolloutRepo interfaces.RolloutRepository, metricsRepo domain.MetricsRepository, cfg *config.Config) *HostService {
 	return &HostService{
 		repo:          repo,
 		ec2PublicKey:  ec2PublicKey,
@@ -43,6 +45,7 @@ func NewHostService(repo domain.Repository, ec2PublicKey string,
 		publisher:     publisher,
 		rolloutRepo:   rolloutRepo,
 		metricsRepo:   metricsRepo,
+		Cfg: cfg,
 	}
 }
 
@@ -79,6 +82,34 @@ func (s *HostService) AddTemplate(
 	return url, nil
 }
 
+type DowloadTemplateResp struct {
+	ImageUrl string `json:"image_url"`
+}
+type DowloadTemplateReq struct {
+	HostID    string `json:"host_id"`
+	ImageType string `json:"image_type"`
+}
+
+func (s *HostService) DownloadTemplate(ctx context.Context, req domain.DowloadTemplateReq, userID string) (string, error) {
+	var filename, sha256, version string
+
+	// log.Printf("-----**%s",s.Cfg.ProfileBaseImage)
+
+		filename = s.Cfg.ProfileBaseImage[req.ImageType]
+		sha256 = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[2]
+		version = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[1]
+
+	presignedURL, err := s.publisher.FetchAgentPresignedURL(userID,version,filename, sha256)
+
+	if err != nil {
+		return "", fmt.Errorf("fetch agent presigned url: %w", err)
+	}
+
+	log.Printf("Downloading template for %s host-type from this url %s",req.ImageType, presignedURL)
+
+	return presignedURL, nil
+
+}
 func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.RolloutUpdateRequest) (*domain.RolloutSummary, error) {
 	hosts, err := s.repo.ListAll(ctx)
 	if err != nil {
@@ -95,9 +126,11 @@ func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.Rollout
 	}
 
 	payload := domain.AgentUpdatePayload{
-		Version: req.Version,
-		URL:     fmt.Sprintf("%s%s", s.agentUrlParts, presignedURL),
-		SHA256:  req.SHA256,
+		Version:    req.Version,
+		URL:        fmt.Sprintf("%s%s", s.agentUrlParts, presignedURL),
+		SHA256:     req.SHA256,
+		HostType:   req.HostType,
+		HostChange: req.HostChange,
 	}
 
 	if err := s.validateS3URL(payload.URL); err != nil {
@@ -114,6 +147,7 @@ func (s *HostService) RolloutAgentUpdate(ctx context.Context, req domain.Rollout
 		URL:         payload.URL,
 		InitiatedBy: req.UserID,
 		Total:       len(hosts),
+		HostType:    req.HostType,
 	}); err != nil {
 		return nil, fmt.Errorf("save rollout metadata: %w", err)
 	}
@@ -297,7 +331,7 @@ func (s *HostService) GetHostTemplates(ctx context.Context, userID, correlationI
 }
 
 func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatResponse, error) {
-	log.Printf("[host-service] Heartbeat from host=\x1b[32m%s\x1b[0m ip=%s cpu_used=%.2f%% ram_free=%.2f vms_count=%d", 
+	log.Printf("[host-service] Heartbeat from host=\x1b[32m%s\x1b[0m ip=%s cpu_used=%.2f%% ram_free=%.2f vms_count=%d",
 		req.HostID, req.IP, req.CPUUsed, req.RAMFree, len(req.VMs))
 
 	sshUser := req.SSHUser
@@ -310,7 +344,7 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 	host := &domain.Host{
 		ID:                 req.HostID,
 		Hostname:           req.Hostname,
-		HostType: req.HostType,
+		HostType:           req.HostType,
 		IP:                 req.IP,
 		SSHUser:            sshUser,
 		CPUTotal:           req.CPUTotal,
@@ -358,17 +392,16 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 	}, nil
 }
 
-
 func getHostPriorityList(profile string) []string {
 	switch profile {
 	case "ai-worker":
-		return []string{"workers", "grey", "games","rds"}
+		return []string{"workers", "grey", "games", "rds"}
 	case "gamelift":
-		return []string{"games", "grey", "workers","rds"}
+		return []string{"games", "grey", "workers", "rds"}
 	case "rds":
 		return []string{"rds", "grey", "workers", "games"}
 	default:
-		return []string{"grey", "workers", "games","rds"}
+		return []string{"grey", "workers", "games", "rds"}
 	}
 }
 

@@ -118,22 +118,7 @@ type AssetConfig struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
-func resolveImage(profile string) string {
-	switch profile {
 
-	case "ai-worker":
-		return "ubuntu-22.04-blue"
-
-	case "gamelift":
-		return "ubuntu-22.04-green"
-	
-	case "rds":
-		return "ubuntu-22.04-grey"
-
-	default:
-		return "ubuntu-22.04-grey"
-	}
-}
 
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
  
@@ -160,12 +145,12 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 
 
 	// Build request
-image := resolveImage(event.Profile)
+// image := resolveImage(event.Profile)
+
 
 log.Printf(
 	"[PROVISIONER] profile=%s resolved image=%s",
 	event.Profile,
-	image,
 )
 
 	assets := []domain.AssetConfigs{}
@@ -179,7 +164,6 @@ log.Printf(
 	}
 
 	req := &domain.CreateInstanceRequest{
-		Image:     image,
 		CPU:       event.Specs["cpu"],
 		ResourceID: event.ResourceID,
 		RAM:       event.Specs["ram"],

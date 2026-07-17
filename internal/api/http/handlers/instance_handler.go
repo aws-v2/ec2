@@ -45,10 +45,9 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		return
 	}
 	userID := c.GetString("userID")
+	req.Profile = "vanilla"
 	
-	
-	
-	
+	log.Printf("Create instance request: %v",req)
 	instance, err := h.service.CreateInstance(c.Request.Context(),&req, userID)
 	if err != nil {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
@@ -71,7 +70,6 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-log.Printf("thisis the session id==>%s", sessionID)
 	dto.SendSuccess(c, http.StatusOK, "Instance retrieved successfully", instance)
 }
 

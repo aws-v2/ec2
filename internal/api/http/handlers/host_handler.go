@@ -30,8 +30,73 @@ func NewHostHandler(service *application.HostService) *HostHandler {
 //               "file_name": "agent-${{ steps.version.outputs.VERSION }}"
 //             }'
 
+type RefreshRequest struct {
+	HostType string `json:"host-type"`
+	HostID   string `json:"host-id"`
+	Env   string `json:"env"`
+
+}
+type RefreshIp struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data string `json:"data"`
+	
+	}
+func (h *HostHandler) CPHost(c *gin.Context) {
+	var req RefreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var data string;
+
+	switch req.Env {
+	case "dev":
+		data= "http://localhost:8080"
+	case "staging":
+		data="http://localhost:8080"
+	case "prod":
+		data="http://102.10.98.23:8080"
+	default:
+		data= "http://localhost:8080"
+
+	}
+
+	c.JSON(http.StatusOK, RefreshIp{
+		Code: http.StatusOK,
+		Message: "Refresh request executed succesfully",
+		Data: data,
+	})
 
 
+}
+
+func (h *HostHandler) DownloadTemplate(c *gin.Context) {
+	
+	var req domain.DowloadTemplateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := c.GetString("userID")
+		log.Printf("--->: %v",req.HostID)
+		log.Printf("--->: %v",req.ImageType)
+
+
+		url, err := h.service.DownloadTemplate(c.Request.Context(),req, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, domain.DowloadTemplateResp{
+		ImageUrl: url,
+	})
+
+
+
+}
 func (h *HostHandler) UpdateAgent(c *gin.Context) {
 	var req domain.RolloutUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -39,6 +104,7 @@ func (h *HostHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 
+	log.Printf("The update agentrequest is as follows, %v", req)
 
 	req.UserID = c.GetString("userID")
 	

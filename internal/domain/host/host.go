@@ -6,36 +6,36 @@ import (
 )
 
 type Host struct {
-	HostType string `json:"hosttype"`
-	ID            string    `json:"id"`
-	Hostname      string    `json:"hostname"`
-	IP            string    `json:"ip"`
-	CPUTotal      float64       `json:"cpu_total"`
-	CPUUsed       float64       `json:"cpu_used"`
-	RAMTotal      float64       `json:"ram_total"` // in MB
-	RAMFree       float64       `json:"ram_free"`  // in MB
-	DiskTotal     float64       `json:"disk_total"` // in GB
-	DiskFree      float64       `json:"disk_free"`  // in GB
-	Status        string    `json:"status"`    // active, inactive, maintenance
-	SSHUser       string    `json:"ssh_user"`
-	LastHeartbeat time.Time `json:"last_heartbeat"`
-	CreatedAt     time.Time `json:"created_at"`
+	HostType           string    `json:"hosttype"`
+	ID                 string    `json:"id"`
+	Hostname           string    `json:"hostname"`
+	IP                 string    `json:"ip"`
+	CPUTotal           float64   `json:"cpu_total"`
+	CPUUsed            float64   `json:"cpu_used"`
+	RAMTotal           float64   `json:"ram_total"`  // in MB
+	RAMFree            float64   `json:"ram_free"`   // in MB
+	DiskTotal          float64   `json:"disk_total"` // in GB
+	DiskFree           float64   `json:"disk_free"`  // in GB
+	Status             string    `json:"status"`     // active, inactive, maintenance
+	SSHUser            string    `json:"ssh_user"`
+	LastHeartbeat      time.Time `json:"last_heartbeat"`
+	CreatedAt          time.Time `json:"created_at"`
 	AvailableTemplates []string  `json:"available_templates"`
 	SSHPrivateKey      string    `json:"ssh_private_key"`
 }
 
 type DomainStats struct {
-	VMID      string  `json:"vmid"`
-	HostID    string  `json:"hostid"`
+	VMID      string    `json:"vmid"`
+	HostID    string    `json:"hostid"`
 	CreatedAt time.Time `json:"created_at"`
-	Name      string  `json:"name"`
-	State     string  `json:"state"`
-	CPUUsed   float64 `json:"cpu_used"`   // Changed to float64
-	Memory    uint64  `json:"memory_kb"`  // Changed to uint64
-	DiskRead  uint64  `json:"disk_read"`  // Changed to uint64
-	DiskWrite uint64  `json:"disk_write"` // Changed to uint64
-	NetRx     uint64  `json:"net_rx"`     // Changed to uint64
-	NetTx     uint64  `json:"net_tx"`     // Changed to uint64
+	Name      string    `json:"name"`
+	State     string    `json:"state"`
+	CPUUsed   float64   `json:"cpu_used"`   // Changed to float64
+	Memory    uint64    `json:"memory_kb"`  // Changed to uint64
+	DiskRead  uint64    `json:"disk_read"`  // Changed to uint64
+	DiskWrite uint64    `json:"disk_write"` // Changed to uint64
+	NetRx     uint64    `json:"net_rx"`     // Changed to uint64
+	NetTx     uint64    `json:"net_tx"`     // Changed to uint64
 }
 
 type VMActionTarget struct {
@@ -44,7 +44,7 @@ type VMActionTarget struct {
 	Action string // "sleep" or "terminate"
 }
 type HeartbeatRequest struct {
-	HostType string `json:"hosttype"`
+	HostType           string        `json:"hosttype"`
 	HostID             string        `json:"host_id"`
 	Hostname           string        `json:"hostname"`
 	IP                 string        `json:"ip"`
@@ -79,20 +79,28 @@ type Repository interface {
 	ListAll(ctx context.Context) ([]Host, error)
 }
 
-
-
 type MetricsRepository interface {
 	// Ins
 	Insert(ctx context.Context, hostID string, metric DomainStats) error
 	GetVMsRequiringAction(ctx context.Context, sleepDuration, terminateDuration time.Duration) ([]VMActionTarget, error)
 }
+type DowloadTemplateResp struct {
+	ImageUrl string `json:"image_url"`
+}
+type DowloadTemplateReq struct {
+	HostID string `json:"host_id"`
+	ImageType string `json:"image_type"`
 
+}
 type RolloutUpdateRequest struct {
-	UserID string `json:"user_id"`
-	Version string `json:"version"`
-	SHA256  string `json:"sha256"`
-	Bucket string `json:"bucket"`
+	UserID   string `json:"user_id"`
+	Version  string `json:"version"`
+	SHA256   string `json:"sha256"`
+	Bucket   string `json:"bucket"`
 	FileName string `json:"file_name"`
+		HostChange bool `json:"host_change"`
+
+	HostType string `json:"host_type"`
 }
 
 type UpdateResult struct {
@@ -108,19 +116,18 @@ type RolloutSummary struct {
 	Failed  int            `json:"failed"`
 	Version string         `json:"version"`
 	Results []UpdateResult `json:"results"`
-	S3Error string `json:"error"`
+	S3Error string         `json:"error"`
 }
 type AgentUpdatePayload struct {
-	Version string `json:"version"`
-	URL     string `json:"url"`
-	SHA256  string `json:"sha256"`
+	Version  string `json:"version"`
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+		HostChange bool `json:"host-change"`
 
+	HostType string `json:"host-type"`
 }
 
-
-
-
-type GetDownloadURLRequest struct{
+type GetDownloadURLRequest struct {
 	UserID    string `json:"user_id"`
 	AssetType string `json:"asset_type"`
 	Key       string `json:"key"`

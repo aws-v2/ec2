@@ -62,6 +62,8 @@ func SetupRoutes(r *gin.Engine,
 		compute.GET("/host/get-host-templates", hostHandler.GetHostTemplates)
 		compute.POST("/host/add-template", hostHandler.AddTemplate)
 		compute.POST("/host/update-agent", hostHandler.UpdateAgent)
+		compute.POST("/host/download-template", hostHandler.DownloadTemplate)
+		compute.GET("/control-plane-host", hostHandler.CPHost)
 	}
 
 

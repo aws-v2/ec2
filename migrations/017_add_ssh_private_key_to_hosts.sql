@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS vm_images (
 ALTER TABLE instances
 ADD COLUMN IF NOT EXISTS image_version TEXT DEFAULT '';
 
+ALTER TABLE agent_rollouts
+ADD COLUMN IF NOT EXISTS host_type TEXT DEFAULT '';
 
 
 ALTER TABLE instances

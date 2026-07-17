@@ -21,10 +21,10 @@ func NewRolloutRepo(db *sqlx.DB) interfaces.RolloutRepository {
 }
 func (r *RolloutRepo) CreateRollout(ctx context.Context, rollout domain.AgentRollout) error {
 	_, err := r.db.ExecContext(ctx, `
-        INSERT INTO agent_rollouts (id, version, file_name, sha256, url, initiated_by, total, created_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
+        INSERT INTO agent_rollouts (id, version, file_name, sha256, url, initiated_by, total,host_type, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
 		rollout.ID, rollout.Version, rollout.FileName,
-		rollout.SHA256, rollout.URL, rollout.InitiatedBy, rollout.Total,
+		rollout.SHA256, rollout.URL, rollout.InitiatedBy, rollout.Total, rollout.HostType,
 	)
 	return err
 }

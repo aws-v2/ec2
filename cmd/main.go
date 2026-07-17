@@ -165,7 +165,7 @@ func main() {
 	rolloutRepo := repository.NewRolloutRepo(db)
 	metricsRepo := repository.NewMetricsRepo(db,logger)
 
-	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo,metricsRepo)
+	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo,metricsRepo,cfg)
 
 	// Initialize and start VM Metrics Monitor Worker
 	vmMonitorWorker := application.NewVMMonitorWorker(metricsRepo, hostService)
@@ -183,7 +183,7 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	instanceService := application.NewInstanceService(instanceRepo,hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort)
+	instanceService := application.NewInstanceService(instanceRepo,hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort,cfg.ProfileBaseImage)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)

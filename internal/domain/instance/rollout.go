@@ -50,6 +50,7 @@ type AgentRollout struct {
     Failed      int
     S3Error     string
     CreatedAt   time.Time
+HostType string `json:"host-type"`
 }
 
 // Stored in agent_update_statuses
