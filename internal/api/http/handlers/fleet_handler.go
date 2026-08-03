@@ -1,9 +1,13 @@
 package transport
 
 import (
-	"net/http" 
+	"fmt"
+	"log"
+	"net/http"
 
 	"ec2-api/internal/application"
+	"ec2-api/internal/vpcpkg"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,59 +21,27 @@ func NewFleetHandler(service *application.FleetService) *FleetHandler {
 
 func (h *FleetHandler) GetOverview(c *gin.Context) {
 	userID := c.GetString("userID")
-	if userID == "" {
-		tokenString := GetTokenFromRequest(c)
-		if tokenString != "" {
-			var err error
-			userID, err = ExtractUserIDFromToken(tokenString)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "unauthorized: " + err.Error()})
-				return
-			}
-		}
-	}
-
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "unauthorized"})
-		return
-	}
+	requestID := c.GetString("requestID")
 
 	overview, err := h.service.GetOverview(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": err.Error()})
+		log.Printf("[Handler:GetManifest] Service call, requestID %s  error %s", requestID, err.Error())
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to get overview"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data":   overview,
-	})
-}
+	vpcpkg.RespondSucces(c, http.StatusOK, "Database provisioned successfully", overview)
 
- 
+}
 
 func (h *FleetHandler) GetEvents(c *gin.Context) {
 	userID := c.GetString("userID")
-	if userID == "" {
-		tokenString := GetTokenFromRequest(c)
-		if tokenString != "" {
-			var err error
-			userID, err = ExtractUserIDFromToken(tokenString)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "unauthorized: " + err.Error()})
-				return
-			}
-		}
-	}
-
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "unauthorized"})
-		return
-	}
+	requestID := c.GetString("requestID")
 
 	events, err := h.service.GetEvents(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": err.Error()})
+		log.Printf("[Handler:GetManifest] Service call, requestID %s  error %s", requestID, err.Error())
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to get overview"))
 		return
 	}
 

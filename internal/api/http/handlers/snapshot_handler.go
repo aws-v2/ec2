@@ -1,13 +1,14 @@
 package transport
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
 	"ec2-api/internal/application"
-	dto "ec2-api/internal/domain/dto"
 	domain "ec2-api/internal/domain/instance"
-
+	"ec2-api/internal/vpcpkg"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,11 +31,12 @@ func (h *SnapshotHandler) CreateSnapshot(c *gin.Context) {
 
 	snapshot, err := h.service.CreateSnapshot(instanceID, &req)
 	if err != nil {
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		log.Printf("[Handler:CreateSnapshot] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to create snapshot"))
 		return
 	}
 
-	dto.SendSuccess(c, http.StatusAccepted, "Snapshot creation started", snapshot)
+	vpcpkg.RespondSucces(c, http.StatusAccepted, "Snapshot creation started", snapshot)
 }
 
 func (h *SnapshotHandler) ListSnapshots(c *gin.Context) {
@@ -49,7 +51,8 @@ func (h *SnapshotHandler) ListSnapshots(c *gin.Context) {
 	}
 
 	if err != nil {
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		log.Printf("[Handler:ListSnapshots] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to list snapshots"))
 		return
 	}
 
@@ -57,46 +60,52 @@ func (h *SnapshotHandler) ListSnapshots(c *gin.Context) {
 		snapshots = []*domain.Snapshot{}
 	}
 
-	dto.SendSuccess(c, http.StatusOK, "Snapshots retrieved successfully", snapshots)
+	vpcpkg.RespondSucces(c, http.StatusOK, "Snapshots retrieved successfully", snapshots)
 }
 
 func (h *SnapshotHandler) GetSnapshot(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		dto.SendError(c, http.StatusBadRequest, "invalid snapshot id")
+		log.Printf("[Handler:GetSnapshot] invalid id: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid snapshot id"))
 		return
 	}
 
 	snapshot, err := h.service.GetSnapshot(id)
 	if err != nil {
 		if err == domain.ErrSnapshotNotFound {
-			dto.SendError(c, http.StatusNotFound, "snapshot not found")
+			log.Printf("[Handler:GetSnapshot] not found: %v", err)
+			vpcpkg.RespondError(c, http.StatusNotFound, fmt.Errorf("snapshot not found"))
 			return
 		}
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		log.Printf("[Handler:GetSnapshot] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to get snapshot"))
 		return
 	}
 
-	dto.SendSuccess(c, http.StatusOK, "Snapshot retrieved successfully", snapshot)
+	vpcpkg.RespondSucces(c, http.StatusOK, "Snapshot retrieved successfully", snapshot)
 }
 
 func (h *SnapshotHandler) DeleteSnapshot(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		dto.SendError(c, http.StatusBadRequest, "invalid snapshot id")
+		log.Printf("[Handler:DeleteSnapshot] invalid id: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid snapshot id"))
 		return
 	}
 
 	if err := h.service.DeleteSnapshot(id); err != nil {
 		if err == domain.ErrSnapshotNotFound {
-			dto.SendError(c, http.StatusNotFound, "snapshot not found")
+			log.Printf("[Handler:DeleteSnapshot] not found: %v", err)
+			vpcpkg.RespondError(c, http.StatusNotFound, fmt.Errorf("snapshot not found"))
 			return
 		}
-		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		log.Printf("[Handler:DeleteSnapshot] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to delete snapshot"))
 		return
 	}
 
-	dto.SendSuccess(c, http.StatusOK, "snapshot deleted", nil)
+	vpcpkg.RespondSucces(c, http.StatusOK, "snapshot deleted", nil)
 }

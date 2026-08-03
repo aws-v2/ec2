@@ -2,9 +2,19 @@ package host
 
 import (
 	"context"
+	"database/sql"
 	"time"
+
 )
 
+
+type GatewayHostResponse struct{
+	GatewayID string `json:"gateway_id"`
+	Port int `json:"port"`
+	VMID sql.NullString `json:"vm_id"`
+	Status string `json:"status"`
+	
+}
 type Host struct {
 	HostType           string    `json:"hosttype"`
 	ID                 string    `json:"id"`
@@ -83,6 +93,8 @@ type MetricsRepository interface {
 	// Ins
 	Insert(ctx context.Context, hostID string, metric DomainStats) error
 	GetVMsRequiringAction(ctx context.Context, sleepDuration, terminateDuration time.Duration) ([]VMActionTarget, error)
+	GetByGatewayHostID(ctx context.Context, hostID string) (*Host, error)
+	InsertGateway(ctx context.Context, hostID string, gateway GatewayHost,)  error
 }
 type DowloadTemplateResp struct {
 	ImageUrl string `json:"image_url"`

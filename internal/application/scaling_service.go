@@ -2,10 +2,9 @@ package application
 
 import (
 	"context"
+	domain "ec2-api/internal/domain/instance"
 	"fmt"
 	"log"
-	domain "ec2-api/internal/domain/instance"
-
 )
 
 func (s *InstanceService) CreateScalingPolicy(ctx context.Context, userID string, req *domain.ScalingPolicyRequest) error {
@@ -23,6 +22,7 @@ func (s *InstanceService) UpdateScalingPolicy(ctx context.Context, userID, polic
 func (s *InstanceService) DeleteScalingPolicy(ctx context.Context, userID, policyID string) error {
 	return s.repo.DeleteScalingPolicy(ctx, userID, policyID)
 }
+
 // ── Scaling Enforcement ──────────────────────────────────────────────────
 
 // EnforceScaling receives a requested scale action from the Metrics Service and attempts to execute it.
@@ -42,7 +42,7 @@ func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.Scal
 
 	switch event.Action {
 	case domain.ScaleOutAction:
-		return s.handleScaleOut(ctx,targetInstance, event.Policy.MaxCapacity)
+		return s.handleScaleOut(ctx, targetInstance, event.Policy.MaxCapacity)
 	case domain.ScaleInAction:
 		return s.handleScaleIn(targetInstance)
 	default:
@@ -50,9 +50,9 @@ func (s *InstanceService) EnforceScaling(ctx context.Context, event *domain.Scal
 	}
 }
 
-func (s *InstanceService) handleScaleOut(ctx context.Context,baseInstance *domain.Instance, maxInstances int) error {
+func (s *InstanceService) handleScaleOut(ctx context.Context, baseInstance *domain.Instance, maxInstances int) error {
 	log.Printf("[SCALER] Initiating scale-out based on instance %s (VPC: %s)", baseInstance.ID, baseInstance.VPCID)
-	
+
 	// Check if max limit is reached
 	if maxInstances > 0 {
 		instances, err := s.ListInstances(baseInstance.UserID)
@@ -66,7 +66,7 @@ func (s *InstanceService) handleScaleOut(ctx context.Context,baseInstance *domai
 				if inst.VPCID == baseInstance.VPCID && inst.Image == baseInstance.Image {
 					currentCount++
 				}
-			} 
+			}
 		}
 
 		if currentCount >= maxInstances {
@@ -76,12 +76,14 @@ func (s *InstanceService) handleScaleOut(ctx context.Context,baseInstance *domai
 	}
 
 	req := &domain.CreateInstanceRequest{
-		Image:  baseInstance.Image,
-		CPU:    baseInstance.CPU,
-		RAM:    baseInstance.RAM,
+		Image: baseInstance.Image,
+		Specs: domain.VMSpecs{
+			CPU: baseInstance.CPU,
+			RAM: baseInstance.RAM,
+		},
 	}
 
-	_, err := s.CreateInstance(ctx,req, baseInstance.UserID)
+	_, err := s.CreateInstance(ctx, req, baseInstance.UserID)
 	return err
 }
 
@@ -111,7 +113,6 @@ func (s *InstanceService) handleScaleIn(baseInstance *domain.Instance) error {
 	return s.DeleteInstance(targetToTerminate.ID, targetToTerminate.UserID)
 }
 
-
 type AssetConfig struct {
 	Name   string `json:"name"`
 	URL    string `json:"url"`
@@ -119,78 +120,41 @@ type AssetConfig struct {
 	SHA256 string `json:"sha256"`
 }
 
+func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response,error) {
 
-func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error {
- 
-		fmt.Printf("[PROVISIONER]------------------>...event parameters: %v", event.Manifest.Parameters)
+	log.Printf("[PROVISIONER] profile=%s resolved image=%s",
+		event.Profile)
 
-	// event.StorageARN = "arn:serw:s3::bdcc0db1-8a77-44a3-90d6-f7fcd604971e:bucket/gamelift_games"
-	
-
-	log.Printf("[PROVISIONER] initial parameters=%v", event)
-
-	// Merge STORAGE_ARN
-	// if event.StorageARN == ""  {
-	// 	log.Printf("[PROVISIONER] injecting STORAGE_ARN from event → %s", event.StorageARN)
-	// 	return fmt.Errorf("STORAGE_ARN provided but not supported in this version: %s", event.StorageARN)
+	// if event.Manifest.Parameters != nil {
+	// 	assets = append(assets, domain.AssetConfigs{
+	// 		Name:   event.Manifest.Name,
+	// 		URL:    event.Manifest.Parameters["ASSET_URL"],
+	// 		Path:   event.Manifest.Parameters["ASSET_PATH"],
+	// 		SHA256: event.Manifest.Parameters["ASSET_SHA256"],
+	// 	})
 	// }
- 
-
-
-	// Merge HEADLESS_BIN
-	// if event.Manifest.HeadlessBin == "" {
-	// 	log.Printf("[PROVISIONER] injecting HEADLESS_BIN from event → %s", event.Manifest.HeadlessBin)
-	// 	return fmt.Errorf("HEADLESS_BIN provided but not supported in this version: %s", event.Manifest.HeadlessBin)
-	// }
-
-
-	// Build request
-// image := resolveImage(event.Profile)
-
-
-log.Printf(
-	"[PROVISIONER] profile=%s resolved image=%s",
-	event.Profile,
-)
-
-	assets := []domain.AssetConfigs{}
-	if event.Manifest.Parameters != nil {
-		assets = append(assets, domain.AssetConfigs{
-			Name:   event.Manifest.Name,
-			URL:    event.Manifest.Parameters["ASSET_URL"],
-			Path:   event.Manifest.Parameters["ASSET_PATH"],
-			SHA256: event.Manifest.Parameters["ASSET_SHA256"],
-		})
-	}
 
 	req := &domain.CreateInstanceRequest{
-		CPU:       event.Specs["cpu"],
+		Specs:      event.Specs,
 		ResourceID: event.ResourceID,
-		RAM:       event.Specs["ram"],
-		Profile:   event.Profile,
-		Manifest:  event.Manifest,
-		ARN:       event.StorageARN,
-		SessionID: event.SessionID,
-		Assets:    assets,
+		Profile:    event.Profile,
+		SessionID:  event.SessionID,
+		Assets:     event.Assets,
 	}
-
-
-
-
 
 	// Defaults
-	if req.CPU == 0 {
+	if req.Specs.CPU == 0 {
 		log.Printf("[PROVISIONER] CPU not provided → defaulting to 2")
-		req.CPU = 2
+		req.Specs.CPU = 2
 	}
 
-	if req.RAM == 0 {
+	if req.Specs.RAM == 0 {
 		log.Printf("[PROVISIONER] RAM not provided → defaulting to 4096MB")
-		req.RAM = 4096
+		req.Specs.RAM = 4096
 	}
 
 	log.Printf("[PROVISIONER] final request → image=%s cpu=%d ram=%d profile=%s",
-		req.Image, req.CPU, req.RAM, req.Profile,
+		req.Image, req.Specs.CPU, req.Specs.RAM, req.Profile,
 	)
 
 	// Resolve user ID
@@ -202,20 +166,19 @@ log.Printf(
 
 	log.Printf("[PROVISIONER] invoking CreateInstance userID=%s", userID)
 
-
-
-
-
 	// Call core logic
 	instance, err := s.CreateInstance(ctx, req, userID)
 	if err != nil {
 		log.Printf("[PROVISIONER] ERROR CreateInstance failed profile=%s error=%v", event.Profile, err)
-		return fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
+		return domain.EC2Response{}, fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
 	}
 
 	log.Printf("[PROVISIONER] SUCCESS instanceID=%s profile=%s", instance.ID, event.Profile)
 
-	return nil
+	return domain.EC2Response{
+		GatewayIP: instance.GatewayIP,
+		GatewayPort: instance.GatewayPort,
+	},nil
 }
 
 func getMapKeys(m map[string]string) []string {

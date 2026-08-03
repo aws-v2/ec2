@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/host"
 	"ec2-api/internal/interfaces"
 	"fmt"
@@ -20,6 +21,73 @@ func NewHostRepository(db *sql.DB) interfaces.HostRepository {
 	return &hostRepository{db: db}
 }
 
+func (r *hostRepository) GetByGatewayHost(ctx context.Context, gatewayID string) (*host.GatewayHostResponse, error) {
+	var query string
+	if gatewayID != "" {
+		query = fmt.Sprintf("SELECT * FROM gateway_ports WHERE status='AVAILABLE' AND gateway_id='%s'", gatewayID)
+		rows, err := r.db.QueryContext(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query hosts: %w", err)
+		}
+
+		defer rows.Close()
+		var hosts []host.GatewayHostResponse
+		var choosenHost host.GatewayHostResponse
+
+		for rows.Next() {
+			h := host.GatewayHostResponse{}
+			err := rows.Scan(
+				&h.GatewayID, &h.Port, &h.VMID, &h.Status,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan host: %w", err)
+			}
+			hosts = append(hosts, h)
+			choosenHost =h 
+		}
+
+		return &choosenHost, nil
+	}
+
+	query = `SELECT * FROM gateway_ports WHERE status='AVAILABLE'`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query hosts: %w", err)
+	}
+	defer rows.Close()
+	var hosts []host.GatewayHostResponse
+
+	for rows.Next() {
+		h := host.GatewayHostResponse{}
+		err := rows.Scan(
+			&h.GatewayID, &h.Port, &h.VMID, &h.Status,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		hosts = append(hosts, h)
+	}
+
+	return &hosts[0], nil
+
+}
+func (r *hostRepository) UpdatePortStatus(ctx context.Context, status, gatewayID, vmID string, port int) (int64, error) {
+	
+	query := fmt.Sprintf("UPDATE gateway_ports SET status='%s',vm_id='%s'  WHERE port=%d AND gateway_id='%s'", status, vmID,port,gatewayID)
+	fmt.Printf("\n\nnew query: %s \n\n", query)
+
+	results, err := r.db.Exec(query)
+	if err != nil {
+
+		return 0, fmt.Errorf("failed to update port status: %w", err)
+
+	}
+	affectedRows, err := results.RowsAffected()
+
+
+	return affectedRows, nil
+
+}
 func (r *hostRepository) ListAll(ctx context.Context) ([]domain.Host, error) {
 	query := `SELECT id, hosttype,hostname, ip, ssh_user, ssh_private_key, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, available_templates FROM hosts`
 	rows, err := r.db.QueryContext(ctx, query)
@@ -32,7 +100,7 @@ func (r *hostRepository) ListAll(ctx context.Context) ([]domain.Host, error) {
 	for rows.Next() {
 		h := domain.Host{}
 		err := rows.Scan(
-			&h.ID,&h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.SSHPrivateKey,
+			&h.ID, &h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.SSHPrivateKey,
 			&h.CPUTotal, &h.CPUUsed, &h.RAMTotal, &h.RAMFree,
 			&h.DiskTotal, &h.DiskFree, &h.Status, &h.LastHeartbeat,
 			pq.Array(&h.AvailableTemplates),
@@ -93,7 +161,7 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 	`
 	// Assume heartbeats within last 5 minutes are active
 	// threshold := time.Now().Add(-5 * time.Minute)
-		threshold := time.Now().Add(-12 * time.Hour)
+	threshold := time.Now().Add(-12 * time.Hour)
 	rows, err := r.db.Query(query, threshold, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query best hosts: %w", err)
@@ -104,7 +172,7 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 	for rows.Next() {
 		h := &domain.Host{}
 		err := rows.Scan(
-			&h.ID,&h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
+			&h.ID, &h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
 			&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
 			&h.Status, &h.LastHeartbeat, &h.CreatedAt,
 			pq.Array(&h.AvailableTemplates),
@@ -128,7 +196,7 @@ func (r *hostRepository) GetBestHostsByType(limit int, targetType string) ([]*do
 	`
 	// Assume heartbeats within last 5 minutes are active
 	// threshold := time.Now().Add(-5 * time.Minute)
-		threshold := time.Now().Add(-12 * time.Hour)
+	threshold := time.Now().Add(-12 * time.Hour)
 	rows, err := r.db.Query(query, threshold, targetType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query best hosts by type: %w", err)
@@ -139,7 +207,7 @@ func (r *hostRepository) GetBestHostsByType(limit int, targetType string) ([]*do
 	for rows.Next() {
 		h := &domain.Host{}
 		err := rows.Scan(
-			&h.ID,&h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
+			&h.ID, &h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
 			&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
 			&h.Status, &h.LastHeartbeat, &h.CreatedAt,
 			pq.Array(&h.AvailableTemplates),
@@ -157,7 +225,7 @@ func (r *hostRepository) GetByID(id string) (*domain.Host, error) {
 	row := r.db.QueryRow(query, id)
 	host := &domain.Host{}
 	err := row.Scan(
-		&host.ID,&host.HostType, &host.Hostname, &host.IP, &host.SSHUser, &host.SSHPrivateKey,
+		&host.ID, &host.HostType, &host.Hostname, &host.IP, &host.SSHUser, &host.SSHPrivateKey,
 		&host.CPUTotal, &host.CPUUsed, &host.RAMTotal, &host.RAMFree,
 		&host.DiskTotal, &host.DiskFree, &host.Status, &host.LastHeartbeat,
 		pq.Array(&host.AvailableTemplates),

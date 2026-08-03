@@ -59,3 +59,8 @@ type ScaleEvent struct {
 	Policy        ScalingPolicyRequest `json:"policy"`
 	CurrentValue  float64              `json:"current_value"`
 }
+
+type EC2Response struct {
+	GatewayIP   string `json:"gateway_ip"`
+	GatewayPort int `json:"gateway_port"`
+}

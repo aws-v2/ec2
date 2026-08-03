@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -728,9 +729,11 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 // ── IAM Token Request ────────────────────────────────────────────────────────
 
 type InstanceTokenRequest struct {
-	InstanceID string `json:"instance_id"`
-	UserID     string `json:"user_id"`
+	InstanceID string `json:"instanceID"`
+	UserId     string `json:"userID"`
+	Payload string `json:"payload"`
 }
+
 
 type InstanceTokenResponse struct {
 	Token string `json:"token"`
@@ -743,24 +746,36 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	if p == nil || p.nc == nil {
 		return "", fmt.Errorf("NATS publisher or connection not initialized")
 	}
+	expiresAt := time.Now().Add(15 * time.Minute)
 
 	correlationID := uuid.New().String()
 	subject := fmt.Sprintf("%s.iam.token.generate", p.profile)
+	payload := map[string]interface{}{
+		"userId": userID,
+		"e":   expiresAt.Unix(),
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	payloadEncoded := base64.RawURLEncoding.EncodeToString(payloadJSON)
 
 	req := InstanceTokenRequest{
 		InstanceID: instanceID,
-		UserID:     userID,
+		UserId:     userID,
+		Payload:payloadEncoded,
 	}
 
-	fmt.Printf("Requesting instance token for instance %s and user %s subject %s\n", instanceID, userID, subject)
 
 	data, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal instance token request: %w", err)
 	}
+	fmt.Printf("Requesting instance token for instance %s and user %s length %v\n", instanceID, userID, len(payloadJSON))
+
 
 	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
 		subject, correlationID, userID, instanceID)
+
+	log.Printf("\nthe fullpayload we sent foratoken %v\n",req )
 
 	msg, err := p.nc.Request(subject, data, 5*time.Second)
 	if err != nil {

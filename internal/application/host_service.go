@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"ec2-api/config"
+	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/host"
 	agentDomain "ec2-api/internal/domain/instance"
 	messaging "ec2-api/internal/infra/messaging"
@@ -17,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,7 @@ type HostService struct {
 	agentUrlParts       string
 	rolloutRepo         interfaces.RolloutRepository
 	metricsRepo         domain.MetricsRepository
-	Cfg *config.Config
+	Cfg                 *config.Config
 }
 
 type HeartbeatResponse struct {
@@ -45,7 +47,7 @@ func NewHostService(repo domain.Repository, ec2PublicKey string,
 		publisher:     publisher,
 		rolloutRepo:   rolloutRepo,
 		metricsRepo:   metricsRepo,
-		Cfg: cfg,
+		Cfg:           cfg,
 	}
 }
 
@@ -95,17 +97,17 @@ func (s *HostService) DownloadTemplate(ctx context.Context, req domain.DowloadTe
 
 	// log.Printf("-----**%s",s.Cfg.ProfileBaseImage)
 
-		filename = s.Cfg.ProfileBaseImage[req.ImageType]
-		sha256 = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[2]
-		version = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[1]
+	filename = s.Cfg.ProfileBaseImage[req.ImageType]
+	sha256 = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[2]
+	version = strings.Split(s.Cfg.ProfileBaseImage[req.ImageType], ":")[1]
 
-	presignedURL, err := s.publisher.FetchAgentPresignedURL(userID,version,filename, sha256)
+	presignedURL, err := s.publisher.FetchAgentPresignedURL(userID, version, filename, sha256)
 
 	if err != nil {
 		return "", fmt.Errorf("fetch agent presigned url: %w", err)
 	}
 
-	log.Printf("Downloading template for %s host-type from this url %s",req.ImageType, presignedURL)
+	log.Printf("Downloading template for %s host-type from this url %s", req.ImageType, presignedURL)
 
 	return presignedURL, nil
 
@@ -330,7 +332,7 @@ func (s *HostService) GetHostTemplates(ctx context.Context, userID, correlationI
 	return url, nil
 }
 
-func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatResponse, error) {
+func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatRequest) (*HeartbeatResponse, error) {
 	log.Printf("[host-service] Heartbeat from host=\x1b[32m%s\x1b[0m ip=%s cpu_used=%.2f%% ram_free=%.2f vms_count=%d",
 		req.HostID, req.IP, req.CPUUsed, req.RAMFree, len(req.VMs))
 
@@ -339,6 +341,21 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 	if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
 		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
 		sshUser = parts[6]
+	}
+
+	if req.HostType == "gateway" {
+		log.Printf("[host-service] Host of type gateway")
+
+		_, err := s.metricsRepo.GetByGatewayHostID(c, req.HostID)
+		if err != nil {
+			er := s.metricsRepo.InsertGateway(c, req.HostID, host.GatewayHost{
+				StartPort: 40000,
+				EndPort:   40100,
+			})
+			if er != nil {
+				return &HeartbeatResponse{}, fmt.Errorf("failed to get presigned url: %w", er)
+			}
+		}
 	}
 
 	host := &domain.Host{
@@ -395,45 +412,113 @@ func (s *HostService) HandleHeartbeat(req domain.HeartbeatRequest) (*HeartbeatRe
 func getHostPriorityList(profile string) []string {
 	switch profile {
 	case "ai-worker":
-		return []string{"workers", "grey", "games", "rds"}
+		return []string{"workers", "grey", "games", "rds", "s3","gateway"}
 	case "gamelift":
-		return []string{"games", "grey", "workers", "rds"}
+		return []string{"games", "grey", "workers", "rds", "s3","gateway"}
 	case "rds":
-		return []string{"rds", "grey", "workers", "games"}
+		return []string{"rds", "grey", "workers", "games", "s3","gateway"}
 	default:
-		return []string{"grey", "workers", "games", "rds"}
+		return []string{"grey", "workers", "games", "rds", "s3","gateway"}
+		case "lambda":
+		return []string{"lambda", "grey", "workers", "games", "s3","gateway"}
 	}
 }
 
-func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*domain.Host, error) {
+func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*domain.Host, *domain.Host, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	priorityList := getHostPriorityList(profile)
 
-	if preferredHostID != "" {
-		host, err := s.repo.GetByID(preferredHostID)
-		if err == nil && host != nil && host.Status == "active" {
-			for _, t := range priorityList {
-				if host.HostType == t {
-					// Strongly prefer the host where this VPC already lives.
-					return host, nil
+	priorityList := getHostPriorityList(profile)
+	var bestGatewayHost *domain.Host
+
+	var gatewayHostType ="gateway"
+
+if strings.ToLower(s.Cfg.ENV) =="dev" {
+	gatewayHostType = "grey"
+}
+
+
+	gatewayHosts, err := s.repo.GetBestHostsByType(10, gatewayHostType)
+	if err != nil {
+		return nil, nil, err
+	}
+	fmt.Printf("the priority list host id %v forprofile %v \n", priorityList, gatewayHosts)
+
+	if len(gatewayHosts) > 0{
+		s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(gatewayHosts)
+		bestGatewayHost = gatewayHosts[s.lastSelectionOffset]
+
+		if preferredHostID != "" {
+			host, err := s.repo.GetByID(preferredHostID)
+			if err == nil && host != nil && host.Status == "active" {
+				for _, t := range priorityList {
+					// TODO: this was puthere for this scenario,
+					// imagine youahve the host type of gateway seelcted,
+					// but since you are in dev and you cant reach it 
+					if t=="gateway" && s.Cfg.ENV !="dev"{
+						continue
+					}
+					if host.HostType == t {
+						// Strongly prefer the host where this VPC already lives.
+						return host, bestGatewayHost, nil
+					}
 				}
+			}
+		}
+
+		for _, hostType := range priorityList {
+			fmt.Printf("The hosttype: %s", hostType)
+			hosts, err := s.repo.GetBestHostsByType(10, hostType)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if len(hosts) > 0 {
+				s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(hosts)
+				return hosts[s.lastSelectionOffset], bestGatewayHost, nil
+			}
+		}
+
+	}
+
+
+	if  s.Cfg.ENV=="dev" && len(gatewayHosts)==0{
+		bestGatewayHost = &host.Host{
+			ID:"18:60:24:4f:4a:13:root:6d617274696e",
+		}
+
+		if preferredHostID != "" {
+			host, err := s.repo.GetByID(preferredHostID)
+			if err == nil && host != nil && host.Status == "active" {
+				for _, t := range priorityList {
+					// TODO: this was puthere for this scenario,
+					// imagine youahve the host type of gateway seelcted,
+					// but since you are in dev and you cant reach it 
+					if t=="gateway" && s.Cfg.ENV !="dev"{
+						continue
+					}
+					if host.HostType == t {
+						// Strongly prefer the host where this VPC already lives.
+						return host, bestGatewayHost, nil
+					}
+				}
+			}
+		}
+
+		for _, hostType := range priorityList {
+			fmt.Printf("The hosttype: %s", hostType)
+			hosts, err := s.repo.GetBestHostsByType(10, hostType)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if len(hosts) > 0 {
+				s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(hosts)
+				return hosts[s.lastSelectionOffset], bestGatewayHost, nil
 			}
 		}
 	}
 
-	for _, hostType := range priorityList {
-		hosts, err := s.repo.GetBestHostsByType(10, hostType)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(hosts) > 0 {
-			s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(hosts)
-			return hosts[s.lastSelectionOffset], nil
-		}
-	}
-
-	return nil, nil
+	return nil, nil, nil
 }

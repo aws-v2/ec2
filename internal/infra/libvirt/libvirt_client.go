@@ -94,6 +94,8 @@ func (l *LibvirtClient) CreateAndStartVM(
 		}
 	}
 
+
+
 	// ---------------------------------------------------
 	// Build XML
 	// ---------------------------------------------------
@@ -1087,9 +1089,10 @@ func (l *LibvirtClient) runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey
 
 	return nil
 }
+
 func (l *LibvirtClient) InjectAssets(
 	remoteHostIP, remoteHostUser, remoteHostKey, diskPath string,
-	assets []domain.AssetConfigs,
+	assets []domain.Asset, profile, jobID string,
 ) error {
 
 	if len(assets) == 0 {
@@ -1111,7 +1114,7 @@ func (l *LibvirtClient) InjectAssets(
 		src := asset.Path
 		dst := filepath.Dir(asset.Path)
 
-		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s **ssetPath=%s",
+		log.Printf("[Libvirt] Injecting asset src=%s dst=%s url=%s sha256=%s assetPath=%s",
 			src, dst, asset.URL, asset.SHA256, asset.Path,
 		)
 
@@ -1124,77 +1127,135 @@ func (l *LibvirtClient) InjectAssets(
 		log.Printf("[Libvirt] No valid assets to inject, skipping")
 		return nil
 	}
+	log.Printf("Assets injected")
+
+	var defaultFolders = make([]string, 10)
+
+	switch profile {
+	case "ai-worker":
+		defaultFolders[0] = "/tmp/sg"
+		defaultFolders[1] = fmt.Sprintf("/workspace/%s/code", jobID)
+		defaultFolders[2] = fmt.Sprintf("/workspace/%s/input", jobID)
+		defaultFolders[3] = fmt.Sprintf("/workspace/%s/output", jobID)
+	case "gamelift":
+		defaultFolders[0] = "/var/lib/libvirt/game/"
+	default:
+		defaultFolders[0] = "/tmp/sg"
+	}
+
+	strBuilder := ""
+	for _, folder := range defaultFolders {
+		strBuilder += " " + folder
+	}
+
 	script := fmt.Sprintf(`
-set -e
+		set -e
 
-modprobe nbd max_part=8 2>/dev/null || true
+		modprobe nbd max_part=8 2>/dev/null || true
 
-NBD="/dev/nbd0"
-MOUNT="/mnt/_serwin_inject_$$"
-FLAT="/tmp/_serwin_flat_$$.raw"   # RAW — no qcow2 metadata to confuse nbd reads
+		NBD="/dev/nbd0"
+		MOUNT="/mnt/_serwin_inject_$$"
+		FLAT="/tmp/_serwin_flat_$$.raw"   # RAW — no qcow2 metadata to confuse nbd reads
 
-cleanup() {
-    umount "$MOUNT" 2>/dev/null || true
-    kpartx -dv "$NBD" 2>/dev/null || true
-    qemu-nbd --disconnect "$NBD" 2>/dev/null || true
-    rmdir "$MOUNT" 2>/dev/null || true
-    rm -f "$FLAT"
-}
-trap cleanup EXIT
+		cleanup() {
+			umount "$MOUNT" 2>/dev/null || true
+			kpartx -dv "$NBD" 2>/dev/null || true
+			qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+			rmdir "$MOUNT" 2>/dev/null || true
+			rm -f "$FLAT"
+		}
+		trap cleanup EXIT
 
-echo "[InjectAssets] Flattening qcow2 -> raw..."
-qemu-img convert -f qcow2 -O raw "%s" "$FLAT"
-echo "[InjectAssets] Flatten complete: $(du -sh $FLAT | cut -f1)"
+		echo "[InjectAssets] Flattening qcow2 -> raw..."
+		qemu-img convert -f qcow2 -O raw "%s" "$FLAT"
+		echo "[InjectAssets] Flatten complete: $(du -sh $FLAT | cut -f1)"
 
-# Ensure nbd slot is clean before use
-qemu-nbd --disconnect "$NBD" 2>/dev/null || true
-sleep 1
+		# Ensure nbd slot is clean before use
+		qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+		sleep 1
 
-mkdir -p "$MOUNT"
-qemu-nbd --connect="$NBD" --format=raw "$FLAT"
-sleep 3
+		mkdir -p "$MOUNT"
+		mkdir -p "%s"
+		qemu-nbd --connect="$NBD" --format=raw "$FLAT"
+		sleep 3
 
-# Force kernel partition re-read
-blockdev --rereadpt "$NBD" 2>/dev/null || true
-kpartx -av "$NBD" 2>/dev/null || true
-sleep 2
+		# Force kernel partition re-read
+		blockdev --rereadpt "$NBD" 2>/dev/null || true
+		kpartx -av "$NBD" 2>/dev/null || true
+		sleep 2
 
-echo "[InjectAssets] Partition layout:"
-lsblk "$NBD"
+		echo "[InjectAssets] Partition layout before resize:"
+		lsblk "$NBD"
 
-MOUNTED=0
-for PART in "/dev/mapper/nbd0p2" "/dev/mapper/nbd0p1" "/dev/mapper/nbd0p3"; do
-    if [ -b "$PART" ]; then
-        echo "[InjectAssets] Trying $PART..."
-        if mount "$PART" "$MOUNT" 2>/dev/null; then
-            echo "[InjectAssets] Mounted $PART"
-            MOUNTED=1
-            break
-        fi
-    fi
-done
+		if command -v growpart >/dev/null 2>&1; then
+			growpart "$NBD" 1 || echo "[InjectAssets] growpart reported no change or failed — continuing"
+		elif command -v parted >/dev/null 2>&1; then
+			echo "[InjectAssets] parted found, resizing..."
+			parted -s -a opt "$NBD" resizepart 1 100%% || echo "[InjectAssets] parted failed"
+		elif command -v sfdisk >/dev/null 2>&1; then
+			echo "[InjectAssets] sfdisk found, resizing..."
+			echo ", +" | sfdisk -N 1 "$NBD" || echo "[InjectAssets] sfdisk failed"
+		else
+			echo "[InjectAssets] No partition resizing tool found! Attempting to install parted/cloud-guest-utils..."
+			echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+			apt-get update -y && apt-get install -y cloud-guest-utils parted || true
+			if command -v growpart >/dev/null 2>&1; then
+				growpart "$NBD" 1 || echo "[InjectAssets] growpart retry failed"
+			elif command -v parted >/dev/null 2>&1; then
+				parted -s -a opt "$NBD" resizepart 1 100%% || echo "[InjectAssets] parted retry failed"
+			fi
+		fi
 
-if [ "$MOUNTED" -eq 0 ]; then
-    echo "[InjectAssets] Failed to mount. fdisk output:"
-    fdisk -l "$NBD" 2>/dev/null || true
-    exit 1
-fi
+		# Re-run kpartx so device-mapper picks up the new partition size
+		kpartx -u "$NBD" 2>/dev/null || true
+		sleep 1
 
-%s
+		echo "[InjectAssets] Resizing filesystem on partition 1..."
+		e2fsck -f -y /dev/mapper/nbd0p1 || true
+		if ! resize2fs /dev/mapper/nbd0p1 2>/tmp/_serwin_resize_err; then
+			echo "[InjectAssets] resize2fs failed, trying xfs_growfs (requires mount)..."
+			mkdir -p "$MOUNT"
+			mount /dev/mapper/nbd0p1 "$MOUNT" 2>/dev/null && xfs_growfs "$MOUNT" && umount "$MOUNT" || cat /tmp/_serwin_resize_err
+		fi
 
-umount "$MOUNT"
-MOUNTED=0
+		echo "[InjectAssets] Partition layout after resize:"
+		lsblk "$NBD"
 
-echo "[InjectAssets] Writing back to qcow2..."
-kpartx -dv "$NBD" 2>/dev/null || true
-qemu-nbd --disconnect "$NBD" 2>/dev/null || true
-sleep 1
+		MOUNTED=0
+		for PART in "/dev/mapper/nbd0p2" "/dev/mapper/nbd0p1" "/dev/mapper/nbd0p3"; do
+			if [ -b "$PART" ]; then
+				echo "[InjectAssets] Trying $PART..."
+				if mount "$PART" "$MOUNT" 2>/dev/null; then
+					echo "[InjectAssets] Mounted $PART"
+					df -h "$MOUNT"
+					MOUNTED=1
+					break
+				fi
+			fi
+		done
 
-# Convert modified raw back to qcow2 (replaces original overlay)
-qemu-img convert -f raw -O qcow2 "$FLAT" "%s"
+		if [ "$MOUNTED" -eq 0 ]; then
+			echo "[InjectAssets] Failed to mount. fdisk output:"
+			fdisk -l "$NBD" 2>/dev/null || true
+			exit 1
+		fi
 
-echo "[InjectAssets] Injection complete"
-`, diskPath, copyCommands.String(), diskPath)
+		%s
+
+		umount "$MOUNT"
+		MOUNTED=0
+
+		echo "[InjectAssets] Writing back to qcow2..."
+		kpartx -dv "$NBD" 2>/dev/null || true
+		qemu-nbd --disconnect "$NBD" 2>/dev/null || true
+		sleep 1
+
+		# Convert modified raw back to qcow2 (replaces original overlay)
+		qemu-img convert -f raw -O qcow2 "$FLAT" "%s"
+
+		echo "[InjectAssets] Injection complete"
+		`, diskPath, strBuilder, copyCommands.String(), diskPath)
 
 	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, script)
 }
+	

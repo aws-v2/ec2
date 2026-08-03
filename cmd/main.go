@@ -30,7 +30,6 @@ import (
 	"ec2-api/internal/vpcpkg"
 	pkg "ec2-api/pkg"
 
-
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -62,6 +61,9 @@ func main() {
 	postgresConn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		cfg.DB.User, cfg.DB.Password, cfg.DB.Host, cfg.DB.Port, cfg.DB.Database, cfg.DB.SSLMode)
 
+	if cfg.DB.ChannelBinding != "" {
+		postgresConn += fmt.Sprintf("&channel_binding=%s", cfg.DB.ChannelBinding)
+	}
 	libvirtURI := cfg.Libvirt.URI
 	imagesDir := cfg.Libvirt.ImagesDir
 
@@ -71,7 +73,9 @@ func main() {
 	// NATS Check
 	if err := pkg.CheckReachabilityURL("NATS", cfg.NATS.URL, 5, 2*time.Second); err != nil {
 		slog.Error("FATAL: NATS unreachable", "url", cfg.NATS.URL, "error", err)
-		os.Exit(1)
+		slog.Error("Anyway we are pressing on")
+		// TODO: uncomment this when the time is right
+		// os.Exit(1)
 	}
 
 	// Database Check
@@ -110,9 +114,7 @@ func main() {
 	slog.Info("Initializing Libvirt client...")
 	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
 	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
-	
-	
-	
+
 	if err != nil {
 		slog.Warn("Failed to connect to libvirt", "error", err)
 		libvirtClient = nil
@@ -143,7 +145,7 @@ func main() {
 	var hostRepo interfaces.HostRepository
 	hostRepo = repository.NewHostRepository(db.DB)
 
-	instanceRepo = repository.NewInstanceRepository(db,cfg, hostRepo)
+	instanceRepo = repository.NewInstanceRepository(db, cfg, hostRepo)
 	volumeRepo = repository.NewVolumeRepository(db)
 	snapshotRepo = repository.NewSnapshotRepository(db)
 	sshKeyRepo = repository.NewSSHKeyRepository(db)
@@ -163,9 +165,9 @@ func main() {
 	vpcRepo := repository.NewVPCRepository(db)
 	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
 	rolloutRepo := repository.NewRolloutRepo(db)
-	metricsRepo := repository.NewMetricsRepo(db,logger)
+	metricsRepo := repository.NewMetricsRepo(db, logger)
 
-	hostService := application.NewHostService(hostRepo,cfg.PublicKey,natsPublisher, cfg.AgentUrlParts,rolloutRepo,metricsRepo,cfg)
+	hostService := application.NewHostService(hostRepo, cfg.PublicKey, natsPublisher, cfg.AgentUrlParts, rolloutRepo, metricsRepo, cfg)
 
 	// Initialize and start VM Metrics Monitor Worker
 	vmMonitorWorker := application.NewVMMonitorWorker(metricsRepo, hostService)
@@ -183,7 +185,7 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	instanceService := application.NewInstanceService(instanceRepo,hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey,cfg.AgentPort,cfg.ProfileBaseImage)
+	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)

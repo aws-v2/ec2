@@ -48,4 +48,8 @@ var schema15 string
 //go:embed 016_add_available_templates_to_hosts.sql
 var schema16 string
 
-var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12 + "\n" + schema13 + "\n" + schema14 + "\n" + schema15 + "\n" + schema16
+
+//go:embed 021_create_gateway_table.sql
+var schema21 string
+
+var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12 + "\n" + schema13 + "\n" + schema14 + "\n" + schema15 + "\n" + schema16+"\n"+schema21

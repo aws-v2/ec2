@@ -28,21 +28,20 @@ type Config struct {
 	// MinIO
 	MinIO MinIOConfig
 
-	AgentUrl string
-	MigrationsDir string 
-	PublicKey string
-	PrivateKey string
-	AgentPort int
-	AgentUrlParts string
+	AgentUrl         string
+	MigrationsDir    string
+	PublicKey        string
+	PrivateKey       string
+	AgentPort        int
+	AgentUrlParts    string
 	ProfileBaseImage map[string]string
-
+	ENV              string
 }
 
 type LibvirtConfig struct {
 	URI       string
 	ImagesDir string
 }
-
 type DBConfig struct {
 	Host            string
 	Port            int
@@ -50,6 +49,7 @@ type DBConfig struct {
 	Password        string
 	Database        string
 	SSLMode         string
+	ChannelBinding  string // "" locally, "require" for Neon
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
@@ -75,6 +75,7 @@ type MinIOConfig struct {
 	SecretKey string
 	UseSSL    bool
 }
+
 func LoadKeyPair() []string {
 	return []string{
 		`-----BEGIN OPENSSH PRIVATE KEY-----
@@ -92,38 +93,47 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 	profileBaseImage := make(map[string]string)
 
-	profileBaseImage["vanilla"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["ai-worker"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["gamelift"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["games"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["workers"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["lambda"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["s3"] ="ubuntu-22.04:version:sha256"
-	profileBaseImage["rds"] ="ubuntu-22.04:version:sha256"
+	profileBaseImage["vanilla"] = "rds-template"
+	profileBaseImage["ai-worker"] = "ubuntu-22.04"
+	profileBaseImage["gamelift"] = "ubuntu-22.04"
+	profileBaseImage["games"] = "ubuntu-22.04"
+	profileBaseImage["workers"] = "rds-template"
+	profileBaseImage["lambda"] = "ubuntu-22.04"
+	profileBaseImage["s3"] = "rds-template"
+	profileBaseImage["rds"] = "rds-template"
 
 	cfg := &Config{
-		AgentUrlParts: getEnv("API_GATEWAY","http://localhost:8080"),
-		AgentPort: getEnvInt("AGENT_PORT", 9030),
-		PrivateKey:LoadKeyPair()[0],
-		PublicKey:LoadKeyPair()[1],
-		AgentUrl :getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
-		MigrationsDir :getEnv("MIGRATIONS_PATH", "./migrations"),
+		AgentUrlParts: getEnv("API_GATEWAY", "http://localhost:8080"),
+		AgentPort:     getEnvInt("AGENT_PORT", 9030),
+		PrivateKey:    LoadKeyPair()[0],
+		ENV:           getEnv("ENV", "dev"),
+		PublicKey:     LoadKeyPair()[1],
+		AgentUrl:      getEnv("AGENT_URL", "ws://localhost:9030/terminal"),
+		MigrationsDir: getEnv("MIGRATIONS_PATH", "./migrations"),
 		DB: DBConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
 			Port:            getEnvInt("DB_PORT", 5432),
 			User:            getEnv("DB_USER", "root"),
 			Password:        getEnv("DB_PASSWORD", "root"),
-			Database:        getEnv("DB_NAME", "ec2_db1"), // Changed from network_db to ec2 to match context
+			Database:        getEnv("DB_NAME", "ec2_db1"),
 			SSLMode:         getEnv("DB_SSLMODE", "disable"),
+			ChannelBinding:  getEnv("DB_CHANNEL_BINDING", ""), // e.g. "require" for Neon
 			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
 			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 10),
 			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
 		},
+// 		DB_HOST=ep-purple-feather-aypga34j-pooler.c-5.us-east-2.aws.neon.tech
+// DB_PORT=5432
+// DB_USER=neondb_owner
+// DB_PASSWORD=npg_EHvDpaNKS73u
+// DB_NAME=ec2_db
+// DB_SSLMODE=require
+// DB_CHANNEL_BINDING=require
 		NATS: NATSConfig{
-			URL:      getEnv("NATS_URL", "nats://localhost:4222"),
-			User:     getEnv("NATS_USER", "auth-server"),
-			Password: getEnv("NATS_PASSWORD", "auth-secret"),
+			URL:           getEnv("NATS_URL", "nats://localhost:4222"),
+			User:          getEnv("NATS_USER", "auth-server"),
+			Password:      getEnv("NATS_PASSWORD", "auth-secret"),
 			SubjectPrefix: getEnv("NATS_PREFIX", "dev.v1"),
 		},
 		Server: ServerConfig{
@@ -132,7 +142,7 @@ func Load() (*Config, error) {
 			HTTPPort:    getEnvInt("HTTP_PORT", 8088),
 		},
 		Libvirt: LibvirtConfig{
-			URI:       getEnv("LIBVIRT_URI", "qemu:///system"),  //this particular url works indev but not in staging 
+			URI:       getEnv("LIBVIRT_URI", "qemu:///system"), //this particular url works indev but not in staging
 			ImagesDir: getEnv("IMAGES_DIR", "/var/lib/libvirt/images"),
 		},
 		Profile: strings.ToLower(getEnv("APP_PROFILE", "dev")),
@@ -142,8 +152,7 @@ func Load() (*Config, error) {
 			SecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin123"),
 			UseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
 		},
-	ProfileBaseImage:profileBaseImage,
-
+		ProfileBaseImage: profileBaseImage,
 	}
 
 	return cfg, nil

@@ -1,8 +1,8 @@
 {
-  "service": "ec2-service",
+  "service": "EC2 compute",
   "version": "V1",
   "type": "internal-docs",
-  "description": "Internal engineering documentation for the EC2 service. Covers serverless function execution, event sources, triggers, runtime environments, monitoring, and deployment constraints.",
+  "description": "Internal engineering documentation for the SageMaker service. Covers pipeline execution, VM orchestration, task scheduling, SDK design, artifact management, container runtime, deployment, and platform architecture.",
   "audience": "developers",
   "visibility": "internal",
 
@@ -10,36 +10,14 @@
     {
       "title": "Getting Started",
       "items": [
-        { "title": "Lambda Overview", "slug": "lambda-overview" },
-        { "title": "Quickstart Guide", "slug": "lambda-quickstart" }
-      ]
-    },
-    {
-      "title": "Networking Core",
-      "items": [
-        { "title": "Networking Core", "slug": "networking-core" },
-        { "title": "Runtime Environments", "slug": "lambda-runtimes" },
-        { "title": "Environment Variables", "slug": "lambda-env-vars" }
-      ]
-    },
-    {
-      "title": "Event & Trigger System",
-      "items": [
-        { "title": "Event Sources", "slug": "lambda-event-sources" },
-        { "title": "Triggers & Invocation Model", "slug": "lambda-triggers" }
-      ]
-    },
-    {
-      "title": "Performance & Limits",
-      "items": [
-        { "title": "Execution Limits", "slug": "lambda-limits" },
-        { "title": "Lambda Layers", "slug": "lambda-layers" }
-      ]
-    },
-    {
-      "title": "Observability",
-      "items": [
-        { "title": "Monitoring & Logs", "slug": "lambda-monitoring" }
+        {
+          "title": "Overview & Architecture",
+          "slug": "architecture"
+        },
+        {
+          "title": "Api Architexture",
+          "slug": "api-architexture"
+        }
       ]
     }
   ]

@@ -23,6 +23,7 @@ var imageURLMap = map[string]string{
 	// Ubuntu cloud images
 	"ubuntu-20.04": "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
 	"ubuntu-22.04": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+	"rds-template": "https://templates.rds.serwin.com/jammy/current/jammy-server-cloudimg-amd64.img",
 	"ubuntu-24.04": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
 
 	// Debian cloud images

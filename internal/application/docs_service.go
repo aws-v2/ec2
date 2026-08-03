@@ -26,8 +26,10 @@ type DocCategory struct {
 
 type DocManifest struct {
 	Service    string        `json:"service"`
-	Version    string        `json:"version,omitempty"`
-	Categories []DocCategory `json:"categories"`
+	APIVersion string        `json:"apiVersion,omitempty"`
+	Scope      string        `json:"scope"`
+	Internal   []DocCategory `json:"internal,omitempty"`
+	Public     []DocCategory `json:"public,omitempty"`
 }
 
 type Metadata struct {
@@ -75,12 +77,30 @@ func (s *DocsService) GetManifest(internal bool) (*DocManifest, error) {
 		return nil, fmt.Errorf("failed to read manifest at %q: %w", path, err)
 	}
 
-	var manifest DocManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	// The on-disk manifest uses 'categories' and 'version'. Use a temp struct
+	var raw struct {
+		Service    string        `json:"service"`
+		Version    string        `json:"version"`
+		Categories []DocCategory `json:"categories"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("invalid manifest JSON at %q: %w", path, err)
 	}
 
-	return &manifest, nil
+	manifest := &DocManifest{
+		Service:    raw.Service,
+		APIVersion: raw.Version,
+		Scope:      scope,
+	}
+
+	if internal {
+		manifest.Internal = raw.Categories
+	} else {
+		manifest.Public = raw.Categories
+	}
+
+	return manifest, nil
 }
 
 // GetDoc loads a markdown file and parses frontmatter

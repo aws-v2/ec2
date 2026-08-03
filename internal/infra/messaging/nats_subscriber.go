@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"log"
 
-		domain "ec2-api/internal/domain/instance"
-
+	domain "ec2-api/internal/domain/instance"
 
 	"github.com/nats-io/nats.go"
 )
@@ -15,7 +14,7 @@ import (
 // EC2EventHandler is the interface the subscriber expects to call when events occur.
 type EC2EventHandler interface {
 	EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error
-	HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) error
+	HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response, error)
 }
 
 type NATSSubscriber struct {
@@ -76,14 +75,21 @@ func (s *NATSSubscriber) Start() error {
 			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal provision event: %v", err)
 			return
 		}
-		
 
 		log.Printf("[NATS-SUB] [INFO] Received provision event for profile: %s", event.Profile)
 
 		go func() {
-			if err := s.handler.HandleProvision(context.Background(), &event); err != nil {
+			ec2Payload, errd := s.handler.HandleProvision(context.Background(), &event)
+			if errd != nil {
 				log.Printf("[NATS-SUB] [ERROR] VM provision failed for profile %s: %v", event.Profile, err)
+				return
 			}
+
+			data, _ := json.Marshal(ec2Payload)
+
+			s.nc.Publish(msg.Reply, data)
+	log.Printf("[NATS-SUB] Successfully replied to %s and %s", scaleSubject, provisionSubject)
+
 		}()
 	})
 	if err != nil {

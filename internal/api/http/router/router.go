@@ -35,13 +35,7 @@ func SetupRoutes(r *gin.Engine,
 
 
 
-	// Documentation Endpoints (public, no auth)
-	computeDocs := r.Group("/api/v1/compute/docs")
-	{
-		computeDocs.GET("", docsHandler.GetPublicManifest)
-		computeDocs.GET("/:slug", docsHandler.GetPublicDoc)
-	}
-	
+ 
 
 
 
@@ -67,6 +61,13 @@ func SetupRoutes(r *gin.Engine,
 	}
 
 
+
+	// Docs
+	docs := compute.Group("/docs")
+	{
+		docs.GET("", docsHandler.GetManifest)
+		docs.GET("/:slug", docsHandler.GetDoc)
+	}
 
 
 
@@ -165,19 +166,6 @@ func SetupRoutes(r *gin.Engine,
 
 
 
-	// Docs
-	docs := api.Group("/docs")
-	{
-		docs.GET("", docsHandler.GetPublicManifest)
-		docs.GET("/:slug", docsHandler.GetPublicDoc)
-	}
-
-	internalDocs := api.Group("/internal/docs")
-	internalDocs.Use(middleware.AuthMiddleware())
-	{
-		internalDocs.GET("", docsHandler.GetInternalManifest)
-		internalDocs.GET("/:slug", docsHandler.GetInternalDoc)
-	}
 
  
 }

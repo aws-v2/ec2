@@ -9,7 +9,7 @@ type NetworkReconcileRequest struct {
 	Bridge  BridgeConfig  `json:"bridge"`
 	IP      string        `json:"ip"`
 	Gateway string        `json:"gateway"`
-	Assets  []domain.AssetConfigs `json:"assets,omitempty"`
+	Assets  []domain.Asset `json:"assets,omitempty"`
 	SessionID string `json:"session_id"`
 
 }
@@ -28,4 +28,15 @@ type BridgeConfig struct {
 	Gateway string `json:"gateway"`
 	CIDR    string `json:"cidr"`
 	Config  string `json:"config"`
+}
+
+
+
+
+
+type GatewayHost struct{
+	ID string 
+	StartPort int
+	EndPort int
+
 }

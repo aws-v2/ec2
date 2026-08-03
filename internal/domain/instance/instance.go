@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type InstanceStatus string
 
@@ -12,41 +15,40 @@ const (
 	WaitForShutdown  InstanceStatus = "wait_for_shutdown"
 	StatusRestarting InstanceStatus = "Restarting"
 )
-	const(
-		RepoReConcile ="RECONCILE_REPO"
-		RepoCreateRecord ="CREATE_REPO_RECORD"
-		RepoUpadateRecord ="UPDATE_REPO_RECORD"
-		NetworkReconcile="NETWORK_RECONCILE"
-		CreateOverlay="CREATE_OVERLAY"
-		BuildCloudInit="BUILD_CLOUD_INIT"
-		TransferOverlay="TRANSFER_OVERLAY"
-		InjectOverlay="INJECT_ASSETS"
-		StartVM="START_VM"
-		VMProvisioned="VM_PROVISIONED"
-		VMStarted="INSTANCE_STARTED"
-		VMStoped="INSTANCE_STOPPED"
-	)
+const (
+	RepoReConcile     = "RECONCILE_REPO"
+	RepoCreateRecord  = "CREATE_REPO_RECORD"
+	RepoUpadateRecord = "UPDATE_REPO_RECORD"
+	NetworkReconcile  = "NETWORK_RECONCILE"
+	CreateOverlay     = "CREATE_OVERLAY"
+	BuildCloudInit    = "BUILD_CLOUD_INIT"
+	TransferOverlay   = "TRANSFER_OVERLAY"
+	InjectOverlay     = "INJECT_ASSETS"
+	StartVM           = "START_VM"
+	VMProvisioned     = "VM_PROVISIONED"
+	VMStarted         = "INSTANCE_STARTED"
+	VMStoped          = "INSTANCE_STOPPED"
+)
+
 // InstanceLifecycleEvent represents the event published to NATS for Network Service integration.
 type InstanceLifecycleEvent struct {
-	CorrelationID string                  `json:"correlation_id"`
-	InstanceID    string                  `json:"instance_id"`
-	EventType     string                  `json:"event_type"`
-	Timestamp     string                  `json:"timestamp"`
-	Stage     string                  `json:"stage"`
+	CorrelationID string                   `json:"correlation_id"`
+	InstanceID    string                   `json:"instance_id"`
+	EventType     string                   `json:"event_type"`
+	Timestamp     string                   `json:"timestamp"`
+	Stage         string                   `json:"stage"`
 	Payload       InstanceLifecyclePayload `json:"payload"`
-	AgentURL    string           `json:"agent_url,omitempty"`
-	SessionID string `json:"session_id"`
-
+	AgentURL      string                   `json:"agent_url,omitempty"`
+	SessionID     string                   `json:"session_id"`
 }
 
 type InstanceLifecyclePayload struct {
-	IPAddress   string            `json:"ip_address"`
-	VPCID       string            `json:"vpc_id"`
-	ServicePort int               `json:"service_port"`
-	Metadata    InstanceMetadata `json:"metadata"`
-	InstanceStartedMetadata interface{} `json:"instance_started_metadata"`
-	AgentWS     string            `json:"agent_ws,omitempty"`
-
+	IPAddress               string           `json:"ip_address"`
+	VPCID                   string           `json:"vpc_id"`
+	ServicePort             int              `json:"service_port"`
+	Metadata                InstanceMetadata `json:"metadata"`
+	InstanceStartedMetadata interface{}      `json:"instance_started_metadata"`
+	AgentWS                 string           `json:"agent_ws,omitempty"`
 }
 
 type InstanceMetadata struct {
@@ -55,12 +57,12 @@ type InstanceMetadata struct {
 }
 
 const (
-	EventInstanceStarted = "INSTANCE_STARTED"
-	EventInstanceStopped = "INSTANCE_STOPPED"
-	EventHealthUpdate    = "HEALTH_UPDATE"
+	EventInstanceStarted      = "INSTANCE_STARTED"
+	EventInstanceStopped      = "INSTANCE_STOPPED"
+	EventHealthUpdate         = "HEALTH_UPDATE"
 	EventProvisioningProgress = "PROVISIONING_PROGRESS"
-	EventInstanceError = "INSTANCE_ERROR"
-	EventInstanceProvisioned = "INSTANCE_PROVISIONED"
+	EventInstanceError        = "INSTANCE_ERROR"
+	EventInstanceProvisioned  = "INSTANCE_PROVISIONED"
 )
 
 type ProvisioningProgressEvent struct {
@@ -69,68 +71,93 @@ type ProvisioningProgressEvent struct {
 	Stage      string `json:"stage"`
 	Message    string `json:"message"`
 	Timestamp  string `json:"timestamp"`
-	 Data       any    `json:"data,omitempty"`
+	Data       any    `json:"data,omitempty"`
 }
 
 type Instance struct {
-	ID           string         `json:"id" db:"id"`
-	VMName       string         `json:"vm_name" db:"vm_name"`
-	Image        string         `json:"image" db:"image"`
-	CPU          int            `json:"cpu" db:"cpu"`
-	RAM          int            `json:"ram" db:"ram"`
-	PublicSSHKey       string         `json:"public_ssh_key" db:"public_sshkey"`
-	PrivateSshKey       string         `json:"private_ssh_key" db:"private_sshkey"`
-	Status       InstanceStatus `json:"status" db:"status"`
-	IP           string         `json:"ip" db:"ip"`
-	PublicIP     string         `json:"public_ip" db:"public_ip"`
-	ProxmoxID    int            `json:"proxmox_id" db:"proxmox_id"`
-	RootVolumeID string         `json:"root_volume_id" db:"root_volume_id"`
-	StorageSize  int            `json:"storage_size" db:"storage_size"`
-	StorageType  string         `json:"storage_type" db:"storage_type"`
-	DeviceName   string         `json:"device_name" db:"device_name"`
-	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
-	UserID       string         `json:"user_id" db:"user_id"`
-	VPCID        string         `json:"vpc_id" db:"vpc_id"`
-	HostID       string         `json:"host_id" db:"host_id"`
+	ID            string         `json:"id" db:"id"`
+	VMName        string         `json:"vm_name" db:"vm_name"`
+	Image         string         `json:"image" db:"image"`
+	CPU           int            `json:"cpu" db:"cpu"`
+	RAM           int            `json:"ram" db:"ram"`
+	PublicSSHKey  string         `json:"public_ssh_key" db:"public_sshkey"`
+	PrivateSshKey string         `json:"private_ssh_key" db:"private_sshkey"`
+	Status        InstanceStatus `json:"status" db:"status"`
+	IP            string         `json:"ip" db:"ip"`
+	PublicIP      string         `json:"public_ip" db:"public_ip"`
+	ProxmoxID     int            `json:"proxmox_id" db:"proxmox_id"`
+	RootVolumeID  string         `json:"root_volume_id" db:"root_volume_id"`
+	StorageSize   int            `json:"storage_size" db:"storage_size"`
+	StorageType   string         `json:"storage_type" db:"storage_type"`
+	DeviceName    string         `json:"device_name" db:"device_name"`
+	CreatedAt     time.Time      `json:"created_at" db:"created_at"`
+	UserID        string         `json:"user_id" db:"user_id"`
+	VPCID         string         `json:"vpc_id" db:"vpc_id"`
+	HostID        string         `json:"host_id" db:"host_id"`
 
-	SSH        string         `json:"ssh" db:"ssh"`
-	SessionID string `json:"session_id" db:"session_id"`
-	ImageVersion string  `json:"image_version" db:"image_version"`
+	SSH          string `json:"ssh" db:"ssh"`
+	SessionID    string `json:"session_id" db:"session_id"`
+	ImageVersion string `json:"image_version" db:"image_version"`
 	ImageProfile string `json:"image_profile" db:"image_profile"`
+	// TODO:  these fileds were added as glue code,toavoid reworking
+	// the whole floe
+		GatewayIP   string `json:"gateway_ip"`
+	GatewayPort int `json:"gateway_port"`
 }
 
-type ProvisionInstanceEvent struct 
-{
-	Profile    string            `json:"profile"`
-	ResourceID    string            `json:"resource_id"`
-	Specs      map[string]int    `json:"specs"`
-	UserID     string            `json:"user_id"  `
-	StorageARN string            `json:"storage_arn"`
-	Manifest GameManifest `json:"manifest"`
-	SessionID string `json:"session_id"  `
+// type ProvisionInstanceEvent struct {
+// 	Profile    string         `json:"profile"`
+// 	ResourceID string         `json:"resource_id"`
+// 	Specs      map[string]int `json:"specs"`
+// 	UserID     string         `json:"user_id"  `
+// 	StorageARN string         `json:"storage_arn"`
+// 	Manifest   GameManifest   `json:"manifest"`
+// 	SessionID  string         `json:"session_id"  `
+// }
+
+type ProvisionInstanceEvent struct {
+	UserID string `json:"userID"`
+	Profile    string          `json:"profile" binding:"required"`
+	Name       string          `json:"name" binding:"required"`
+	ResourceID string          `json:"resource_id"`
+	Specs      VMSpecs         `json:"specs" binding:"required"`
+	SessionID  string          `json:"session_id"`
+	Assets     []Asset         `json:"assets,omitempty"`
+	Config     json.RawMessage `json:"config,omitempty"` // profile-specific config, opaque to the core service
 }
 
+type VMSpecs struct {
+	CPU     int `json:"cpu" binding:"required"`
+	RAM     int `json:"ram" binding:"required"` // MB
+	Storage int `json:"storage,omitempty"`      // GB, optional override of image default
+}
+type AssetSource string
+
+const (
+	AssetSourceObject AssetSource = "object" // single presigned file (e.g. lambda binary)
+	AssetSourceZip    AssetSource = "zip"    // presigned zip (folder/bucket export) — unpack after download
+	AssetSourceInline AssetSource = "inline" // small payload embedded directly, base64
+)
+
+type Asset struct {
+	Name       string      `json:"name"`
+	Source     AssetSource `json:"source"`
+	URL        string      `json:"url,omitempty"`
+	InlineData string      `json:"inline_data,omitempty"` // only for AssetSourceInline
+	DestPath   string      `json:"dest_path"`             // where the agent places/unpacks it
+	SHA256     string      `json:"sha256,omitempty"`
+	Unpack     bool        `json:"unpack,omitempty"`     // true = unzip after download
+	Executable bool        `json:"executable,omitempty"` // chmod +x after placing
 
 
-type ProvisionedRequesFinishedResponse struct{
-	VMID string `json:"vm_id"`
-	AgentURL  string `json:"agent_url"`
+	Path   string `json:"path"`
+
 
 }
 
-type GameManifest struct {
-	Name        string     `json:"name"`
-	Version     string     `json:"version"`
-	HeadlessBin string     `json:"headless_bin"`
-	MainScene   string     `json:"main_scene"`
-	PlayerNode  string     `json:"player_node"`
-	SyncNodes   []SyncNode `json:"sync_nodes"`
-	Parameters map[string]string `json:"parameters"`
-
-}
-type SyncNode struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+type ProvisionedRequesFinishedResponse struct {
+	VMID     string `json:"vm_id"`
+	AgentURL string `json:"agent_url"`
 }
 
 type InstanceSpecs struct {
@@ -138,20 +165,30 @@ type InstanceSpecs struct {
 	RAM int `json:"ram"`
 }
 
+type GameManifest struct {
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	HeadlessBin string            `json:"headless_bin"`
+	MainScene   string            `json:"main_scene"`
+	PlayerNode  string            `json:"player_node"`
+	SyncNodes   []SyncNode        `json:"sync_nodes"`
+	Parameters  map[string]string `json:"parameters"`
+}
+type SyncNode struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
 
 type CreateInstanceRequest struct {
-	Image      string            `json:"image" binding:"required"`
-	Name      string            `json:"name" binding:"required"`
-	ResourceID    string            `json:"resource_id"`
 
-	CPU        int               `json:"cpu" binding:"required"`
-	RAM        int               `json:"ram" binding:"required"`
-	Profile    string            `json:"profile"`
-	Manifest GameManifest `json:"manifest"`
-	ARN string `json:"arn"`
-	SessionID string `json:"session_id"`
-	Assets []AssetConfigs `json:"assets,omitempty"`
-	
+	Name       string `json:"name" binding:"required"`
+	ResourceID string `json:"resource_id"`
+	Image string `json:"image"`
+	Specs      VMSpecs         `json:"specs" binding:"required"`
+	Profile   string         `json:"profile"`
+	SessionID string         `json:"session_id"`
+	Assets    []Asset `json:"assets,omitempty"`
+	Config     json.RawMessage `json:"config,omitempty"` // profile-specific config, opaque to the core service
 
 }
 type AssetConfigs struct {
@@ -206,14 +243,8 @@ type InstanceInfo struct {
 
 	// SSH target fields forwarded verbatim to the agent's open_terminal message.
 	VMIP      string
-	VMSSHPort int    // 0 → agent defaults to 22
+	VMSSHPort int // 0 → agent defaults to 22
 	SSHUser   string
 	SSHKey    string // private key PEM content
-	VMHost		string
-	
+	VMHost    string
 }
-
-
-
-
- 

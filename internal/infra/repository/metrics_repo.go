@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -25,6 +27,42 @@ func NewMetricsRepo(db *sqlx.DB, logger *slog.Logger) host.MetricsRepository {
 	}
 }
 
+func (r *MetricsRepository) GetByGatewayHostID(
+	ctx context.Context,
+	hostID string,
+
+) (*host.Host, error) {
+
+	query := `SELECT * FROM gateway_ports WHERE gateway_id = $1`
+	var host host.Host
+
+	err := r.db.Get(&host, query, hostID)
+	if err == sql.ErrNoRows {
+		return nil, errors.New("host not found")
+	}
+	return &host, err
+
+}
+
+func (r *MetricsRepository) InsertGateway(
+	ctx context.Context,
+	hostID string,
+	gateway host.GatewayHost,
+
+) error {
+
+_, err := r.db.ExecContext(ctx, `
+    INSERT INTO gateway_ports(gateway_id, port, status)
+    SELECT $1, p, 'AVAILABLE'
+    FROM generate_series($2::int, $3::int) AS p
+    ON CONFLICT (gateway_id, port) DO NOTHING;
+`, hostID, gateway.StartPort, gateway.EndPort)
+	if err != nil {
+		return err
+	}
+	return nil
+
+}
 func (r *MetricsRepository) Insert(
 	ctx context.Context,
 	hostID string,

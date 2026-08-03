@@ -37,15 +37,27 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 
 	dto.SendSuccess(c, http.StatusOK, fmt.Sprintf("Instance %s has been restarted", instanceID), nil)
 }
-
+type CreateInstanceRequest struct{
+	Ram int `json:"ram"`
+	Image string `json:"image"`
+	Cpu int `json:"cpu"`
+	Storage int `json:"storage"`
+}
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
-	var req domain.CreateInstanceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var reqObj CreateInstanceRequest
+	if err := c.ShouldBindJSON(&reqObj); err != nil {
 		dto.SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	var req domain.CreateInstanceRequest
 	userID := c.GetString("userID")
 	req.Profile = "vanilla"
+	req.Specs=domain.VMSpecs{
+		CPU: reqObj.Cpu,
+		RAM: reqObj.Ram,
+		Storage: 10,
+	}
+	req.Image=reqObj.Image
 	
 	log.Printf("Create instance request: %v",req)
 	instance, err := h.service.CreateInstance(c.Request.Context(),&req, userID)

@@ -2,8 +2,9 @@ package transport
 
 import (
 	"ec2-api/internal/application"
-	dto "ec2-api/internal/domain/dto"
 	domain "ec2-api/internal/domain/host"
+	"ec2-api/internal/vpcpkg"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -33,83 +34,74 @@ func NewHostHandler(service *application.HostService) *HostHandler {
 type RefreshRequest struct {
 	HostType string `json:"host-type"`
 	HostID   string `json:"host-id"`
-	Env   string `json:"env"`
-
+	Env      string `json:"env"`
 }
 type RefreshIp struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data string `json:"data"`
-	
-	}
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    string `json:"data"`
+}
+
 func (h *HostHandler) CPHost(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		log.Printf("[Handler:CPHost] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
-	var data string;
+	var data string
 
 	switch req.Env {
 	case "dev":
-		data= "http://localhost:8080"
+		data = "http://localhost:8080"
 	case "staging":
-		data="http://localhost:8080"
+		data = "http://localhost:8080"
 	case "prod":
-		data="http://102.10.98.23:8080"
+		data = "http://102.10.98.23:8080"
 	default:
-		data= "http://localhost:8080"
+		data = "http://localhost:8080"
 
 	}
 
-	c.JSON(http.StatusOK, RefreshIp{
-		Code: http.StatusOK,
-		Message: "Refresh request executed succesfully",
-		Data: data,
-	})
-
+	vpcpkg.RespondSucces(c, http.StatusOK, "Refresh request executed successfully", gin.H{"data": data})
 
 }
 
 func (h *HostHandler) DownloadTemplate(c *gin.Context) {
-	
+
 	var req domain.DowloadTemplateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		log.Printf("[Handler:DownloadTemplate] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
 
 	userID := c.GetString("userID")
-		log.Printf("--->: %v",req.HostID)
-		log.Printf("--->: %v",req.ImageType)
+	log.Printf("--->: %v", req.HostID)
+	log.Printf("--->: %v", req.ImageType)
 
-
-		url, err := h.service.DownloadTemplate(c.Request.Context(),req, userID)
+	url, err := h.service.DownloadTemplate(c.Request.Context(), req, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Printf("[Handler:DownloadTemplate] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to fetch download url"))
 		return
 	}
 
-	c.JSON(http.StatusOK, domain.DowloadTemplateResp{
-		ImageUrl: url,
-	})
-
-
+	vpcpkg.RespondSucces(c, http.StatusOK, "Download URL fetched", domain.DowloadTemplateResp{ImageUrl: url})
 
 }
 func (h *HostHandler) UpdateAgent(c *gin.Context) {
 	var req domain.RolloutUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		log.Printf("[Handler:UpdateAgent] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
 
 	log.Printf("The update agentrequest is as follows, %v", req)
 
 	req.UserID = c.GetString("userID")
-	
-	
-	
+
 	// req.Bucket and req.FileName come from the JSON body
 	// req.Version is derived from the file name eg agent-1.0.2 → 1.0.2
 	if req.FileName != "" && req.Version == "" {
@@ -119,21 +111,15 @@ func (h *HostHandler) UpdateAgent(c *gin.Context) {
 		}
 	}
 
-
-
-
-	summary, err := h.service.RolloutAgentUpdate(c.Request.Context(),req)
+	summary, err := h.service.RolloutAgentUpdate(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Printf("[Handler:UpdateAgent] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to start rollout"))
 		return
 	}
 
-	c.JSON(http.StatusOK, summary)
+	vpcpkg.RespondSucces(c, http.StatusOK, "Rollout started", summary)
 }
-
-
-
-
 
 func (h *HostHandler) AddTemplate(c *gin.Context) {
 	userID := c.GetString("user_id")
@@ -149,7 +135,8 @@ func (h *HostHandler) AddTemplate(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "invalid request body"})
+		log.Printf("[Handler:AddTemplate] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
 
@@ -163,14 +150,11 @@ func (h *HostHandler) AddTemplate(c *gin.Context) {
 
 	if err != nil {
 		log.Printf("[templates] add failed: %v", err)
-		c.JSON(500, gin.H{"error": "failed to add template"})
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to add template"))
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"template_key": key,
-		"bucket":       "templatebucket-default",
-	})
+	vpcpkg.RespondSucces(c, http.StatusOK, "Template created", gin.H{"template_key": key, "bucket": "templatebucket-default"})
 }
 
 func (h *HostHandler) GetHostTemplates(c *gin.Context) {
@@ -189,29 +173,27 @@ func (h *HostHandler) GetHostTemplates(c *gin.Context) {
 
 	if err != nil {
 		log.Printf("[templates] failed: %v", err)
-		c.JSON(500, gin.H{"error": "failed to fetch templates"})
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to fetch templates"))
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"download_url": url,
-	})
+	vpcpkg.RespondSucces(c, http.StatusOK, "Download URL fetched", gin.H{"download_url": url})
 }
 func (h *HostHandler) HandleHeartbeat(c *gin.Context) {
-    var req domain.HeartbeatRequest
-    if err := c.ShouldBindJSON(&req); err != nil {
-        // Log the specific unmarshaling error to the console
-        log.Printf("[host-handler] Heartbeat bind error: %v", err)
-        dto.SendError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
-        return
-    }
+	var req domain.HeartbeatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Log the specific unmarshaling error to the console
+		log.Printf("[host-handler] Heartbeat bind error: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
+		return
+	}
 
-    resp, err := h.service.HandleHeartbeat(req)
-    if err != nil {
-        log.Printf("[host-handler] Heartbeat service error: %v", err)
-        dto.SendError(c, http.StatusInternalServerError, err.Error())
-        return
-    }
+	resp, err := h.service.HandleHeartbeat(c,req)
+	if err != nil {
+		log.Printf("[host-handler] Heartbeat service error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to record heartbeat"))
+		return
+	}
 
-    dto.SendSuccess(c, http.StatusOK, "Heartbeat recorded", resp)
+	vpcpkg.RespondSucces(c, http.StatusOK, "Heartbeat recorded", resp)
 }
