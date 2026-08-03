@@ -122,7 +122,7 @@ type AssetConfig struct {
 
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response,error) {
 
-	log.Printf("[PROVISIONER] profile=%s resolved image=%s",
+	log.Printf("[PROVISIONER] profile=%s ",
 		event.Profile)
 
 	// if event.Manifest.Parameters != nil {

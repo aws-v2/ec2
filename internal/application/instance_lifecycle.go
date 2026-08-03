@@ -245,7 +245,7 @@ func (s *InstanceService) persistAndLaunch(
 
 	gatewayServer, serr := s.hostRepo.GetByGatewayHost(ctx, publicGateway.ID)
 	if serr != nil {
-		log.Printf("[NETWORK] gateway reconcile failed for instance %s: %v", gatewayServer, serr)
+		log.Printf("[NETWORK] gateway reconcile failed for instance %v: %v", gatewayServer, serr)
 
 		return nil, fmt.Errorf("Failed to get the gateway server: %w", serr)
 
