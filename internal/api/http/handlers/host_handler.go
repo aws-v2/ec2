@@ -197,3 +197,10 @@ func (h *HostHandler) HandleHeartbeat(c *gin.Context) {
 
 	vpcpkg.RespondSucces(c, http.StatusOK, "Heartbeat recorded", resp)
 }
+
+func (h *HostHandler) HandleHealth(c *gin.Context) {
+	vpcpkg.RespondSucces(c, http.StatusOK, "Heartbeat recorded", gin.H{"status":"ok"})
+
+}
+
+

@@ -74,7 +74,12 @@ func SetupRoutes(r *gin.Engine,
 
 
 
+	health := r.Group("/api/v1/ec2/health")
+	{
+		health.GET("",hostHandler.HandleHealth)
+	}
 	api := r.Group("/api/v1/ec2")
+
 	api.Use(middleware.AuthMiddleware())
 	{
 		// Instance CRUD
