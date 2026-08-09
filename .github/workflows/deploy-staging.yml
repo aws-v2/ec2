@@ -121,7 +121,29 @@ jobs:
               -e "LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock" \
               qarani/ec2-api:staging-${{ github.sha }}
 
+  # APP_PROFILE=staging
+  #             SERVICE_NAME=ec2-service
+  #             EUREKA_HOSTNAME=ec2-service-staging
+  #             EUREKA_IP_ADDR=127.0.0.1
+  #             LOG_LEVEL=info
+  #             LOG_FORMAT=json
+  #             EUREKA_SERVER_URL=https://discovery-server-staging.onrender.com/eureka
+  #             DB_SSLMODE=disable
+  #             NATS_URL=nats://nats-staging:4222
+  #             NATS_USER=nats-staging-user
+  #             NATS_PASSWORD=nats-staging-password
+  #             IMAGES_DIR=/var/lib/libvirt/images
+  #             MINIO_ENDPOINT=minio-staging:9000
+  #             MINIO_ACCESS_KEY=minio-staging-user
+  #             MINIO_SECRET_KEY=minio-staging-password
+  #             MIGRATIONS_PATH=/app/migrations
+  #             API_GATEWAY=https://api-gateway-staging-1-86xa.onrender.com
 
+  #             MINIO_USE_SSL=false
+  #             NATS_PREFIX=staging.v1
+  #             --add-host=host.docker.internal:host-gateway
+  #             AGENT_URL=ws://host.docker.internal:9030/terminal
+  #             LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock
 
   open-pr-to-main:
     needs: staging-deploy

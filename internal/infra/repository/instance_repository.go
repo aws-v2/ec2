@@ -19,11 +19,11 @@ import (
 )
 
 type instanceRepository struct { // lowercase, unexported
-	db *sqlx.DB
-	cfg *config.Config
+	db       *sqlx.DB
+	cfg      *config.Config
 	hostRepo interfaces.HostRepository
-
 }
+
 func NewInstanceRepository(db *sqlx.DB, cfg *config.Config, hostRepo interfaces.HostRepository) interfaces.InstanceRepository { // return interface
 	return &instanceRepository{db: db, cfg: cfg, hostRepo: hostRepo}
 }
@@ -270,7 +270,6 @@ func (r *instanceRepository) AddOrUpdateTag(instanceID string, tag *domain.Insta
 	return err
 }
 
-
 func (r *instanceRepository) DeleteTag(instanceID string, key string) error {
 	query := `DELETE FROM instance_tags WHERE instance_id = $1 AND key = $2`
 	_, err := r.db.Exec(query, instanceID, key)
@@ -289,15 +288,14 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 	instance, err := r.FindByID(instanceID)
 
 	if err != nil {
-		return nil, fmt.Errorf("GetInstanceInfo: %w, forinstance %s", err,instanceID)
+		return nil, fmt.Errorf("GetInstanceInfo: %w, forinstance %s", err, instanceID)
 	}
 	// Ownership check.
 	if instance.UserID != userID {
 		return nil, fmt.Errorf("GetInstanceInfo: instance %s not found for user %s", instanceID, userID)
 	}
 
-host, err := r.hostRepo.GetByID(instance.HostID)
-
+	host, err := r.hostRepo.GetByID(instance.HostID)
 
 	agentHost := host.IP
 	if agentHost == "" {
@@ -305,13 +303,12 @@ host, err := r.hostRepo.GetByID(instance.HostID)
 	}
 	log.Printf("-------->>IN %s: ", instance.PublicSSHKey)
 
-
 	return &domain.InstanceInfo{
 		// VMHost:  fmt.Sprintf("http://%s:%d", agentHost, agentPort),
-		VMHost:host.ID,
+		VMHost: host.ID,
 		// AgentURL:  r.cfg.AgentUrl,
-		AgentURL:  fmt.Sprintf("ws://%s:%d", agentHost, agentPort),
-		
+		AgentURL: fmt.Sprintf("ws://%s:%d", agentHost, agentPort),
+
 		VMIP:      instance.IP,
 		VMSSHPort: 22,
 		SSHUser:   host.SSHUser,

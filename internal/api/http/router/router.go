@@ -62,13 +62,6 @@ func SetupRoutes(r *gin.Engine,
 
 
 
-	// Docs
-	docs := compute.Group("/docs")
-	{
-		docs.GET("", docsHandler.GetManifest)
-		docs.GET("/:slug", docsHandler.GetDoc)
-	}
-
 
 
 
@@ -79,6 +72,13 @@ func SetupRoutes(r *gin.Engine,
 		health.GET("",hostHandler.HandleHealth)
 	}
 	api := r.Group("/api/v1/ec2")
+
+	// Docs
+	docs := api.Group("/docs")
+	{
+		docs.GET("", docsHandler.GetManifest)
+		docs.GET("/:slug", docsHandler.GetDoc)
+	}
 
 	api.Use(middleware.AuthMiddleware())
 	{

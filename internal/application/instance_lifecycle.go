@@ -243,6 +243,8 @@ func (s *InstanceService) persistAndLaunch(
 	// get all from the gateway_ports table whosoe status is available
 	//select the recent,
 
+	log.Printf("[NETWORK-] check log %v", publicGateway.ID)
+
 	gatewayServer, serr := s.hostRepo.GetByGatewayHost(ctx, publicGateway.ID)
 	if serr != nil {
 		log.Printf("[NETWORK] gateway reconcile failed for instance %v: %v", gatewayServer, serr)

@@ -43,7 +43,7 @@ func (r *hostRepository) GetByGatewayHost(ctx context.Context, gatewayID string)
 				return nil, fmt.Errorf("failed to scan host: %w", err)
 			}
 			hosts = append(hosts, h)
-			choosenHost =h 
+			choosenHost = h
 		}
 
 		return &choosenHost, nil
@@ -72,18 +72,18 @@ func (r *hostRepository) GetByGatewayHost(ctx context.Context, gatewayID string)
 
 }
 func (r *hostRepository) UpdatePortStatus(ctx context.Context, status, gatewayID, vmID string, port int) (int64, error) {
-	
-	query := fmt.Sprintf("UPDATE gateway_ports SET status='%s',vm_id='%s'  WHERE port=%d AND gateway_id='%s'", status, vmID,port,gatewayID)
+
+	query := fmt.Sprintf("UPDATE gateway_ports SET status='%s',vm_id='%s'  WHERE port=%d AND gateway_id='%s'", status, vmID, port, gatewayID)
 	fmt.Printf("\n\nnew query: %s \n\n", query)
 
 	results, err := r.db.Exec(query)
 	if err != nil {
+		fmt.Printf("failed to update port status: %w", err)
 
 		return 0, fmt.Errorf("failed to update port status: %w", err)
 
 	}
 	affectedRows, err := results.RowsAffected()
-
 
 	return affectedRows, nil
 
@@ -190,7 +190,7 @@ func (r *hostRepository) GetBestHostsByType(limit int, targetType string) ([]*do
 	query := `
 		SELECT id,hosttype, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at, available_templates
 		FROM hosts
-		WHERE status = 'active' AND last_heartbeat > $1 AND hosttype = $2
+		WHERE status = 'active' AND last_heartbeat > $1 AND hosttype = $2 or hosttype='hybrid'
 		ORDER BY ram_free DESC, cpu_used ASC, disk_free DESC
 		LIMIT $3
 	`
