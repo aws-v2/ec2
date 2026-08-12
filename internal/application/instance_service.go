@@ -157,6 +157,8 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	}
 
 	bestHost,gatewayHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
+	// beshHost== the host where the vms will be running 
+	// gatewayHost == the public vps that is available  
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)

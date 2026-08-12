@@ -11,8 +11,16 @@ type NetworkReconcileRequest struct {
 	Gateway string        `json:"gateway"`
 	Assets  []domain.Asset `json:"assets,omitempty"`
 	SessionID string `json:"session_id"`
+	ForwardingRule AddForwardingRuleRequest `json:"forwarding_rule"`
 
 }
+type AddForwardingRuleRequest struct {
+	ExternalPort int    `json:"external_port"`
+	TargetIP     string `json:"target_ip"`
+	TargetPort   int    `json:"target_port"`
+	Protocol     string `json:"protocol"` // tcp/udp
+}
+
 
 type AssetConfig struct {
 	Name   string `json:"name"`

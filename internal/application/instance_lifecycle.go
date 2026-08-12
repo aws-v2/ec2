@@ -148,9 +148,6 @@ func (s *InstanceService) persistAndLaunch(
 		return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
 	}
 
-
-
-
 	instance := &domain.Instance{
 		ID:            instanceID,
 		VMName:        vmName,
@@ -167,14 +164,10 @@ func (s *InstanceService) persistAndLaunch(
 		UserID:        userID,
 		VPCID:         vpcID,
 		SessionID:     req.SessionID,
-		StorageSize: req.Specs.Storage,
+		StorageSize:   req.Specs.Storage,
 	}
 
-
-	fmt.Printf("\n1:the instance specs are as follows cpu: %v ram:%v storage:%v  \n", req.Specs.CPU, req.Specs.RAM, instance.StorageSize )
- 
-
-	
+	fmt.Printf("\n1:the instance specs are as follows cpu: %v ram:%v storage:%v  \n", req.Specs.CPU, req.Specs.RAM, instance.StorageSize)
 
 	if err := s.repo.Create(instance); err != nil {
 		if s.vpcService != nil && privateIP != "" {
@@ -185,7 +178,16 @@ func (s *InstanceService) persistAndLaunch(
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoCreateRecord, req.ResourceID)
 		return nil, fmt.Errorf("failed to save instance: %w", err)
 	}
+	log.Printf("[NETWORK-] check log %v", publicGateway.ID)
 
+	gatewayServer, serr := s.hostRepo.GetByGatewayHost(ctx, publicGateway.ID)
+	if serr != nil {
+		log.Printf("[NETWORK] gateway reconcile failed for instance %v: %v", gatewayServer, serr)
+
+		return nil, fmt.Errorf("Failed to get the gateway server: %w", serr)
+
+	}
+	log.Printf("[NETWORK] gateway reconcile values %v", gatewayServer)
 	// Extract assets from manifest parameters
 	assets := []domain.Asset{}
 	if req.Assets != nil {
@@ -193,10 +195,28 @@ func (s *InstanceService) persistAndLaunch(
 
 	}
 
+		var forwardingPort int
+	switch req.Profile {
+	case "rds":
+		forwardingPort = 5432
+	case "gamelift":
+		forwardingPort = 9030
+	case "ai-worker":
+		forwardingPort = 9030
+	default:
+		forwardingPort = 22
+	}
+
 	// Reconcile network + asset download on agent.
 	// This is SYNCHRONOUS — we must not launch the VM until the agent
 	// confirms assets are on disk. ReconcileNetwork now returns a real
 	// error when assets are present and the call fails.
+	var	reqForward = host.AddForwardingRuleRequest{
+		ExternalPort: gatewayServer.Port,
+		TargetIP:     instance.IP,
+		TargetPort:   forwardingPort,
+		Protocol:     "tcp",
+	}
 	if _, err := s.ReconcileNetwork(req.Profile, bestHost.IP, host.NetworkReconcileRequest{
 		VPCID: vpcID,
 		Bridge: host.BridgeConfig{
@@ -209,6 +229,8 @@ func (s *InstanceService) persistAndLaunch(
 		Assets:    assets,
 		SessionID: req.SessionID,
 		VMID:      instanceID,
+		// ExternalPort:publicGateway,
+		ForwardingRule: reqForward,
 	}); err != nil {
 		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoReConcile, req.ResourceID)
@@ -227,38 +249,20 @@ func (s *InstanceService) persistAndLaunch(
 		assetPath,
 	)
 
-	var forwardingPort int
-	switch req.Profile {
-	case "rds":
-		forwardingPort = 5432
-	case "gamelift":
-		forwardingPort = 9030
-	case "ai-worker":
-		forwardingPort = 9030
-	default:
-		forwardingPort = 22
-	}
+
 
 	// get an external port withthis logic,
 	// get all from the gateway_ports table whosoe status is available
 	//select the recent,
 
-	log.Printf("[NETWORK-] check log %v", publicGateway.ID)
 
-	gatewayServer, serr := s.hostRepo.GetByGatewayHost(ctx, publicGateway.ID)
-	if serr != nil {
-		log.Printf("[NETWORK] gateway reconcile failed for instance %v: %v", gatewayServer, serr)
 
-		return nil, fmt.Errorf("Failed to get the gateway server: %w", serr)
-
-	}
-	log.Printf("[NETWORK] gateway reconcile values %v", gatewayServer)
-
-	if strings.ToLower(s.ENV) != "dev" {
+	// if strings.ToLower(s.ENV) != "dev" {
 
 		if _, err := s.AddForwardingRule(
 			publicGateway.IP,
-			bestHost.IP,
+			bestHost.IP, //vm_ip
+			
 			gatewayServer.Port,
 			forwardingPort,
 			req.Profile,
@@ -269,7 +273,7 @@ func (s *InstanceService) persistAndLaunch(
 			s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
 			return nil, fmt.Errorf("network add a forwading rul failed: %w", err)
 		}
-	}
+	// }
 
 	log.Printf("\n\nBefore updating the port status %v \n\n", gatewayServer)
 
@@ -287,12 +291,12 @@ func (s *InstanceService) persistAndLaunch(
 	return instance, nil
 }
 
-type AddForwardingRuleRequest struct {
-	ExternalPort int    `json:"external_port"`
-	TargetIP     string `json:"target_ip"`
-	TargetPort   int    `json:"target_port"`
-	Protocol     string `json:"protocol"` // tcp/udp
-}
+// type AddForwardingRuleRequest struct {
+// 	ExternalPort int    `json:"external_port"`
+// 	TargetIP     string `json:"target_ip"`
+// 	TargetPort   int    `json:"target_port"`
+// 	Protocol     string `json:"protocol"` // tcp/udp
+// }
 
 type RemoveForwardingRuleRequest struct {
 	ExternalPort int    `json:"external_port"`
@@ -361,19 +365,25 @@ func (s *InstanceService) RemoveForwardingRule(
 
 func (s *InstanceService) AddForwardingRule(
 	gatewayIP string,
-	targetIP string,
+	targetIP string, //esstt host ip
 	targetPort int,
 	externalPort int,
 	profile, SessionID string,
 
 ) (bool, error) {
 
-	req := AddForwardingRuleRequest{
+	req := host.AddForwardingRuleRequest{
 		ExternalPort: externalPort, // gateway port
 		TargetIP:     targetIP,     //vmport
 		TargetPort:   targetPort,
 		Protocol:     "tcp",
 	}
+	// 	req := AddForwardingRuleRequest{
+	// 	ExternalPort: externalPort, // gateway port
+	// 	TargetIP:     vmIP,     //vmport
+	// 	TargetPort:   3333,
+	// 	Protocol:     "tcp",
+	// }
 
 	url := fmt.Sprintf("http://%s:9030/gateway/add", gatewayIP)
 
@@ -474,7 +484,6 @@ func (s *InstanceService) buildOverlay(
 	if diskSizeGB <= 0 {
 		size = "20G"
 	}
-
 
 	fmt.Printf("Thedisk size that reaches this function is  %d", diskSizeGB)
 
@@ -590,7 +599,7 @@ func (s *InstanceService) createVMAsync(
 	// ---------------------------------------------------
 	// STEP 1 — BUILD OVERLAY
 	// ---------------------------------------------------
-	fmt.Printf("\n2:the instance specs are as follows cpu: %v ram:%v storage:%v  \n", instance.CPU, instance.RAM, instance.StorageSize )
+	fmt.Printf("\n2:the instance specs are as follows cpu: %v ram:%v storage:%v  \n", instance.CPU, instance.RAM, instance.StorageSize)
 
 	log.Printf("[VM] building overlay %s", absOverlay)
 
@@ -718,8 +727,7 @@ func (s *InstanceService) createVMAsync(
 		log.Printf("[VM] assets injected successfully")
 	}
 
-fmt.Printf("\n 1: the cpu: %d the ram:%d \n",req.Specs.CPU, req.Specs.RAM)
-
+	fmt.Printf("\n 1: the cpu: %d the ram:%d \n", req.Specs.CPU, req.Specs.RAM)
 
 	// ---------------------------------------------------
 	// STEP 5 — START VM

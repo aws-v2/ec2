@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"ec2-api/config"
@@ -301,7 +300,6 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 	if agentHost == "" {
 		agentHost = instance.IP // fall back to private IP
 	}
-	log.Printf("-------->>IN %s: ", instance.PublicSSHKey)
 
 	return &domain.InstanceInfo{
 		// VMHost:  fmt.Sprintf("http://%s:%d", agentHost, agentPort),

@@ -412,15 +412,15 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 func getHostPriorityList(profile string) []string {
 	switch profile {
 	case "ai-worker":
-		return []string{"workers", "grey", "games", "rds", "s3","gateway"}
+		return []string{"workers", "grey", "games", "rds", "s3", "gateway"}
 	case "gamelift":
-		return []string{"games", "grey", "workers", "rds", "s3","gateway"}
+		return []string{"games", "grey", "workers", "rds", "s3", "gateway"}
 	case "rds":
-		return []string{"rds", "grey", "workers", "games", "s3","gateway"}
+		return []string{"rds", "grey", "workers", "games", "s3", "gateway"}
 	default:
-		return []string{"grey", "workers", "games", "rds", "s3","gateway"}
-		case "lambda":
-		return []string{"lambda", "grey", "workers", "games", "s3","gateway"}
+		return []string{"grey", "workers", "games", "rds", "s3", "gateway"}
+	case "lambda":
+		return []string{"lambda", "grey", "workers", "games", "s3", "gateway"}
 	}
 }
 
@@ -428,26 +428,25 @@ func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*d
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-
 	priorityList := getHostPriorityList(profile)
 	var bestGatewayHost *domain.Host
 
-	var gatewayHostType ="gateway"
+	var gatewayHostType = "gateway"
 
-if strings.ToLower(s.Cfg.ENV) =="dev" {
-	gatewayHostType = "grey"
-}
-
+	if strings.ToLower(s.Cfg.ENV) == "dev" {
+		gatewayHostType = "grey"
+	}
 
 	gatewayHosts, err := s.repo.GetBestHostsByType(10, gatewayHostType)
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("the priority list host id %v forprofile %v \n", priorityList, gatewayHosts)
 
-	if len(gatewayHosts) > 0{
+	if len(gatewayHosts) > 0 {
 		s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(gatewayHosts)
+
 		bestGatewayHost = gatewayHosts[s.lastSelectionOffset]
+		fmt.Printf("the choosen gateway host %v \n", bestGatewayHost)
 
 		if preferredHostID != "" {
 			host, err := s.repo.GetByID(preferredHostID)
@@ -455,8 +454,8 @@ if strings.ToLower(s.Cfg.ENV) =="dev" {
 				for _, t := range priorityList {
 					// TODO: this was puthere for this scenario,
 					// imagine youahve the host type of gateway seelcted,
-					// but since you are in dev and you cant reach it 
-					if t=="gateway" && s.Cfg.ENV !="dev"{
+					// but since you are in dev and you cant reach it
+					if t == "gateway" && s.Cfg.ENV != "dev" {
 						continue
 					}
 					if host.HostType == t {
@@ -482,10 +481,9 @@ if strings.ToLower(s.Cfg.ENV) =="dev" {
 
 	}
 
-
-	if  s.Cfg.ENV=="dev" && len(gatewayHosts)==0{
+	if s.Cfg.ENV == "dev" && len(gatewayHosts) == 0 {
 		bestGatewayHost = &host.Host{
-			ID:"18:60:24:4f:4a:13:root:6d617274696e",
+			ID: "18:60:24:4f:4a:13:root:6d617274696e",
 		}
 
 		if preferredHostID != "" {
@@ -494,8 +492,8 @@ if strings.ToLower(s.Cfg.ENV) =="dev" {
 				for _, t := range priorityList {
 					// TODO: this was puthere for this scenario,
 					// imagine youahve the host type of gateway seelcted,
-					// but since you are in dev and you cant reach it 
-					if t=="gateway" && s.Cfg.ENV !="dev"{
+					// but since you are in dev and you cant reach it
+					if t == "gateway" && s.Cfg.ENV != "dev" {
 						continue
 					}
 					if host.HostType == t {
