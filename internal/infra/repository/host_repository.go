@@ -215,6 +215,10 @@ func (r *hostRepository) GetBestHostsByType(limit int, targetType string) ([]*do
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
+		fmt.Printf("the choosen gateway rew host %v \n",h.ID )
+		fmt.Printf("the choosen hosts type %v \n",h.HostType )
+		fmt.Printf("Target type %v \n",targetType )
+
 		hosts = append(hosts, h)
 	}
 	return hosts, nil

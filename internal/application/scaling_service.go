@@ -140,6 +140,7 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		Profile:    event.Profile,
 		SessionID:  event.SessionID,
 		Assets:     event.Assets,
+		EnvParams: event.EnvParams,
 	}
 
 	// Defaults
@@ -166,6 +167,34 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 
 	log.Printf("[PROVISIONER] invoking CreateInstance userID=%s", userID)
 
+
+
+
+	if req.Profile == "lambda" || req.Profile == "sagemaker" {
+		warmInstance, err := s.repo.FindAndMarkWarmInstanceInUse(ctx, req.Profile)
+		if err == nil && warmInstance != nil {
+			log.Printf("[PROVISIONER] Reusing warm instance %s (%s) for profile %s", warmInstance.ID, warmInstance.IP, req.Profile)
+
+			gatewayIP := warmInstance.GatewayIP
+			if gatewayIP == "" && warmInstance.HostID != "" {
+				if host, err := s.hostRepo.GetByID(warmInstance.HostID); err == nil && host != nil {
+					gatewayIP = host.IP
+				}
+			}
+
+			return domain.EC2Response{
+				GatewayIP:   gatewayIP,
+				GatewayPort: warmInstance.GatewayPort,
+				VMiP:        warmInstance.IP,
+			}, nil
+		}
+		log.Printf("[PROVISIONER] No warm instance available for profile %s, creating new instance", req.Profile)
+	}
+
+
+
+
+
 	// Call core logic
 	instance, err := s.CreateInstance(ctx, req, userID)
 	if err != nil {
@@ -173,11 +202,12 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 		return domain.EC2Response{}, fmt.Errorf("failed to create instance for profile %s: %w", event.Profile, err)
 	}
 
-	log.Printf("[PROVISIONER] SUCCESS instanceID=%s profile=%s", instance.ID, event.Profile)
+	log.Printf("\n[PROVISIONE6R] SUCCESS instanceID=%s profile=%s\n", instance.IP, event.Profile)
 
 	return domain.EC2Response{
 		GatewayIP: instance.GatewayIP,
 		GatewayPort: instance.GatewayPort,
+		VMiP: instance.IP,
 	},nil
 }
 

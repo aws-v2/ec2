@@ -44,14 +44,13 @@ var imageMap = map[string]string{
 	// due tochangin this  baseImageName, ok := imageMap[req.Profile]  in the prepareInstanceResources from
 	// baseImageName, ok := imageMap[req.Image]
 
-	"rds":       "rds-template.qcow2",
+	"lambda":    "lambda-template.qcow2",
+	"rds":       "rds-v4.qcow2",
 	"vanilla":   "rds-template.qcow2",
 	"ai-worker": "ubuntu-22.04.qcow2",
 	"games":     "ubuntu-22.04.qcow2",
 	"gamelift":  "ubuntu-22.04.qcow2",
 	"worker":    "rds-template.qcow2",
-	"lambda":    "rds-template.qcow2",
-	"s3":        "rds-template.qcow2",
 }
 
 // prepareInstanceResources validates the requested image, ensures the base disk
@@ -84,13 +83,10 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 		return "", "", "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
 	}
 
-	instanceID = fmt.Sprintf("i-%s", uuid.New().String()[:8])
-	if req.Name == "" {
-		req.Name = instanceID
-
-	}
-	vmName = fmt.Sprintf("vm-%s", req.Name)
-
+	instanceID = fmt.Sprintf(uuid.New().String()[:8])
+ 
+	vmName = fmt.Sprintf("%s-vm-%s",req.Profile, instanceID)
+	instanceID= fmt.Sprintf("%s-i-%s",req.Profile, vmName) 
 	newDiskPath = filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
 	// ai-worker VMs do not need an IAM token — the IAM service may not even
@@ -158,13 +154,15 @@ func (s *InstanceService) persistAndLaunch(
 		PrivateSshKey: keyPair.PrivateKeyPEM,
 		Status:        domain.StatusPending,
 		IP:            privateIP,
-		PublicIP:      "",
+		PublicIP:      publicGateway.IP,
+		PublicPort:      publicGateway.IP,
 		ProxmoxID:     0,
 		CreatedAt:     time.Now(),
 		UserID:        userID,
 		VPCID:         vpcID,
 		SessionID:     req.SessionID,
 		StorageSize:   req.Specs.Storage,
+		ImageProfile: req.Profile,
 	}
 
 	fmt.Printf("\n1:the instance specs are as follows cpu: %v ram:%v storage:%v  \n", req.Specs.CPU, req.Specs.RAM, instance.StorageSize)
@@ -195,7 +193,8 @@ func (s *InstanceService) persistAndLaunch(
 
 	}
 
-		var forwardingPort int
+	var forwardingPort int
+	forwardingPort =req.ForwardingPort
 	switch req.Profile {
 	case "rds":
 		forwardingPort = 5432
@@ -203,6 +202,8 @@ func (s *InstanceService) persistAndLaunch(
 		forwardingPort = 9030
 	case "ai-worker":
 		forwardingPort = 9030
+	case "lambda":
+		forwardingPort = 9087
 	default:
 		forwardingPort = 22
 	}
@@ -211,7 +212,7 @@ func (s *InstanceService) persistAndLaunch(
 	// This is SYNCHRONOUS — we must not launch the VM until the agent
 	// confirms assets are on disk. ReconcileNetwork now returns a real
 	// error when assets are present and the call fails.
-	var	reqForward = host.AddForwardingRuleRequest{
+	var reqForward = host.AddForwardingRuleRequest{
 		ExternalPort: gatewayServer.Port,
 		TargetIP:     instance.IP,
 		TargetPort:   forwardingPort,
@@ -249,41 +250,37 @@ func (s *InstanceService) persistAndLaunch(
 		assetPath,
 	)
 
-
-
 	// get an external port withthis logic,
 	// get all from the gateway_ports table whosoe status is available
 	//select the recent,
 
-
-
 	// if strings.ToLower(s.ENV) != "dev" {
 
-		if _, err := s.AddForwardingRule(
-			publicGateway.IP,
-			bestHost.IP, //vm_ip
-			
-			gatewayServer.Port,
-			forwardingPort,
-			req.Profile,
-			req.SessionID,
-		); err != nil {
-			log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
-			go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoReConcile, req.ResourceID)
-			s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
-			return nil, fmt.Errorf("network add a forwading rul failed: %w", err)
-		}
+	if _, err := s.AddForwardingRule(
+		publicGateway.IP,
+		bestHost.IP, //vm_ip
+
+		gatewayServer.Port,
+		forwardingPort,
+		req.Profile,
+		req.SessionID,
+	); err != nil {
+		log.Printf("[NETWORK] reconcile failed for instance %s: %v", instanceID, err)
+		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.RepoReConcile, req.ResourceID)
+		s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+		return nil, fmt.Errorf("network add a forwading rul failed: %w", err)
+	}
 	// }
 
 	log.Printf("\n\nBefore updating the port status %v \n\n", gatewayServer)
 
 	updatedPortsCount, err := s.hostRepo.UpdatePortStatus(ctx, "TAKEN", gatewayServer.GatewayID, instanceID, gatewayServer.Port)
 	if updatedPortsCount <= 0 {
-		return nil, fmt.Errorf("could not update the port status of the gateway%w", err)
+		return nil, fmt.Errorf("could not update the port status of the gateway%v", err)
 
 	}
 	log.Printf("Port status updated")
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets, bestHost)
 
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
 	instance.GatewayIP = publicGateway.IP
@@ -373,9 +370,9 @@ func (s *InstanceService) AddForwardingRule(
 ) (bool, error) {
 
 	req := host.AddForwardingRuleRequest{
-		ExternalPort: externalPort, // gateway port
+		ExternalPort: targetPort, // gateway port
 		TargetIP:     targetIP,     //vmport
-		TargetPort:   targetPort,
+		TargetPort:   externalPort,
 		Protocol:     "tcp",
 	}
 	// 	req := AddForwardingRuleRequest{
@@ -569,6 +566,7 @@ func (s *InstanceService) createVMAsync(
 	instanceToken string,
 	keyPair *SSHKeyPair,
 	assets []domain.Asset,
+	bestHost *host.Host,
 ) {
 	// ---------------------------------------------------
 	// Resolve host
@@ -633,7 +631,10 @@ func (s *InstanceService) createVMAsync(
 
 	// TODO: remove this
 	// in the near future
-	params := make(map[string]string)
+	// params := make(map[string]string)
+	params := req.EnvParams
+
+	
 	isoPath, cleanupFn, err := s.libvirtClient.CreateCloudInitISO(
 		instance.VMName,
 		combinedKeys,
@@ -655,11 +656,14 @@ func (s *InstanceService) createVMAsync(
 	defer cleanupFn()
 
 	log.Printf("[VM] cloud-init iso created %s", isoPath)
+	log.Printf("[VM] cloud-init iso created remotehost ip %s remote user %s len of pk %d", remoteHostIP, remoteHostUser,len(s.ec2PrivateKey))
 
 	// ---------------------------------------------------
 	// STEP 3 — TRANSFER OVERLAY
 	// ---------------------------------------------------
+		// remoteHostIP="192.168.122.1"
 
+	// s.ec2PrivateKey = bestHost.SSHPrivateKey
 	err = s.transferOverlayToHost(
 		remoteHostIP,
 		remoteHostUser,
@@ -795,3 +799,35 @@ func (s *InstanceService) createVMAsync(
 	}
 
 }
+
+
+
+
+
+
+/*
+
+i ahve this situation, 
+i am using the same machine as my gateway server and the 
+provisioning host, 
+i ahve it register itself in the dabae with hosttype gateway and also 
+so i ahve this 
+
+ec2_db1=# select id, hostname,hosttype from hosts;
+                     id                      |              hostname               | hosttype 
+---------------------------------------------+-------------------------------------+----------
+ gateway-18:60:24:4f:4a:13:root:6d617274696e | 18:60:24:4f:4a:13:root:6d617274696e | gateway
+ grey-18:60:24:4f:4a:13:root:6d617274696e    | 18:60:24:4f:4a:13:root:6d617274696e | grey
+ 18:60:24:4f:4a:13:root:6d617274696e         | 18:60:24:4f:4a:13:root:6d617274696e | hybrid
+
+
+ now issue comes in in the forwarding rule 
+ when creating an rds vm(the ip address of the vm is 10.0.5.121) we pick the randomport 40093,which means
+ whatever traffic we get on our machine on port port forward it to the vm,
+ these ae the two forwarding rules tha
+
+
+
+
+
+*/

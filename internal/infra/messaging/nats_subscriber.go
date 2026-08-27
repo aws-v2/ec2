@@ -84,11 +84,11 @@ func (s *NATSSubscriber) Start() error {
 				log.Printf("[NATS-SUB] [ERROR] VM provision failed for profile %s: %v", event.Profile, err)
 				return
 			}
-
+			log.Printf("this si the final vent %v", ec2Payload)
 			data, _ := json.Marshal(ec2Payload)
 
 			s.nc.Publish(msg.Reply, data)
-	log.Printf("[NATS-SUB] Successfully replied to %s and %s", scaleSubject, provisionSubject)
+			log.Printf("[NATS-SUB] Successfully replied to %s and %s", scaleSubject, provisionSubject)
 
 		}()
 	})

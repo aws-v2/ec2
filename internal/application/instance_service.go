@@ -34,15 +34,15 @@ type InstanceService struct {
 	hostService   *HostService
 	ec2PrivateKey string
 	//  agentClient *vpcpkg.AgentClient
-	httpClient       *http.Client
-	agentPort        int
+	httpClient *http.Client
+	agentPort  int
 	// TODO: i should probably remvoethis ,
 	// it was added here to facilitate working with this line
 	// if _, err := s.AddForwardingRule(
-// in the n the intance_lifecycle.go, ie. if the ENV is dev we skip
-// calling the function it requires an intenet connection
-// Aki pesa wewe :)
-	ENV string 
+	// in the n the intance_lifecycle.go, ie. if the ENV is dev we skip
+	// calling the function it requires an intenet connection
+	// Aki pesa wewe :)
+	ENV              string
 	profileBaseImage map[string]string
 }
 
@@ -80,7 +80,7 @@ func NewInstanceService(
 		},
 		agentPort:        agentPort,
 		profileBaseImage: profileBaseImage,
-		ENV: ENV,
+		ENV:              ENV,
 	}
 }
 
@@ -124,6 +124,7 @@ func resolveImage(profile string, profileBaseImage map[string]string) string {
 		return fmt.Sprintf("%s", imagePrefix)
 	}
 }
+
 // 8.4.4.4.12
 type PrepareInstanceResources struct {
 	baseImagePath string
@@ -134,6 +135,14 @@ type PrepareInstanceResources struct {
 }
 
 // CreateInstance — unchanged signature, Step 2 now calls vpcService directly.
+func (s *InstanceService) DownloadPem(ctx context.Context, instanceID string) (string, error) {
+	instance, err := s.repo.FindByID(instanceID)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get download pem forisntance  %s: %w", instanceID, err)
+	}
+return  instance.PrivateSshKey,nil
+}
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
 	log.Printf("[SCHEDULER][] %d profile", req.Specs.CPU)
@@ -147,6 +156,8 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		return nil, err
 	}
 
+	fmt.Printf("The choosen base-image----->: %s",baseImagePath)
+
 	// Step 2: VPC Placement & Host Selection
 	// ─── NEW PLACEMENT LOGIC ──────────────────────────────────────
 
@@ -156,9 +167,9 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		return nil, fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
 	}
 
-	bestHost,gatewayHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
-	// beshHost== the host where the vms will be running 
-	// gatewayHost == the public vps that is available  
+	bestHost, gatewayHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
+	// beshHost== the host where the vms will be running
+	// gatewayHost == the public vps that is available
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
@@ -192,11 +203,12 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	}
 
 	log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s", bestHost.Hostname, hostID, instanceID)
+	log.Printf("[SCHEDULER] [OK] Stelected host hostname: %s hostip (%s) for hosttype %s", gatewayHost.Hostname, gatewayHost.IP, gatewayHost.HostType)
 
 	// --------------
 
 	// Step 3: Persist the record and launch VM creation asynchronously
-	instance, err := s.persistAndLaunch(ctx,req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost,gatewayHost)
+	instance, err := s.persistAndLaunch(ctx, req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost, gatewayHost)
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
 		return nil, err
@@ -444,6 +456,7 @@ func (s *InstanceService) AssignVPC(
 	userID,
 	instanceID,
 	newVPCID string,
+	params map[string]any,
 ) error {
 
 	// ---------------------------------------------------
@@ -565,7 +578,7 @@ func (s *InstanceService) AssignVPC(
 		gateway,
 		"",
 		"default",
-		map[string]string{},
+		params ,
 	)
 
 	if err != nil {

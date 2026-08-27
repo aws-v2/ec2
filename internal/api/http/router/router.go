@@ -9,19 +9,18 @@ import (
 
 // api/routes.go
 
-func SetupRoutes(r *gin.Engine, 
-	instanceHandler *transport.InstanceHandler, 
-	volumeHandler *transport.VolumeHandler, 
-	snapshotHandler *transport.SnapshotHandler, 
-	sshKeyHandler *transport.SSHKeyHandler, 
-	networkingHandler *transport.NetworkingHandler, 
-	templateHandler *transport.TemplateHandler, 
+func SetupRoutes(r *gin.Engine,
+	instanceHandler *transport.InstanceHandler,
+	volumeHandler *transport.VolumeHandler,
+	snapshotHandler *transport.SnapshotHandler,
+	sshKeyHandler *transport.SSHKeyHandler,
+	networkingHandler *transport.NetworkingHandler,
+	templateHandler *transport.TemplateHandler,
 	terminalHandler *transport.TerminalHandler,
 	fleetHandler *transport.FleetHandler,
 	docsHandler *transport.DocsHandler,
 	hostHandler *transport.HostHandler) {
-	
- 
+
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
 	fleet.Use(middleware.AuthMiddleware())
@@ -32,18 +31,6 @@ func SetupRoutes(r *gin.Engine,
 
 	}
 
-
-
-
- 
-
-
-
-
-	
-
-
-
 	// Compute API
 	compute := r.Group("/api/v1/compute")
 	compute.Use(middleware.AuthMiddleware())
@@ -51,7 +38,6 @@ func SetupRoutes(r *gin.Engine,
 	{
 		compute.POST("/hosts/heartbeat", hostHandler.HandleHeartbeat)
 
-	
 		compute.PUT("/instances/:id/vpc", instanceHandler.AssignVPC)
 		compute.GET("/host/get-host-templates", hostHandler.GetHostTemplates)
 		compute.POST("/host/add-template", hostHandler.AddTemplate)
@@ -60,16 +46,9 @@ func SetupRoutes(r *gin.Engine,
 		compute.GET("/control-plane-host", hostHandler.CPHost)
 	}
 
-
-
-
-
-
-
-
 	health := r.Group("/api/v1/ec2/health")
 	{
-		health.GET("",hostHandler.HandleHealth)
+		health.GET("", hostHandler.HandleHealth)
 	}
 	api := r.Group("/api/v1/ec2")
 
@@ -84,6 +63,7 @@ func SetupRoutes(r *gin.Engine,
 	{
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
+		api.GET("/instances/:id/download/key", instanceHandler.DownloadPem)
 		api.GET("/instances", instanceHandler.ListInstances)
 		api.GET("/instances/:id", instanceHandler.GetInstance)
 		api.GET("/instances/:id/status-checks", instanceHandler.GetStatusChecks)
@@ -94,7 +74,6 @@ func SetupRoutes(r *gin.Engine,
 		api.DELETE("/instances/:id", instanceHandler.DeleteInstance)
 		api.PUT("/instances/:id/vpc", networkingHandler.AssignVPC)
 		api.GET("/instances/:id/terminal/:session", terminalHandler.HandleTerminal)
-
 
 		// Instance control
 		api.POST("/instances/:id/start", instanceHandler.StartInstance)
@@ -129,7 +108,7 @@ func SetupRoutes(r *gin.Engine,
 		api.POST("/ip/allocate", networkingHandler.AllocateIP)
 		api.POST("/ip/:id/release", networkingHandler.ReleaseIP)
 		api.GET("/ip", networkingHandler.ListIPs)
-		
+
 		vpcs := api.Group("/vpcs")
 		{
 			vpcs.GET("", networkingHandler.ListVPCs)
@@ -151,26 +130,20 @@ func SetupRoutes(r *gin.Engine,
 		api.DELETE("/instances/:id/security-groups/:sgId", networkingHandler.RemoveFromInstance)
 		api.GET("/instances/:id/security-groups", networkingHandler.ListForInstance)
 
-
-		
-		api.POST("/volumes", volumeHandler.CreateVolume)            // Create new block volume
-		api.POST("/volumes/:id/reserve", volumeHandler.ReserveVolume)    // Reserve volume record
-		api.GET("/volumes", volumeHandler.ListVolumes)              // List all volumes
-		api.GET("/volumes/:id", volumeHandler.GetVolume)            // Get volume details
-		api.POST("/volumes/:id/attach", volumeHandler.AttachVolume) // Attach volume to instance
-		api.POST("/volumes/:id/expand", volumeHandler.ExpandVolume) // Expand volume size
-		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume) // Detach volume from instance
-		api.POST("/volumes/:id/snapshots", volumeHandler.CreateSnapshot) // Create volume snapshot
-		api.GET("/volumes/:id/snapshots", volumeHandler.ListSnapshots)   // List volume snapshots
+		api.POST("/volumes", volumeHandler.CreateVolume)                        // Create new block volume
+		api.POST("/volumes/:id/reserve", volumeHandler.ReserveVolume)           // Reserve volume record
+		api.GET("/volumes", volumeHandler.ListVolumes)                          // List all volumes
+		api.GET("/volumes/:id", volumeHandler.GetVolume)                        // Get volume details
+		api.POST("/volumes/:id/attach", volumeHandler.AttachVolume)             // Attach volume to instance
+		api.POST("/volumes/:id/expand", volumeHandler.ExpandVolume)             // Expand volume size
+		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume)             // Detach volume from instance
+		api.POST("/volumes/:id/snapshots", volumeHandler.CreateSnapshot)        // Create volume snapshot
+		api.GET("/volumes/:id/snapshots", volumeHandler.ListSnapshots)          // List volume snapshots
 		api.DELETE("/volumes/:id/snapshot", volumeHandler.DeleteVolumeSnapshot) // Delete volume snapshot
-		api.GET("/volumes/:id/tags", volumeHandler.ListTags)             // List volume tags
-		api.POST("/volumes/:id/tags", volumeHandler.AddTag)               // Add/Update volume tag
-		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)    // Delete volume tag
-		api.DELETE("/volumes/:id", volumeHandler.DeleteVolume)      // Delete volume
+		api.GET("/volumes/:id/tags", volumeHandler.ListTags)                    // List volume tags
+		api.POST("/volumes/:id/tags", volumeHandler.AddTag)                     // Add/Update volume tag
+		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)           // Delete volume tag
+		api.DELETE("/volumes/:id", volumeHandler.DeleteVolume)                  // Delete volume
 	}
 
-
-
-
- 
 }

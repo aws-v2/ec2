@@ -21,7 +21,7 @@ type Config struct {
 
 	// Libvirt
 	Libvirt LibvirtConfig
-
+SystemUserId string
 	// Profiles
 	Profile string
 
@@ -103,6 +103,7 @@ func Load() (*Config, error) {
 	profileBaseImage["rds"] = "rds-template"
 
 	cfg := &Config{
+		SystemUserId:"00000000-0000-0000-0000-000000000000",
 		AgentUrlParts: getEnv("API_GATEWAY", "http://localhost:8080"),
 		AgentPort:     getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:    LoadKeyPair()[0],

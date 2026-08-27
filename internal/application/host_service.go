@@ -375,7 +375,7 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 		Status:             "active",
 		LastHeartbeat:      time.Now(),
 	}
-
+fmt.Printf("=============oio")
 	if err := s.repo.Update(host); err != nil {
 		log.Printf("[host-service] Failed to database update host %s: %v", req.HostID, err)
 		return nil, err
@@ -412,15 +412,17 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 func getHostPriorityList(profile string) []string {
 	switch profile {
 	case "ai-worker":
-		return []string{"workers", "grey", "games", "rds", "s3", "gateway"}
+		return []string{"workers", "grey", "games", "rds", "s3"}
 	case "gamelift":
-		return []string{"games", "grey", "workers", "rds", "s3", "gateway"}
+		return []string{"games", "grey", "workers", "rds", "s3"}
 	case "rds":
-		return []string{"rds", "grey", "workers", "games", "s3", "gateway"}
-	default:
-		return []string{"grey", "workers", "games", "rds", "s3", "gateway"}
+		return []string{"rds", "grey", "workers", "games", "s3"}
+
 	case "lambda":
-		return []string{"lambda", "grey", "workers", "games", "s3", "gateway"}
+		return []string{"lambda", "grey", "workers", "games", "s3"}
+	default:
+		return []string{"grey", "workers", "games", "rds", "s3", "lambda"}
+
 	}
 }
 
@@ -431,15 +433,25 @@ func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*d
 	priorityList := getHostPriorityList(profile)
 	var bestGatewayHost *domain.Host
 
+	fmt.Printf("\nthe choosen profile host %v \n", profile)
+
 	var gatewayHostType = "gateway"
 
-	if strings.ToLower(s.Cfg.ENV) == "dev" {
-		gatewayHostType = "grey"
-	}
+	// if strings.ToLower(s.Cfg.ENV) == "dev" {
+	// 	gatewayHostType = "grey"
+	// }
 
 	gatewayHosts, err := s.repo.GetBestHostsByType(10, gatewayHostType)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(gatewayHosts) > 0 {
+		log.Printf("[SCHEDULER] [*#*OK] Selected host %v for instance, with length %v", gatewayHosts[0], len(gatewayHosts))
+	} else {
+
+		log.Printf("[SCHEDULER] [##*OK] Selected host %v for instance", gatewayHosts)
+		return nil, nil, fmt.Errorf("No gateway hosts found")
+
 	}
 
 	if len(gatewayHosts) > 0 {

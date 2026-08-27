@@ -94,8 +94,6 @@ func (l *LibvirtClient) CreateAndStartVM(
 		}
 	}
 
-
-
 	// ---------------------------------------------------
 	// Build XML
 	// ---------------------------------------------------
@@ -211,7 +209,7 @@ func (l *LibvirtClient) CreateAndStartVM(
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]string) (string, func(), error) {
+func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]any) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
@@ -246,7 +244,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
 	}
 
-	writeFiles := `  - path: /opt/metrics-agent/config
+writeFiles := `  - path: /opt/metrics-agent/config
     permissions: '0600'
     content: |
       INSTANCE_ID="__INSTANCE_ID__"
@@ -290,15 +288,27 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
       Restart=always
       RestartSec=5
       [Install]
-      WantedBy=multi-user.target`
+      WantedBy=multi-user.target
+
+  - path: /etc/rds/config.env
+    permissions: '0600'
+    content: |
+      DB_USER=iopoi
+      DB_PASSWORD=loik
+      DB_NAME=klkoim`
 
 	runCmd := `  - systemctl daemon-reload
   - systemctl enable metrics-agent
-  - systemctl start metrics-agent`
+  - systemctl start metrics-agent
+  - /etc/rds/init-db.sh`
 
 	// ── Select Profile Template ──────────────────────────────────────────────
 	userName := "ubuntu"
+	if profile =="rds"{
+		profile="vanilla"
+	}
 	profileContent := ""
+
 	switch profile {
 	case "gamelift":
 		userName = "gls"
@@ -334,6 +344,9 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 
       cd "$(dirname "$BIN")"
       exec "./$( basename "$BIN")" --headless --env-port 8080
+
+
+
 
   - path: /etc/systemd/system/game-server.service
     content: |
@@ -461,10 +474,20 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
 	// RDS profile: install and start a lightweight PostgreSQL instance
 	case "rds":
-		userName = "postgres"
+		userName = "rds"
+
+		fmt.Printf("Choosen usernam %s",userName)
+
 		// Allow configuring DB name/user/password via params: DB_NAME, DB_USER, DB_PASSWORD
 		profileContent = `
-  - path: /opt/rds/init-db.sh
+  - path: /etc/rds/config.env
+	permissions: '0600'
+    content: |
+      DB_USER=mkarani
+      DB_PASSWORD=mkarani
+	  DB_NAME=tyui
+
+  - path: /opt/rds/init-dbs.sh
 	permissions: '0755'
 	content: |
 	  #!/bin/bash
@@ -481,10 +504,14 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 	  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
 	  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true
 `
+		for key, value := range params {
+			runCmd += fmt.Sprintf("\n - export %s=%q;", strings.ToUpper(key), fmt.Sprint(value))
+		}
 		// Install and start postgres in runcmd
 		runCmd += "\n  - apt-get update && apt-get install -y postgresql postgresql-contrib"
 		runCmd += "\n  - systemctl enable postgresql"
 		runCmd += "\n  - systemctl start postgresql"
+		runCmd += "\n  - /opt/rds/init-dbs.sh"
 		runCmd += "\n  - /opt/rds/init-db.sh"
 	case "lambda":
 		userName = "lambda"
@@ -497,7 +524,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 ssh_pwauth: true
 users:
   - name: %s
-    plain_text_passwd: "ubuntu!!"
+    plain_text_passwd: "ubuntu"
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
     shell: /bin/bash
     lock_passwd: false
@@ -511,6 +538,12 @@ runcmd:
 %s
 `, userName, keysYaml, writeFiles, profileContent, runCmd)
 
+
+
+	fmt.Printf("\n-----> this is the profile:%s\n", userData)
+
+
+
 	// ── Replace basic placeholders ───────────────────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)
 	userData = strings.ReplaceAll(userData, "__IAM_TOKEN__", instanceToken)
@@ -519,7 +552,7 @@ runcmd:
 	// ── Replace Dynamic Parameters ───────────────────────────────────────────
 	for key, value := range params {
 		placeholder := fmt.Sprintf("{{%s}}", strings.ToUpper(key))
-		userData = strings.ReplaceAll(userData, placeholder, value)
+		userData = strings.ReplaceAll(userData, placeholder, fmt.Sprint(value))
 	}
 
 	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
@@ -1258,4 +1291,3 @@ func (l *LibvirtClient) InjectAssets(
 
 	return l.runRemoteSSH(remoteHostIP, remoteHostUser, remoteHostKey, script)
 }
-	

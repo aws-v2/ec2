@@ -193,6 +193,8 @@ func main() {
 	terminalService := application.NewTerminalService(instanceRepo)
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 	docsService := application.NewDocsService("docs")
+	warmUpService := application.NewWarmupService(instanceRepo, hostRepo,*instanceService, cfg.SystemUserId)
+
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
@@ -258,6 +260,55 @@ func main() {
 			slog.Error("Failed to start server", "error", err)
 			os.Exit(1)
 		}
+	}()
+// when the server is started we get hosts from db which host is type lambda, 
+// we check if in this host has hot vms, 
+// if no vm is running on the hosts we create 1, ie send a provision request with host typelambda
+// so when we get a lmbda invocation request, 
+// instead of ceating a new vm we could take one fromthe pool,
+// since each lambda vm has the lambda runtime running on there with th efast api server, 
+// so a lambda invacation request sends
+/*
+
+we mark the vm as in_service
+
+ProvisionRequest{
+		profile lambda
+}
+
+then we chack the db for a lambda host vm we return the IP and port
+we then create the forwarding rule gateway->host->vm
+
+then we do gatewayip:port/invoke with request payload {function_id, function_s3_url}
+we download the function files from s3
+we return {code, message, Data}
+
+
+we remove any data that was downloaded and mark the vm as free
+
+
+
+http
+
+*/
+
+
+
+
+	go func() {
+		fmt.Println("=========7=7=7==7=7=7=7=7=7=7=7=============")
+
+		if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
+			slog.Error("Failed to get warm Lambda VMs", "error", err)
+		}
+	fmt.Println("=========7=7=744444444==7=7=7=7=w7=7=7=7=============")
+
+		if _, err := warmUpService.GetWarmSageMakerVMs(); err != nil {
+			slog.Error("Failed to get warm SageMaker VMs", "error", err)
+		}
+	fmt.Println("=========7=7=744444444==7=7=7=7=7=7=s7=7=============")
+
+	
 	}()
 
 	// Wait for interrupt signal to gracefully shutdown the server

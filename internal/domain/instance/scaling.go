@@ -10,10 +10,8 @@ type ScalingPolicyRequest struct {
 	TargetValue      float64 `json:"target_value" binding:"required"`
 	ScaleInCooldown  int     `json:"scale_in_cooldown"`
 	ScaleOutCooldown int     `json:"scale_out_cooldown"`
-	TargetID		string `json:"target_id"`
-	UserID        string               `json:"user_id"`
-
-
+	TargetID         string  `json:"target_id"`
+	UserID           string  `json:"user_id"`
 }
 
 type UpdateScalingPolicyRequest struct {
@@ -24,11 +22,11 @@ type UpdateScalingPolicyRequest struct {
 	ScaleInCooldown  *int     `json:"scale_in_cooldown,omitempty"`
 	ScaleOutCooldown *int     `json:"scale_out_cooldown,omitempty"`
 
-	TargetType       *string  `json:"target_type,omitempty"`
-	TargetID         *string  `json:"target_id,omitempty"`
-	MetricName       *string  `json:"metric_name,omitempty"`
-	ScaleDownValue   *float64 `json:"scale_down_value,omitempty"`
-	MaxInstances     *int     `json:"max_instances,omitempty"`
+	TargetType     *string  `json:"target_type,omitempty"`
+	TargetID       *string  `json:"target_id,omitempty"`
+	MetricName     *string  `json:"metric_name,omitempty"`
+	ScaleDownValue *float64 `json:"scale_down_value,omitempty"`
+	MaxInstances   *int     `json:"max_instances,omitempty"`
 }
 type ScalingPolicy struct {
 	ID               string    `json:"id"`
@@ -42,7 +40,7 @@ type ScalingPolicy struct {
 	ScaleOutCooldown int       `json:"scale_out_cooldown"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
-	TargetID		string `json:"target_id"`
+	TargetID         string    `json:"target_id"`
 }
 
 type ScaleAction string
@@ -62,5 +60,7 @@ type ScaleEvent struct {
 
 type EC2Response struct {
 	GatewayIP   string `json:"gateway_ip"`
-	GatewayPort int `json:"gateway_port"`
+	GatewayPort int    `json:"gateway_port"`
+	VMiP        string `json:"vm_ip"`
+	VMPORT      int    `json:"vm_port"`
 }

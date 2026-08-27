@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS gateway_ports(
     PRIMARY KEY (gateway_id,port)
 );
 
-
+ALTER TABLE instances ADD COLUMN IF NOT EXISTS public_port VARCHAR(50) NOT NULL DEFAULT '';
 
  
 -- INSERT INTO gateway_ports(gateway_id, port,status) VALUES('gateway-vps-1', generate_series(40000, 40100), 'AVAILABLE');

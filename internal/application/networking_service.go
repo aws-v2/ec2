@@ -218,7 +218,7 @@ func (s *NetworkingService) CreateVPC(ctx context.Context, tenantID, vpcName str
 	return s.publisher.CreateVPC(tenantID, vpcName, tenantID)
 }
 
-func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string) error {
+func (s *NetworkingService) AssignVPC(tenantID, instanceID, vpcID string, params map[string]any) error {
 	if s.publisher == nil {
 		return fmt.Errorf("NATS publisher not initialized")
 	}

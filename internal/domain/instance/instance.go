@@ -14,6 +14,7 @@ const (
 	StatusTerminated InstanceStatus = "terminated"
 	WaitForShutdown  InstanceStatus = "wait_for_shutdown"
 	StatusRestarting InstanceStatus = "Restarting"
+	StatusInUse      InstanceStatus = "in_use"
 )
 const (
 	RepoReConcile     = "RECONCILE_REPO"
@@ -84,6 +85,7 @@ type Instance struct {
 	PrivateSshKey string         `json:"private_ssh_key" db:"private_sshkey"`
 	Status        InstanceStatus `json:"status" db:"status"`
 	IP            string         `json:"ip" db:"ip"`
+	PublicPort            string         `json:"public_port" db:"public_port"`
 	PublicIP      string         `json:"public_ip" db:"public_ip"`
 	ProxmoxID     int            `json:"proxmox_id" db:"proxmox_id"`
 	RootVolumeID  string         `json:"root_volume_id" db:"root_volume_id"`
@@ -116,6 +118,8 @@ type Instance struct {
 // }
 
 type ProvisionInstanceEvent struct {
+	ForwardingPort int 	`json:"forwarding_port"`
+	EnvParams map[string]any `json:"params"`
 	UserID string `json:"userID"`
 	Profile    string          `json:"profile" binding:"required"`
 	Name       string          `json:"name" binding:"required"`
@@ -180,7 +184,8 @@ type SyncNode struct {
 }
 
 type CreateInstanceRequest struct {
-
+		ForwardingPort int 	`json:"forwarding_port"`
+EnvParams  map[string]any  `json:"params"`
 	Name       string `json:"name" binding:"required"`
 	ResourceID string `json:"resource_id"`
 	Image string `json:"image"`
@@ -248,3 +253,5 @@ type InstanceInfo struct {
 	SSHKey    string // private key PEM content
 	VMHost    string
 }
+
+

@@ -170,14 +170,14 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		public_sshkey, private_sshkey,
 		status, ip, public_ip, proxmox_id, 
 		created_at, user_id, root_volume_id, 
-		storage_size, storage_type, device_name, vpc_id, host_id, session_id
+		storage_size, storage_type, device_name, vpc_id, host_id, session_id, public_port
 	) 
 	VALUES (
 		$1, $2, $3, $4, $5, 
 		$6, $7,
 		$8, $9, $10, $11, 
 		$12, $13, $14, 
-		$15, $16, $17, $18, $19, $20
+		$15, $16, $17, $18, $19, $20, $21
 	)`
 
 	instance.CreatedAt = time.Now()
@@ -204,6 +204,7 @@ func (r *instanceRepository) Create(instance *domain.Instance) error {
 		instance.VPCID,
 		instance.HostID,
 		instance.SessionID,
+		instance.PublicPort,
 	)
 
 	return err
@@ -312,4 +313,28 @@ func (r *instanceRepository) GetInstanceInfo(instanceID, userID string) (*domain
 		SSHUser:   host.SSHUser,
 		SSHKey:    instance.PrivateSshKey,
 	}, nil
+}
+
+func (r *instanceRepository) FindAndMarkWarmInstanceInUse(ctx context.Context, profile string) (*domain.Instance, error) {
+	query := `
+		UPDATE instances 
+		SET status = $1
+		WHERE id = (
+			SELECT id FROM instances 
+			WHERE image_profile = $2 AND (status = 'running' OR status = 'active') 
+			ORDER BY created_at ASC 
+			LIMIT 1 
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *
+	`
+	var instance domain.Instance
+	err := r.db.GetContext(ctx, &instance, query, domain.StatusInUse, profile)
+	if err == sql.ErrNoRows {
+		return nil, dto.ErrInstanceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("FindAndMarkWarmInstanceInUse: %w", err)
+	}
+	return &instance, nil
 }

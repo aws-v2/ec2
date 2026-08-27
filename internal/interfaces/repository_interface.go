@@ -44,6 +44,7 @@ type InstanceRepository interface {
 	UpdateScalingPolicy(ctx context.Context, userID, policyID string, req *domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(ctx context.Context, userID, policyID string) error
 	GetInstanceInfo(instanceID, userID string) (*domain.InstanceInfo, error)
+	FindAndMarkWarmInstanceInUse(ctx context.Context, profile string) (*domain.Instance, error)
 }
 
 

@@ -13,10 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
-
-
-
 type InstanceHandler struct {
 	service *application.InstanceService
 }
@@ -37,11 +33,32 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 
 	dto.SendSuccess(c, http.StatusOK, fmt.Sprintf("Instance %s has been restarted", instanceID), nil)
 }
-type CreateInstanceRequest struct{
-	Ram int `json:"ram"`
-	Image string `json:"image"`
-	Cpu int `json:"cpu"`
-	Storage int `json:"storage"`
+
+type CreateInstanceRequest struct {
+	Ram     int    `json:"ram"`
+	Image   string `json:"image"`
+	Cpu     int    `json:"cpu"`
+	Storage int    `json:"storage"`
+}
+
+func (h *InstanceHandler) DownloadPem(c *gin.Context) {
+	instanceID := c.Param("id")
+	sshKey, err := h.service.DownloadPem(c.Request.Context(), instanceID)
+	if err != nil {
+		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+
+
+
+
+	c.Header("Content-Type","application/x-pem-file")
+	c.Header("Content-Disposition",`attachment;filename="my-key.pem"`)
+	// c.Header("Content-Length",strconv.Itoa(len(sshKey)))
+	c.Data(http.StatusOK,"application/x-pem-file",[]byte(sshKey) )
+	dto.SendSuccess(c, http.StatusOK, "Instance creation started", []byte(sshKey))
+
 }
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	var reqObj CreateInstanceRequest
@@ -52,15 +69,15 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	var req domain.CreateInstanceRequest
 	userID := c.GetString("userID")
 	req.Profile = "vanilla"
-	req.Specs=domain.VMSpecs{
-		CPU: reqObj.Cpu,
-		RAM: reqObj.Ram,
+	req.Specs = domain.VMSpecs{
+		CPU:     reqObj.Cpu,
+		RAM:     reqObj.Ram,
 		Storage: 10,
 	}
-	req.Image=reqObj.Image
-	
-	log.Printf("Create instance request: %v",req)
-	instance, err := h.service.CreateInstance(c.Request.Context(),&req, userID)
+	req.Image = reqObj.Image
+
+	log.Printf("Create instance request: %v", req)
+	instance, err := h.service.CreateInstance(c.Request.Context(), &req, userID)
 	if err != nil {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
 		return
@@ -73,7 +90,7 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 	userID := c.GetString("userID")
 	sessionID := uuid.New().String()
 	instance, err := h.service.GetInstance(id, userID)
-	instance.SessionID=sessionID
+	instance.SessionID = sessionID
 	if err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
@@ -85,28 +102,24 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 	dto.SendSuccess(c, http.StatusOK, "Instance retrieved successfully", instance)
 }
 
-
- 
-
-
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
-    userID := c.GetString("userID")
-    if userID == "" {
-        dto.SendError(c, http.StatusUnauthorized, "missing user identity")
-        return
-    }
+	userID := c.GetString("userID")
+	if userID == "" {
+		dto.SendError(c, http.StatusUnauthorized, "missing user identity")
+		return
+	}
 
-    instances, err := h.service.ListInstances(userID)
-    if err != nil {
-        dto.SendError(c, http.StatusInternalServerError, err.Error())
-        return
-    }
+	instances, err := h.service.ListInstances(userID)
+	if err != nil {
+		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 
-    if instances == nil {
-        instances = []*domain.Instance{}
-    }
+	if instances == nil {
+		instances = []*domain.Instance{}
+	}
 
-    dto.SendSuccess(c, http.StatusOK, "Instances retrieved successfully", instances)
+	dto.SendSuccess(c, http.StatusOK, "Instances retrieved successfully", instances)
 }
 
 func (h *InstanceHandler) StopInstance(c *gin.Context) {
@@ -259,7 +272,7 @@ func (h *InstanceHandler) AssignVPC(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID); err != nil {
+	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID,map[string]any{}); err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
 			return
