@@ -457,6 +457,7 @@ func (s *InstanceService) AssignVPC(
 	instanceID,
 	newVPCID string,
 	params map[string]any,
+	rdsParticulars map[string]string,
 ) error {
 
 	// ---------------------------------------------------
@@ -579,6 +580,7 @@ func (s *InstanceService) AssignVPC(
 		"",
 		"default",
 		params ,
+		rdsParticulars,
 	)
 
 	if err != nil {

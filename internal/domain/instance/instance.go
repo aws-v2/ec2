@@ -85,7 +85,7 @@ type Instance struct {
 	PrivateSshKey string         `json:"private_ssh_key" db:"private_sshkey"`
 	Status        InstanceStatus `json:"status" db:"status"`
 	IP            string         `json:"ip" db:"ip"`
-	PublicPort            string         `json:"public_port" db:"public_port"`
+	PublicPort    string         `json:"public_port" db:"public_port"`
 	PublicIP      string         `json:"public_ip" db:"public_ip"`
 	ProxmoxID     int            `json:"proxmox_id" db:"proxmox_id"`
 	RootVolumeID  string         `json:"root_volume_id" db:"root_volume_id"`
@@ -103,8 +103,8 @@ type Instance struct {
 	ImageProfile string `json:"image_profile" db:"image_profile"`
 	// TODO:  these fileds were added as glue code,toavoid reworking
 	// the whole floe
-		GatewayIP   string `json:"gateway_ip"`
-	GatewayPort int `json:"gateway_port"`
+	GatewayIP   string `json:"gateway_ip"`
+	GatewayPort int    `json:"gateway_port"`
 }
 
 // type ProvisionInstanceEvent struct {
@@ -117,17 +117,22 @@ type Instance struct {
 // 	SessionID  string         `json:"session_id"  `
 // }
 
+type RealeaseLambdaInstanceEvent struct {
+	VMID string `json:"vm_id"`
+
+}
 type ProvisionInstanceEvent struct {
-	ForwardingPort int 	`json:"forwarding_port"`
-	EnvParams map[string]any `json:"params"`
-	UserID string `json:"userID"`
-	Profile    string          `json:"profile" binding:"required"`
-	Name       string          `json:"name" binding:"required"`
-	ResourceID string          `json:"resource_id"`
-	Specs      VMSpecs         `json:"specs" binding:"required"`
-	SessionID  string          `json:"session_id"`
-	Assets     []Asset         `json:"assets,omitempty"`
-	Config     json.RawMessage `json:"config,omitempty"` // profile-specific config, opaque to the core service
+	RDSParticulars map[string]string `json:"rds_particulars"`
+	ForwardingPort int               `json:"forwarding_port"`
+	EnvParams      map[string]any    `json:"params"`
+	UserID         string            `json:"userID"`
+	Profile        string            `json:"profile" binding:"required"`
+	Name           string            `json:"name" binding:"required"`
+	ResourceID     string            `json:"resource_id"`
+	Specs          VMSpecs           `json:"specs" binding:"required"`
+	SessionID      string            `json:"session_id"`
+	Assets         []Asset           `json:"assets,omitempty"`
+	Config         json.RawMessage   `json:"config,omitempty"` // profile-specific config, opaque to the core service
 }
 
 type VMSpecs struct {
@@ -153,10 +158,7 @@ type Asset struct {
 	Unpack     bool        `json:"unpack,omitempty"`     // true = unzip after download
 	Executable bool        `json:"executable,omitempty"` // chmod +x after placing
 
-
-	Path   string `json:"path"`
-
-
+	Path string `json:"path"`
 }
 
 type ProvisionedRequesFinishedResponse struct {
@@ -184,15 +186,17 @@ type SyncNode struct {
 }
 
 type CreateInstanceRequest struct {
-		ForwardingPort int 	`json:"forwarding_port"`
-EnvParams  map[string]any  `json:"params"`
-	Name       string `json:"name" binding:"required"`
-	ResourceID string `json:"resource_id"`
-	Image string `json:"image"`
+	ForwardingPort int               `json:"forwarding_port"`
+	EnvParams      map[string]any    `json:"params"`
+	RDSParticulars map[string]string `json:"rds_particulars"`
+
+	Name       string          `json:"name" binding:"required"`
+	ResourceID string          `json:"resource_id"`
+	Image      string          `json:"image"`
 	Specs      VMSpecs         `json:"specs" binding:"required"`
-	Profile   string         `json:"profile"`
-	SessionID string         `json:"session_id"`
-	Assets    []Asset `json:"assets,omitempty"`
+	Profile    string          `json:"profile"`
+	SessionID  string          `json:"session_id"`
+	Assets     []Asset         `json:"assets,omitempty"`
 	Config     json.RawMessage `json:"config,omitempty"` // profile-specific config, opaque to the core service
 
 }
@@ -253,5 +257,3 @@ type InstanceInfo struct {
 	SSHKey    string // private key PEM content
 	VMHost    string
 }
-
-

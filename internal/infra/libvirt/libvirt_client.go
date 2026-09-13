@@ -209,12 +209,21 @@ func (l *LibvirtClient) CreateAndStartVM(
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
-func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]any) (string, func(), error) {
+func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]any, rDSParticulars map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
 	networkCfgPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-network-config", vmName))
 	absDir, _ := filepath.Abs(l.imagesDir)
 	isoPath := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
+
+	// fmt.Printf("\n===>>> %v : %v \n",event.Profile, event.RDSParticulars )
+	if profile == "rds" {
+
+		for particular := range rDSParticulars {
+			fmt.Printf("\n===>>> %v\n", rDSParticulars[particular])
+		}
+
+	}
 
 	// Derive the instance ID from vmName (vm-i-abc12345 → i-abc12345)
 	instanceID := strings.TrimPrefix(vmName, "vm-")
@@ -244,13 +253,13 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		fmt.Printf("[Libvirt] [WARN] No SSH keys provided for VM %s\n", vmName)
 	}
 
-writeFiles := `  - path: /opt/metrics-agent/config
+	writeFiles := `  - path: /opt/metrics-agent/config
     permissions: '0600'
     content: |
       INSTANCE_ID="__INSTANCE_ID__"
       IAM_TOKEN="__IAM_TOKEN__"
       METRICS_ENDPOINT="http://192.168.1.7:8099/api/v1/metrics-server/ec2/ingest"
-
+ 
   - path: /opt/metrics-agent/report.sh
     permissions: '0755'
     content: |
@@ -276,7 +285,7 @@ writeFiles := `  - path: /opt/metrics-agent/config
           }" 2>/dev/null
         sleep 5
       done
-
+ 
   - path: /etc/systemd/system/metrics-agent.service
     content: |
       [Unit]
@@ -288,24 +297,45 @@ writeFiles := `  - path: /opt/metrics-agent/config
       Restart=always
       RestartSec=5
       [Install]
-      WantedBy=multi-user.target
+      WantedBy=multi-user.target`
 
+	// This is the ONLY place config.env gets written now — the switch
+	// case below no longer writes it a second time.
+	if profile == "rds" {
+		writeFiles += fmt.Sprintf(`
+ 
   - path: /etc/rds/config.env
     permissions: '0600'
     content: |
-      DB_USER=iopoi
-      DB_PASSWORD=loik
-      DB_NAME=klkoim`
+      DB_USER=%s
+      DB_PASSWORD=%s
+      DB_NAME=%s
+ 
+  - path: /opt/rds/init-db.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      source /etc/rds/config.env
+ 
+      sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME};" || true
+      sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
+      sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true`,
+			rDSParticulars["DB_USER"], rDSParticulars["DB_PASSWORD"], rDSParticulars["DB_NAME"])
+	}
 
 	runCmd := `  - systemctl daemon-reload
   - systemctl enable metrics-agent
-  - systemctl start metrics-agent
-  - /etc/rds/init-db.sh`
+  - systemctl start metrics-agent`
+
+	if profile == "rds" {
+		runCmd += "\n  - /opt/rds/init-db.sh"
+	}
 
 	// ── Select Profile Template ──────────────────────────────────────────────
 	userName := "ubuntu"
-	if profile =="rds"{
-		profile="vanilla"
+	if profile == "rds" {
+		profile = "vanilla"
 	}
 	profileContent := ""
 
@@ -472,47 +502,23 @@ writeFiles := `  - path: /opt/metrics-agent/config
 		runCmd += "\n  - curl https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc"
 		runCmd += "\n  - curl -s https://raw.githubusercontent.com/nats-io/natscli/main/install.sh | sh"
 		runCmd += "\n  - systemctl enable ai-worker && systemctl start ai-worker"
-	// RDS profile: install and start a lightweight PostgreSQL instance
+		// RDS profile: install and start a lightweight PostgreSQL instance
+
+	// RDS profile: postgres is already installed/configured on the base
+	// template, so this case no longer touches write_files at all —
+	// config.env and init-db.sh are already handled above. It only
+	// needs to set the login username for this VM type.
 	case "rds":
 		userName = "rds"
+		fmt.Printf("Chosen username %s\n", userName)
 
-		fmt.Printf("Choosen usernam %s",userName)
-
-		// Allow configuring DB name/user/password via params: DB_NAME, DB_USER, DB_PASSWORD
-		profileContent = `
-  - path: /etc/rds/config.env
-	permissions: '0600'
-    content: |
-      DB_USER=mkarani
-      DB_PASSWORD=mkarani
-	  DB_NAME=tyui
-
-  - path: /opt/rds/init-dbs.sh
-	permissions: '0755'
-	content: |
-	  #!/bin/bash
-	  set -e
-	  DB_NAME="{{DB_NAME}}"
-	  DB_USER="{{DB_USER}}"
-	  DB_PASSWORD="{{DB_PASSWORD}}"
-	  if [ -z "$DB_NAME" ] || [ "$DB_NAME" == "<nil>" ]; then DB_NAME="appdb"; fi
-	  if [ -z "$DB_USER" ] || [ "$DB_USER" == "<nil>" ]; then DB_USER="rds"; fi
-	  if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" == "<nil>" ]; then DB_PASSWORD="rds_pass"; fi
-
-	  # Create database and user (idempotent)
-	  sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME};" || true
-	  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
-	  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true
-`
+		// If you still want the debug env-var dump, fine to keep, but it
+		// has no effect on init-db.sh since that script sources
+		// config.env directly rather than reading exported shell vars.
+		// Safe to delete this loop.
 		for key, value := range params {
-			runCmd += fmt.Sprintf("\n - export %s=%q;", strings.ToUpper(key), fmt.Sprint(value))
+			fmt.Printf("param %s=%v\n", strings.ToUpper(key), value)
 		}
-		// Install and start postgres in runcmd
-		runCmd += "\n  - apt-get update && apt-get install -y postgresql postgresql-contrib"
-		runCmd += "\n  - systemctl enable postgresql"
-		runCmd += "\n  - systemctl start postgresql"
-		runCmd += "\n  - /opt/rds/init-dbs.sh"
-		runCmd += "\n  - /opt/rds/init-db.sh"
 	case "lambda":
 		userName = "lambda"
 	default:
@@ -538,11 +544,7 @@ runcmd:
 %s
 `, userName, keysYaml, writeFiles, profileContent, runCmd)
 
-
-
 	fmt.Printf("\n-----> this is the profile:%s\n", userData)
-
-
 
 	// ── Replace basic placeholders ───────────────────────────────────────────
 	userData = strings.ReplaceAll(userData, "__INSTANCE_ID__", instanceID)

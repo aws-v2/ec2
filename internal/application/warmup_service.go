@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -34,6 +35,8 @@ func NewWarmupService(
 }
 
 func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
+		fmt.Println("=========Warming lambda vms =============")
+
 	hosts, err := w.hostRepo.GetBestHostsByType(5, "lambda")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hosts: %w", err)
@@ -66,7 +69,7 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 		}
 		resp.Body.Close()
 
-		if len(domains) == 0 {
+		if len(domains) == 0 || !specificDomains(domains,"lambda"){ //orthe doainsthat arereturnedthere is nodomwain that starts with "lambda"
 			resourceId := uuid.New().String()
 			instanceRequest := domain.CreateInstanceRequest{
 				Profile:    "lambda",
@@ -95,12 +98,28 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 	return allDomains, nil
 }
 
+
+func specificDomains(allDomains []string, domainType string)bool{
+	for _,domain := range allDomains{
+		if strings.Contains(domain,domainType){
+			return true
+		}
+
+	}
+	return false 
+}
+
+
+
+
 func GetWarmLambdaVMs(w *WarmupService) ([]string, error) {
 
 	return w.GetWarmLambdaVMs()
 }
 
 func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
+		fmt.Println("=========Warming SGM vms =============")
+
 	hosts, err := w.hostRepo.GetBestHostsByType(5, "sagemaker")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hosts: %w", err)
@@ -130,8 +149,9 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 			continue
 		}
 		resp.Body.Close()
+			log.Printf(" %s: %v", host.IP, err)
 
-		if len(domains) == 0 {
+		if len(domains) == 0 || !specificDomains(domains,"sagemaker") {
 			resourceId := uuid.New().String()
 			instanceRequest := domain.CreateInstanceRequest{
 				Profile:    "sagemaker",

@@ -272,7 +272,7 @@ func (h *InstanceHandler) AssignVPC(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID,map[string]any{}); err != nil {
+	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID,map[string]any{},map[string]string{}); err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
 			return

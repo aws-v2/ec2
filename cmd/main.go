@@ -292,25 +292,28 @@ http
 
 */
 
+	warmVmTimer := time.Duration(cfg.WarmVmsTimer) * time.Second
+	ticker := time.NewTicker(warmVmTimer)
+	defer ticker.Stop()
+
+	for range ticker.C {
+
 
 
 
 	go func() {
-		fmt.Println("=========7=7=7==7=7=7=7=7=7=7=7=============")
 
 		if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
 			slog.Error("Failed to get warm Lambda VMs", "error", err)
 		}
-	fmt.Println("=========7=7=744444444==7=7=7=7=w7=7=7=7=============")
 
 		if _, err := warmUpService.GetWarmSageMakerVMs(); err != nil {
 			slog.Error("Failed to get warm SageMaker VMs", "error", err)
 		}
-	fmt.Println("=========7=7=744444444==7=7=7=7=7=7=s7=7=============")
 
 	
 	}()
-
+	}
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

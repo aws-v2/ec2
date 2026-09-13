@@ -1,7 +1,7 @@
 -- internal/repository/postgres/migrations/001_initial_schema.sql
 
 CREATE TABLE IF NOT EXISTS instances(
-    id VARCHAR(20) PRIMARY KEY,
+    id VARCHAR(50) PRIMARY KEY,
     vm_name VARCHAR(100) NOT NULL,
     image VARCHAR(100) NOT NULL,
     cpu INTEGER NOT NULL,
@@ -92,3 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_ssh_keys_name ON ssh_keys(name);
 CREATE INDEX IF NOT EXISTS idx_ip_allocations_instance_id ON ip_allocations(instance_id);
 CREATE INDEX IF NOT EXISTS idx_security_groups_name ON security_groups(name);
 CREATE INDEX IF NOT EXISTS idx_templates_name ON templates(name);
+
+
+
+alter table instances alter column id type varchar(50);

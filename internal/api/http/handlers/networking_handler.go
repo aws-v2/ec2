@@ -285,7 +285,7 @@ func (h *NetworkingHandler) AssignVPC(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AssignVPC(tenantID, instanceID, req.VPCID, map[string]any{}); err != nil {
+	if err := h.service.AssignVPC(tenantID, instanceID, req.VPCID, map[string]any{},map[string]string{}); err != nil {
 		dto.SendError(c, http.StatusInternalServerError, err.Error())
 		return
 	}

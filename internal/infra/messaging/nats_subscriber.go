@@ -15,6 +15,7 @@ import (
 type EC2EventHandler interface {
 	EnforceScaling(ctx context.Context, event *domain.ScaleEvent) error
 	HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response, error)
+	HandleLambdaRealease(ctx context.Context, event *domain.RealeaseLambdaInstanceEvent) (domain.RealeaseLambdaResponse, error)
 }
 
 type NATSSubscriber struct {
@@ -95,6 +96,35 @@ func (s *NATSSubscriber) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", provisionSubject, err)
 	}
+
+	// 2. Subscribe to VM Provision Events
+	releaseLambdaSubject := fmt.Sprintf("%s.ec2.task.release_lambda", s.profile)
+	_, err = s.nc.QueueSubscribe(releaseLambdaSubject, queueGroup, func(msg *nats.Msg) {
+
+		var event domain.RealeaseLambdaInstanceEvent
+		if err := json.Unmarshal(msg.Data, &event); err != nil {
+			log.Printf("[NATS-SUB] [ERROR] Failed to unmarshal lambda_release event: %v", err)
+			return
+		}
+		log.Printf("[NATS-SUB] [INFO] Received realease event for vm_id: %s", event.VMID)
+
+		go func() {
+			fmt.Printf("*******88Realeaseing*******")
+
+			releasePayload, errd := s.handler.HandleLambdaRealease(context.Background(), &event)
+			if errd != nil {
+				log.Printf("[NATS-SUB] [ERROR] VM release failed for vm_id %s: %v", event.VMID, err)
+				return
+			}
+			log.Printf("this si the final event %v", releasePayload)
+			data, _ := json.Marshal(releasePayload)
+
+			s.nc.Publish(msg.Reply, data)
+			log.Printf("[NATS-SUB] Successfully replied to %s and %s", scaleSubject, provisionSubject)
+
+		}()
+
+	})
 
 	log.Printf("[NATS-SUB] Successfully subscribed to %s and %s", scaleSubject, provisionSubject)
 	return nil

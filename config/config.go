@@ -36,6 +36,7 @@ SystemUserId string
 	AgentUrlParts    string
 	ProfileBaseImage map[string]string
 	ENV              string
+	WarmVmsTimer int
 }
 
 type LibvirtConfig struct {
@@ -104,6 +105,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		SystemUserId:"00000000-0000-0000-0000-000000000000",
+		WarmVmsTimer: getEnvInt("WARM_VM_TIMER", 10),
 		AgentUrlParts: getEnv("API_GATEWAY", "http://localhost:8080"),
 		AgentPort:     getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:    LoadKeyPair()[0],

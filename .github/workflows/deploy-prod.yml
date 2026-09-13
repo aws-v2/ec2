@@ -139,4 +139,5 @@ jobs:
               --env IMAGES_DIR=/var/lib/libvirt/images \
               --env AGENT_URL=ws://host.docker.internal:9030/terminal \
               --env LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock \
+              --env WARM_VM_TIMER=10 \
               qarani/ec2-api:prod-${{ github.sha }}

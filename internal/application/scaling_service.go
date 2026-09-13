@@ -120,27 +120,42 @@ type AssetConfig struct {
 	SHA256 string `json:"sha256"`
 }
 
-func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response,error) {
+func (s *InstanceService) HandleLambdaRealease(ctx context.Context, event *domain.RealeaseLambdaInstanceEvent) (domain.RealeaseLambdaResponse, error) {
+	warmInstance, err := s.repo.ReleaseLambdaVM(ctx, event.VMID)
+
+	var code int
+
+	if err != nil {
+		code = 500
+		log.Printf("come error occured %v, could not release vm: %s", err, event.VMID)
+		return domain.RealeaseLambdaResponse{
+			Code: code,
+		}, nil
+	}
+	log.Printf("warmInstance.ID  %v, event.VMID: %s", warmInstance.ID, event.VMID)
+
+	if warmInstance.ID == event.VMID {
+		code = 200
+
+	}
+
+	return domain.RealeaseLambdaResponse{
+		Code: code,
+	}, nil
+}
+func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response, error) {
 
 	log.Printf("[PROVISIONER] profile=%s ",
 		event.Profile)
 
-	// if event.Manifest.Parameters != nil {
-	// 	assets = append(assets, domain.AssetConfigs{
-	// 		Name:   event.Manifest.Name,
-	// 		URL:    event.Manifest.Parameters["ASSET_URL"],
-	// 		Path:   event.Manifest.Parameters["ASSET_PATH"],
-	// 		SHA256: event.Manifest.Parameters["ASSET_SHA256"],
-	// 	})
-	// }
-
 	req := &domain.CreateInstanceRequest{
-		Specs:      event.Specs,
-		ResourceID: event.ResourceID,
-		Profile:    event.Profile,
-		SessionID:  event.SessionID,
-		Assets:     event.Assets,
-		EnvParams: event.EnvParams,
+		Specs:          event.Specs,
+		ResourceID:     event.ResourceID,
+		Profile:        event.Profile,
+		SessionID:      event.SessionID,
+		Assets:         event.Assets,
+		EnvParams:      event.EnvParams,
+		RDSParticulars: event.RDSParticulars,
 	}
 
 	// Defaults
@@ -167,11 +182,10 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 
 	log.Printf("[PROVISIONER] invoking CreateInstance userID=%s", userID)
 
-
-
-
-	if req.Profile == "lambda" || req.Profile == "sagemaker" {
+	if req.Profile == "lambda" || req.Profile == "ai-worker!" || req.Profile == "sagemaker" {
 		warmInstance, err := s.repo.FindAndMarkWarmInstanceInUse(ctx, req.Profile)
+		log.Printf("INSTANCE AFTER return  %+v\n", warmInstance)
+
 		if err == nil && warmInstance != nil {
 			log.Printf("[PROVISIONER] Reusing warm instance %s (%s) for profile %s", warmInstance.ID, warmInstance.IP, req.Profile)
 
@@ -183,17 +197,27 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 			}
 
 			return domain.EC2Response{
-				GatewayIP:   gatewayIP,
+				GatewayIP:   warmInstance.IP,
 				GatewayPort: warmInstance.GatewayPort,
 				VMiP:        warmInstance.IP,
+				VMID:        warmInstance.ID,
 			}, nil
 		}
-		log.Printf("[PROVISIONER] No warm instance available for profile %s, creating new instance", req.Profile)
+		if warmInstance ==nil{
+			log.Printf("All"+req.Profile+"vms are in use ")
+			return domain.EC2Response{
+				Code: 400,
+			}, nil
+
+		}
+
+		if err != nil {
+			log.Printf("some error occured %v, creating new instance", err)
+		}
+		log.Printf("[PROVISIONER] No warm instance available for profile %s, creating new instance: warm instance %v", req.Profile, warmInstance)
 	}
 
-
-
-
+	instance := &domain.Instance{}
 
 	// Call core logic
 	instance, err := s.CreateInstance(ctx, req, userID)
@@ -205,10 +229,11 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 	log.Printf("\n[PROVISIONE6R] SUCCESS instanceID=%s profile=%s\n", instance.IP, event.Profile)
 
 	return domain.EC2Response{
-		GatewayIP: instance.GatewayIP,
+		GatewayIP:   instance.GatewayIP,
 		GatewayPort: instance.GatewayPort,
-		VMiP: instance.IP,
-	},nil
+		VMiP:        instance.IP,
+		VMID:        instance.ID,
+	}, nil
 }
 
 func getMapKeys(m map[string]string) []string {

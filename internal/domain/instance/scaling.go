@@ -63,4 +63,12 @@ type EC2Response struct {
 	GatewayPort int    `json:"gateway_port"`
 	VMiP        string `json:"vm_ip"`
 	VMPORT      int    `json:"vm_port"`
+	VMID string `json:"vm_id"`
+	Code int `json:"code"`
+}
+
+
+
+type RealeaseLambdaResponse struct{
+	Code int `json:"code"`
 }
