@@ -338,7 +338,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		profile = "vanilla"
 	}
 	profileContent := ""
-
+// profile
 	switch profile {
 	case "gamelift":
 		userName = "gls"
