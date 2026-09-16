@@ -100,6 +100,7 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_USER=postgres-staging-user \
               -e LOG_LEVEL=info \
+              -e ENV=staging \
               -e LOG_FORMAT=json \
               -e DB_PASSWORD=postgres-staging-password \
               -e DB_NAME=ec2_db1 \
