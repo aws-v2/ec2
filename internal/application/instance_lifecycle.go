@@ -44,9 +44,9 @@ var imageMap = map[string]string{
 	// due tochangin this  baseImageName, ok := imageMap[req.Profile]  in the prepareInstanceResources from
 	// baseImageName, ok := imageMap[req.Image]
 
-	"lambda":    "main_template.qcow2",
-	"sagemaker": "main_template.qcow2",
-	"rds":       "main_template.qcow2",
+	"lambda":    "main-base.qcow2",
+	"sagemaker": "main-base.qcow2",
+	"rds":       "main-base.qcow2",
 	"vanilla":   "ubuntu-22.04.qcow2",
 	"ai-worker": "ubuntu-22.04.qcow2",
 	"games":     "ubuntu-22.04.qcow2",

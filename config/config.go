@@ -20,8 +20,8 @@ type Config struct {
 	Server ServerConfig
 
 	// Libvirt
-	Libvirt LibvirtConfig
-SystemUserId string
+	Libvirt      LibvirtConfig
+	SystemUserId string
 	// Profiles
 	Profile string
 
@@ -36,7 +36,7 @@ SystemUserId string
 	AgentUrlParts    string
 	ProfileBaseImage map[string]string
 	ENV              string
-	WarmVmsTimer int
+	WarmVmsTimer     int
 }
 
 type LibvirtConfig struct {
@@ -104,8 +104,8 @@ func Load() (*Config, error) {
 	profileBaseImage["rds"] = "rds-template"
 
 	cfg := &Config{
-		SystemUserId:"00000000-0000-0000-0000-000000000000",
-		WarmVmsTimer: getEnvInt("WARM_VM_TIMER", 10),
+		SystemUserId:  "00000000-0000-0000-0000-000000000000",
+		WarmVmsTimer:  getEnvInt("WARM_VM_TIMER", 10),
 		AgentUrlParts: getEnv("API_GATEWAY", "http://localhost:8080"),
 		AgentPort:     getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:    LoadKeyPair()[0],
@@ -126,13 +126,13 @@ func Load() (*Config, error) {
 			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 10*time.Minute),
 		},
-// 		DB_HOST=ep-purple-feather-aypga34j-pooler.c-5.us-east-2.aws.neon.tech
-// DB_PORT=5432
-// DB_USER=neondb_owner
-// DB_PASSWORD=npg_EHvDpaNKS73u
-// DB_NAME=ec2_db
-// DB_SSLMODE=require
-// DB_CHANNEL_BINDING=require
+		// 		DB_HOST=ep-purple-feather-aypga34j-pooler.c-5.us-east-2.aws.neon.tech
+		// DB_PORT=5432
+		// DB_USER=neondb_owner
+		// DB_PASSWORD=npg_EHvDpaNKS73u
+		// DB_NAME=ec2_db
+		// DB_SSLMODE=require
+		// DB_CHANNEL_BINDING=require
 		NATS: NATSConfig{
 			URL:           getEnv("NATS_URL", "nats://localhost:4222"),
 			User:          getEnv("NATS_USER", "auth-server"),
