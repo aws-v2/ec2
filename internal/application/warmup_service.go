@@ -7,12 +7,12 @@ import (
 	interfaces "ec2-api/internal/interfaces"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os/exec"
 	"strings"
 	"time"
-	"io"
 
 	"github.com/google/uuid"
 )
@@ -39,17 +39,20 @@ func NewWarmupService(
 }
 
 func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
-		fmt.Println("=========Warming lambda vms =============")
+	fmt.Println("=========Warming lambda vms =============")
 
 	hosts, err := w.hostRepo.GetBestHostsByType(5, "lambda")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hosts: %w", err)
 	}
-			log.Printf("checkpoint1")
+	log.Printf("checkpoint1")
 
 	var allDomains []string
 
+	fmt.Printf("sagemeker hosts found: %v", len(hosts))
+
 	for _, host := range hosts {
+		fmt.Printf("calling sagemeker hosts found: %v", host.ID)
 
 		url := fmt.Sprintf("http://%s:%d/warm-vms", host.IP, 9030)
 
@@ -73,7 +76,7 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 		}
 		resp.Body.Close()
 
-		if len(domains) == 0 || !specificDomains(domains,"lambda"){ //orthe doainsthat arereturnedthere is nodomwain that starts with "lambda"
+		if len(domains) == 0 || !specificDomains(domains, "lambda") { //orthe doainsthat arereturnedthere is nodomwain that starts with "lambda"
 			resourceId := uuid.New().String()
 			instanceRequest := domain.CreateInstanceRequest{
 				Profile:    "lambda",
@@ -85,9 +88,8 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 					RAM:     1024,
 					Storage: 10,
 				},
-				SessionID: uuid.New().String(),
-				ForwardingPort:9087,
-
+				SessionID:      uuid.New().String(),
+				ForwardingPort: 9087,
 			}
 			_, err := w.instanceService.CreateInstance(context.Background(), &instanceRequest, w.systemUserId)
 			if err != nil {
@@ -97,24 +99,20 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 
 		allDomains = append(allDomains, domains...)
 	}
-			log.Printf("checkpoint2 %v",allDomains)
+	log.Printf("checkpoint2 %v", allDomains)
 
 	return allDomains, nil
 }
 
-
-func specificDomains(allDomains []string, domainType string)bool{
-	for _,domain := range allDomains{
-		if strings.Contains(domain,domainType){
+func specificDomains(allDomains []string, domainType string) bool {
+	for _, domain := range allDomains {
+		if strings.Contains(domain, domainType) {
 			return true
 		}
 
 	}
-	return false 
+	return false
 }
-
-
-
 
 func GetWarmLambdaVMs(w *WarmupService) ([]string, error) {
 
@@ -122,7 +120,7 @@ func GetWarmLambdaVMs(w *WarmupService) ([]string, error) {
 }
 
 func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
-		fmt.Println("=========Warming SGM vms =============")
+	fmt.Println("=========Warming SGM vms =============")
 
 	hosts, err := w.hostRepo.GetBestHostsByType(5, "sagemaker")
 	if err != nil {
@@ -131,7 +129,10 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 
 	var allDomains []string
 
+	fmt.Printf("sagemeker hosts found: %v", len(hosts))
+
 	for _, host := range hosts {
+		fmt.Printf("calling sagemeker hosts found: %v", host.ID)
 		url := fmt.Sprintf("http://%s:%d/warm-vms", host.IP, 9030)
 
 		resp, err := http.Get(url)
@@ -153,9 +154,9 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 			continue
 		}
 		resp.Body.Close()
-			log.Printf(" %s: %v", host.IP, err)
+		log.Printf(" %s: %v", host.IP, err)
 
-		if len(domains) == 0 || !specificDomains(domains,"sagemaker") {
+		if len(domains) == 0 || !specificDomains(domains, "sagemaker") {
 			resourceId := uuid.New().String()
 			instanceRequest := domain.CreateInstanceRequest{
 				Profile:    "sagemaker",
@@ -167,8 +168,8 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 					RAM:     1024,
 					Storage: 10,
 				},
-				SessionID: uuid.New().String(),
-				ForwardingPort:9087,
+				SessionID:      uuid.New().String(),
+				ForwardingPort: 9087,
 			}
 			_, err := w.instanceService.CreateInstance(context.Background(), &instanceRequest, w.systemUserId)
 			if err != nil {
@@ -186,10 +187,6 @@ func GetWarmSageMakerVMs(w *WarmupService) ([]string, error) {
 
 	return w.GetWarmSageMakerVMs()
 }
-
-
-
-
 
 func (w *WarmupService) PurgeWarmLambdaVMs() {
 	ctx := context.Background()
@@ -212,31 +209,29 @@ func (w *WarmupService) PurgeWarmLambdaVMs() {
 		return
 	}
 
-for _, vm := range toRemove {
-	host, err := w.hostRepo.GetByID(vm.HostID)
-	if err != nil {
-		fmt.Printf("failed to find host %s for vm %s: %v\n", vm.HostID, vm.VMName, err)
-		continue
+	for _, vm := range toRemove {
+		host, err := w.hostRepo.GetByID(vm.HostID)
+		if err != nil {
+			fmt.Printf("failed to find host %s for vm %s: %v\n", vm.HostID, vm.VMName, err)
+			continue
+		}
+
+		if err := sendDestroyCommand(host.IP, vm.ID); err != nil {
+			fmt.Printf("failed to destroy vm %s on host %s: %v\n", vm.VMName, host.IP, err)
+			continue
+		}
+
+		fmt.Printf("Marking VM for removal: %s (%s)\n", vm.VMName, vm.IP)
+
+		if err := w.repo.Delete(vm.ID); err != nil {
+			fmt.Printf("failed to remove vm %s from db: %v\n", vm.VMName, err)
+			continue
+		}
+
+		fmt.Printf("VM removed from db: %s\n", vm.VMName)
 	}
 
-	if err := sendDestroyCommand(host.IP, vm.ID); err != nil {
-		fmt.Printf("failed to destroy vm %s on host %s: %v\n", vm.VMName, host.IP, err)
-		continue
-	}
-
-	fmt.Printf("Marking VM for removal: %s (%s)\n", vm.VMName, vm.IP)
-
-	if err := w.repo.Delete(vm.ID); err != nil {
-		fmt.Printf("failed to remove vm %s from db: %v\n", vm.VMName, err)
-		continue
-	}
-
-	fmt.Printf("VM removed from db: %s\n", vm.VMName)
 }
-
-}
-
-
 
 // sendDestroyCommand posts a destroy action to the agent running on hostIP:9030
 // and returns an error unless the agent responds with 202 Accepted.
@@ -272,9 +267,6 @@ type VMPowerRequest struct {
 	VMID   string `json:"vm_id"`
 	Action string `json:"action"`
 }
-
-
-
 
 // pingHost sends a single ICMP ping with a 1-second timeout and reports
 // whether the host responded. Uses the system `ping` binary since raw
