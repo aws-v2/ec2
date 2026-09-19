@@ -348,6 +348,23 @@ func (r *instanceRepository) ReleaseLambdaVM(ctx context.Context, vmId string) (
 
 
 
+func (r *instanceRepository) FindUnreachableVms(ctx context.Context) ([]*domain.Instance, error) {
+	query := `
+		SELECT id, vm_name, ip , host_id
+		FROM instances 
+		WHERE (status = 'running' OR status = 'active')
+		AND (vm_name LIKE 'sagemaker%' OR vm_name LIKE 'lambda%')
+	`
+
+
+	var instances []*domain.Instance
+	err := r.db.SelectContext(ctx, &instances, query)
+	if err != nil {
+		return nil, fmt.Errorf("FindUnreachableVms: %w", err)
+	}
+
+	return instances, nil
+}
 func (r *instanceRepository) FindAndMarkWarmInstanceInUse(ctx context.Context, profile string) (*domain.Instance, error) {
 	query := `
 		UPDATE instances 

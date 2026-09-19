@@ -302,6 +302,29 @@ http
 
 
 	go func() {
+		// here before we warm up any vm, we need any left over vms tohandle an edge case like this oen 
+		/*
+		suppose we preovisioned a sagemaker vm,
+		we ran a job on it, after the jib is completed and we have called  the  .ec2.task.release_lambda_vm (both sagemake and lambda vm a re release usingthis subject,tobe fixed latar TODO:)
+		and the vm is released succesfully and then we delete the vm via somethinglike 
+
+		for vm in $(virsh list --all --name | grep -v '^base-template$' | grep -v '^$'); do virsh destroy "$vm" 2>/dev/null; virsh undefine "$vm" --remove-all-storage; done
+
+		in the database the vm wwill be marked as running, that is bringin up issue since the when assigning sagemaker/lambda jobs to a vm
+		we get the first record with status runnning that measns we select the vm that doesnt exist, 
+		so the idea here is that before we provision any new lambda/vm we first check if there is anyleftover lambda orsagemaker vm 
+		 we delete them first, 
+		 ie. we purge the vms from the db  
+
+		*/
+
+
+		warmUpService.PurgeWarmLambdaVMs()
+		// ; err != nil {
+		// 	slog.Error("Failed to get warm Lambda VMs", "error", err)
+		// }
+
+		
 
 		if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
 			slog.Error("Failed to get warm Lambda VMs", "error", err)

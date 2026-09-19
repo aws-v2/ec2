@@ -257,7 +257,7 @@ func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdat
 	}
 
 	url := fmt.Sprintf("http://%s:9030/update", hostIP)
-	log.Printf("[HostService] pushing update to agent at %s", url)
+	log.Printf("[HostService] pushing update to agent at %s with this body %+v", url,payload)
 
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -458,6 +458,9 @@ func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*d
 		s.lastSelectionOffset = (s.lastSelectionOffset + 1) % len(gatewayHosts)
 
 		bestGatewayHost = gatewayHosts[s.lastSelectionOffset]
+ 
+
+
 		fmt.Printf("the choosen gateway host %v \n", bestGatewayHost)
 
 		if preferredHostID != "" {
@@ -531,4 +534,4 @@ func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*d
 	}
 
 	return nil, nil, nil
-}
+ }

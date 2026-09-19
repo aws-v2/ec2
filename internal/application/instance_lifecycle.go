@@ -501,7 +501,6 @@ func (s *InstanceService) buildOverlay(
 			instanceID, err, string(output),
 		)
 	}
-	
 
 	return nil
 }
@@ -813,7 +812,7 @@ provisioning host,
 i ahve it register itself in the dabae with hosttype gateway and also
 so i ahve this
 
-ec2_db1=# select id, hostname,hosttype from hosts;
+ec2_db=# select id, hostname,hosttype from hosts;
                      id                      |              hostname               | hosttype
 ---------------------------------------------+-------------------------------------+----------
  gateway-18:60:24:4f:4a:13:root:6d617274696e | 18:60:24:4f:4a:13:root:6d617274696e | gateway

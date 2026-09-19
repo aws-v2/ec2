@@ -153,7 +153,17 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 	if err != nil {
 		return "", fmt.Errorf("marshal presign request: %w", err)
 	}
+// type createPresignedURLRequest struct {
+//     UserID     string    `json:"user_id"`
+//     GameID     string    `json:"game_id,omitempty"`
+//     AssetID    string    `json:"asset_id"`
+//     AssetType  AssetType `json:"asset_type"`  // "game" | "template"
+//     AssetName  string    `json:"asset_name"`  // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
+//     BucketName string    `json:"bucket_name"` // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
+//     Key        string    `json:"key"`
 
+//     Sha256 string `json:"sha256"`
+// }
 	subject := fmt.Sprintf("%s.s3.task.create_presign_download_url", p.profile)
 
 	slog.Debug("publishing presign request via NATS",

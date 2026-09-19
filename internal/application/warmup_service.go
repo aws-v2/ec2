@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	domain "ec2-api/internal/domain/instance"
 	interfaces "ec2-api/internal/interfaces"
@@ -8,7 +9,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
+	"time"
+	"io"
 
 	"github.com/google/uuid"
 )
@@ -181,4 +185,107 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 func GetWarmSageMakerVMs(w *WarmupService) ([]string, error) {
 
 	return w.GetWarmSageMakerVMs()
+}
+
+
+
+
+
+func (w *WarmupService) PurgeWarmLambdaVMs() {
+	ctx := context.Background()
+	vms, err := w.repo.FindUnreachableVms(ctx)
+	if err != nil {
+		fmt.Printf("failed to get hosts: %v\n", err)
+		return
+	}
+
+	var toRemove []*domain.Instance
+
+	for _, vm := range vms {
+		if !pingHost(vm.IP) {
+			toRemove = append(toRemove, vm)
+		}
+	}
+
+	if len(toRemove) == 0 {
+		fmt.Println("PurgeWarmLambdaVMs: no unreachable VMs found")
+		return
+	}
+
+for _, vm := range toRemove {
+	host, err := w.hostRepo.GetByID(vm.HostID)
+	if err != nil {
+		fmt.Printf("failed to find host %s for vm %s: %v\n", vm.HostID, vm.VMName, err)
+		continue
+	}
+
+	if err := sendDestroyCommand(host.IP, vm.ID); err != nil {
+		fmt.Printf("failed to destroy vm %s on host %s: %v\n", vm.VMName, host.IP, err)
+		continue
+	}
+
+	fmt.Printf("Marking VM for removal: %s (%s)\n", vm.VMName, vm.IP)
+
+	if err := w.repo.Delete(vm.ID); err != nil {
+		fmt.Printf("failed to remove vm %s from db: %v\n", vm.VMName, err)
+		continue
+	}
+
+	fmt.Printf("VM removed from db: %s\n", vm.VMName)
+}
+
+}
+
+
+
+// sendDestroyCommand posts a destroy action to the agent running on hostIP:9030
+// and returns an error unless the agent responds with 202 Accepted.
+func sendDestroyCommand(hostIP string, vmID string) error {
+	url := fmt.Sprintf("http://%s:9030/vm/power", hostIP)
+
+	body, err := json.Marshal(VMPowerRequest{
+		VMID:   vmID,
+		Action: "destroy",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to reach agent at %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("agent returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	return nil
+}
+
+// VMPowerRequest mirrors the agent's expected request body.
+type VMPowerRequest struct {
+	VMID   string `json:"vm_id"`
+	Action string `json:"action"`
+}
+
+
+
+
+// pingHost sends a single ICMP ping with a 1-second timeout and reports
+// whether the host responded. Uses the system `ping` binary since raw
+// ICMP sockets require elevated privileges.
+func pingHost(ip string) bool {
+	if ip == "" {
+		return false
+	}
+
+	// -c 1: send 1 packet, -W 1: wait max 1 second for a reply (Linux)
+	cmd := exec.CommandContext(context.Background(), "ping", "-c", "1", "-W", "1", ip)
+	err := cmd.Run()
+	return err == nil
 }

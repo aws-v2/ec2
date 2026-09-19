@@ -55,15 +55,23 @@ func (h *HostHandler) CPHost(c *gin.Context) {
 	case "dev":
 		data = "http://localhost:8080"
 	case "staging":
-		data = "http://localhost:8080"
+		data = "http://100.109.4.73:8080"
 	case "prod":
 		data = "http://102.10.98.23:8080"
 	default:
 		data = "http://localhost:8080"
 
 	}
-
-	vpcpkg.RespondSucces(c, http.StatusOK, "Refresh request executed successfully", gin.H{"data": data})
+var RefreshIp struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data string `json:"data"`
+	
+	}
+	RefreshIp.Code=200
+	RefreshIp.Message="Refresh request executed successfully"
+	RefreshIp.Data = data
+	vpcpkg.RespondSucces(c, http.StatusOK, "Refresh request executed successfully", RefreshIp)
 
 }
 

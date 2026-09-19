@@ -32,6 +32,7 @@ type RolloutRepository interface {
 type InstanceRepository interface {
 	Create(instance *domain.Instance) error
 	FindByID(id string) (*domain.Instance, error)
+	FindUnreachableVms(ctx context.Context) ([]*domain.Instance, error)
 	FindAll(userID string) ([]*domain.Instance, error)
 	UpdateStatus(id string, status domain.InstanceStatus) error
 	Delete(id string) error
