@@ -441,7 +441,7 @@ func (s *HostService) SelectBestHost(profile string, preferredHostID string) (*d
 	// 	gatewayHostType = "grey"
 	// }
 
-	gatewayHosts, err := s.repo.GetBestHostsByType(10, gatewayHostType)
+	gatewayHosts, err := s.repo.GetBestGatewayHosts(10, gatewayHostType)
 	if err != nil {
 		return nil, nil, err
 	}

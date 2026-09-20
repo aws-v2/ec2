@@ -12,6 +12,7 @@ type HostRepository interface {
 	Update(host *hostdomain.Host) error
 	GetBestHosts(limit int) ([]*hostdomain.Host, error)
 	GetBestHostsByType(limit int, targetType string) ([]*hostdomain.Host, error)
+	GetBestGatewayHosts(limit int, targetType string) ([]*hostdomain.Host, error)
 	GetByID(id string) (*hostdomain.Host, error)
 	ListAll(ctx context.Context) ([]hostdomain.Host, error)
 	UpdatePortStatus(ctx context.Context, action, gatewayID,vmID string, port int) (int64, error) 

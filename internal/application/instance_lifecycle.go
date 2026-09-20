@@ -276,7 +276,7 @@ func (s *InstanceService) persistAndLaunch(
 		}
 	}
 
-	log.Printf("\n\nBefore updating the port status %v \n\n", gatewayServer)
+	log.Printf("\n\nBefore updating the port status %+v \n\n", gatewayServer)
 
 	updatedPortsCount, err := s.hostRepo.UpdatePortStatus(ctx, "TAKEN", gatewayServer.GatewayID, instanceID, gatewayServer.Port)
 	if updatedPortsCount <= 0 {

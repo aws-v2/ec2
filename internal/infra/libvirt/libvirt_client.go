@@ -209,6 +209,14 @@ func (l *LibvirtClient) CreateAndStartVM(
 // The network-config file is what tells cloud-init to configure the NIC with
 // the pre-allocated IP from the network service instead of using DHCP.
 
+func ParseRDSPermissionsString(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	permStrings := strings.Split(s, ",")
+	return permStrings
+}
+
 func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gateway, instanceToken, profile string, params map[string]any, rDSParticulars map[string]string) (string, func(), error) {
 	userDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-user-data", vmName))
 	metaDataPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s-meta-data", vmName))
@@ -217,13 +225,6 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 	isoPath := filepath.Join(absDir, fmt.Sprintf("%s-cloudinit.iso", vmName))
 
 	// fmt.Printf("\n===>>> %v : %v \n",event.Profile, event.RDSParticulars )
-	if profile == "rds" {
-
-		for particular := range rDSParticulars {
-			fmt.Printf("\n===>>> %v\n", rDSParticulars[particular])
-		}
-
-	}
 
 	// Derive the instance ID from vmName (vm-i-abc12345 → i-abc12345)
 	instanceID := strings.TrimPrefix(vmName, "vm-")
@@ -301,8 +302,20 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 
 	// This is the ONLY place config.env gets written now — the switch
 	// case below no longer writes it a second time.
-	if profile == "rds" {
-		writeFiles += fmt.Sprintf(`
+if profile == "rds" {
+	// nil => user requested no extra permissions
+	perms := ParseRDSPermissionsString(rDSParticulars["PERMISSIONS"])
+
+	alterRoleLine := ""
+	if perms != nil {
+		// values were validated by the RDS service, e.g. ["CREATEDB","CREATEROLE"]
+		alterRoleLine = fmt.Sprintf(
+			"\n      sudo -u postgres psql -c \"ALTER ROLE ${DB_USER} WITH %s;\"",
+			strings.Join(perms, " "),
+		)
+	}
+
+	writeFiles += fmt.Sprintf(`
  
   - path: /etc/rds/config.env
     permissions: '0600'
@@ -320,9 +333,10 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
  
       sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME};" || true
       sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
-      sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true`,
-			rDSParticulars["DB_USER"], rDSParticulars["DB_PASSWORD"], rDSParticulars["DB_NAME"])
-	}
+      sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true%s`,
+		rDSParticulars["DB_USER"], rDSParticulars["DB_PASSWORD"], rDSParticulars["DB_NAME"],
+		alterRoleLine)
+}
 
 	runCmd := `  - systemctl daemon-reload
   - systemctl enable metrics-agent
@@ -338,7 +352,7 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 		profile = "vanilla"
 	}
 	profileContent := ""
-// profile
+	// profile
 	switch profile {
 	case "gamelift":
 		userName = "gls"

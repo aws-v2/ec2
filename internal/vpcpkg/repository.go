@@ -9,6 +9,8 @@ type Repository interface {
 	GetDefaultVPC(ctx context.Context, tenantID string) (*VPC, error)
 	GetVPCByID(ctx context.Context, vpcID string) (*VPC, error)
 	ListVPCsByTenant(ctx context.Context, tenantID string) ([]*VPC, error)
+	FindOrphanBridges(ctx context.Context, candidates []string) ([]string, error)
+
 	CreateVPC(ctx context.Context, vpc *VPC) error
 	UpdateVPCStatus(ctx context.Context, vpcID, status string) error
 	UpdateVPCHost(ctx context.Context, vpcID, hostID string) error

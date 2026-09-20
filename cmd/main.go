@@ -163,7 +163,7 @@ func main() {
 
 	vpcProvisioner := vpcpkg.NewVPCProvisioner()
 	vpcRepo := repository.NewVPCRepository(db)
-	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner)
+	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner,hostRepo )
 	rolloutRepo := repository.NewRolloutRepo(db)
 	metricsRepo := repository.NewMetricsRepo(db, logger)
 
@@ -320,16 +320,14 @@ http
 
 
 		warmUpService.PurgeWarmLambdaVMs()
-		// ; err != nil {
-		// 	slog.Error("Failed to get warm Lambda VMs", "error", err)
-		// }
-
+time.Sleep(20 * time.Second)
 		
 
 		if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
 			slog.Error("Failed to get warm Lambda VMs", "error", err)
 		}
 
+time.Sleep(20 * time.Second)
 		if _, err := warmUpService.GetWarmSageMakerVMs(); err != nil {
 			slog.Error("Failed to get warm SageMaker VMs", "error", err)
 		}

@@ -7,7 +7,9 @@ import (
 	"time"
 
 	vpc "ec2-api/internal/vpcpkg"
+
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 type VPCRepository struct {
@@ -32,6 +34,23 @@ func (r *VPCRepository) GetDefaultVPC(ctx context.Context, tenantID string) (*vp
 		return nil, err
 	}
 	return &v, nil
+}
+
+
+func (r *VPCRepository) FindOrphanBridges(ctx context.Context, candidates []string) ([]string, error) {
+	var known []string
+	if err := r.db.SelectContext(ctx, &known, `
+		SELECT bridge_name FROM vpcs
+		WHERE bridge_name = ANY($1) AND status != 'deleted'`, pq.Array(candidates)); err != nil {
+		return nil, err
+	}
+	keep := make(map[string]bool, len(known))
+	for _, k := range known { keep[k] = true }
+	var orphans []string
+	for _, c := range candidates {
+		if !keep[c] { orphans = append(orphans, c) }
+	}
+	return orphans, nil
 }
 
 func (r *VPCRepository) GetVPCByID(ctx context.Context, vpcID string) (*vpc.VPC, error) {

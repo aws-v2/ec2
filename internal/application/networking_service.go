@@ -209,6 +209,9 @@ func (s *NetworkingService) ListVPCs(ctx context.Context, tenantID string) ([]do
 	
 	return s.publisher.ListVPCs(tenantID)
 }
+func (s *NetworkingService) FindOrphanBridges(ctx context.Context, candidates []string) ([]string, error) {
+	return s.vpcService.FindOrphanBridges(ctx, candidates)
+}
 
 // CreateVPC dispatches a request to create a VPC
 func (s *NetworkingService) CreateVPC(ctx context.Context, tenantID, vpcName string) error {

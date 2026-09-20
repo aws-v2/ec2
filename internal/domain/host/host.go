@@ -85,6 +85,7 @@ type Repository interface {
 	Update(host *Host) error
 	GetBestHosts(limit int) ([]*Host, error)
 	GetBestHostsByType(limit int, targetType string) ([]*Host, error)
+	GetBestGatewayHosts(limit int, targetType string) ([]*Host, error)
 	GetByID(id string) (*Host, error)
 	ListAll(ctx context.Context) ([]Host, error)
 }

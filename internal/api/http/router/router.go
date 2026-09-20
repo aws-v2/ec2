@@ -112,6 +112,7 @@ func SetupRoutes(r *gin.Engine,
 		vpcs := api.Group("/vpcs")
 		{
 			vpcs.GET("", networkingHandler.ListVPCs)
+			vpcs.POST("/agent/bridges/orphans", networkingHandler.FindOrphanBridges)
 			vpcs.POST("", networkingHandler.CreateVPC)
 			vpcs.PUT("/:id/vpc", networkingHandler.AssignVPC)
 

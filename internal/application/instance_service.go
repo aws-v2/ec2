@@ -158,6 +158,35 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	fmt.Printf("The choosen base-image----->: %s",baseImagePath)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
 	// Step 2: VPC Placement & Host Selection
 	// ─── NEW PLACEMENT LOGIC ──────────────────────────────────────
 
@@ -175,6 +204,39 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
 		return nil, err
 	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	hostID := ""
 	if bestHost != nil {

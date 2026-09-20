@@ -1,8 +1,10 @@
 package transport
 
 import (
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"ec2-api/internal/application"
 	dto "ec2-api/internal/domain/dto"
@@ -268,6 +270,51 @@ func (h *NetworkingHandler) CreateVPC(c *gin.Context) {
 	}
 
 	dto.SendSuccess(c, http.StatusAccepted, "VPC creation request submitted successfully", nil)
+}
+
+type findOrphanBridgesRequest struct {
+	Bridges []string `json:"bridges"`
+}
+
+type findOrphanBridgesResponse struct {
+	Orphans []string `json:"orphans"`
+}
+
+const maxBridgesPerRequest = 1000
+
+func (h *NetworkingHandler) FindOrphanBridges(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+
+	var req findOrphanBridgesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+		return
+	}
+	if len(req.Bridges) > maxBridgesPerRequest {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "too many bridges"})
+		return
+	}
+
+	// Defence in depth: this endpoint may only ever talk about agent-managed bridges,
+	// so a bug or a forged request can't get docker0/virbr0/etc. reported as orphans.
+	for _, b := range req.Bridges {
+		if !strings.HasPrefix(b, "vbr-") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bridge name: " + b})
+			return
+		}
+	}
+
+	orphans, err := h.service.FindOrphanBridges(c.Request.Context(), req.Bridges)
+	if err != nil {
+		log.Printf("[vpc] find orphan bridges failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if orphans == nil {
+		orphans = []string{} // encode as [] not null
+	}
+
+	c.JSON(http.StatusOK, findOrphanBridgesResponse{Orphans: orphans})
 }
 
 func (h *NetworkingHandler) AssignVPC(c *gin.Context) {

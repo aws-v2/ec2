@@ -1,10 +1,16 @@
 package vpcpkg
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"ec2-api/internal/interfaces"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,12 +19,14 @@ import (
 // Service is the single entry point the InstanceService will call.
 // It owns all VPC business logic and coordinates the repository + provisioner.
 type Service struct {
-	repo        Repository
+	repo     Repository
+	hostRepo interfaces.HostRepository
+
 	provisioner *Provisioner
 }
 
-func NewVpcService(repo Repository, provisioner *Provisioner) *Service {
-	return &Service{repo: repo, provisioner: provisioner}
+func NewVpcService(repo Repository, provisioner *Provisioner, hostRepo interfaces.HostRepository) *Service {
+	return &Service{repo: repo, provisioner: provisioner, hostRepo: hostRepo}
 }
 
 // GetOrCreateDefaultVPC returns the tenant's default VPC, creating it if needed.
@@ -40,6 +48,10 @@ func (s *Service) GetOrCreateDefaultVPC(ctx context.Context, tenantID string) (*
 // Called when the user explicitly creates a VPC from the API.
 func (s *Service) CreateVPC(ctx context.Context, tenantID, name string) (*VPC, error) {
 	return s.createVPC(ctx, tenantID, name, false)
+}
+
+func (s *Service) FindOrphanBridges(ctx context.Context, candidates []string) ([]string, error) {
+	return s.repo.FindOrphanBridges(ctx, candidates)
 }
 
 // AllocateInstanceNetwork resolves the VPC and assigns a free IP to the instance.
@@ -120,6 +132,8 @@ func (s *Service) ListVPCs(ctx context.Context, tenantID string) ([]*VPC, error)
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
+const maxCIDRAttempts = 64
+
 func (s *Service) createVPC(ctx context.Context, tenantID, name string, isDefault bool) (*VPC, error) {
 	// CIDR allocation must be serialized — get all existing CIDRs first
 	usedCIDRs, err := s.repo.GetUsedCIDRs(ctx)
@@ -127,9 +141,31 @@ func (s *Service) createVPC(ctx context.Context, tenantID, name string, isDefaul
 		return nil, fmt.Errorf("failed to fetch used CIDRs: %w", err)
 	}
 
-	cidr, err := AllocateNextCIDR(usedCIDRs)
-	if err != nil {
-		return nil, err
+	// cidr, err := AllocateNextCIDR(usedCIDRs)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	var cidr string
+	for attempt := 0; attempt < maxCIDRAttempts; attempt++ {
+		candidate, err := AllocateNextCIDR(usedCIDRs)
+		if err != nil {
+			return nil, err
+		}
+
+		free, reason, err := s.cidrFreeOnAllHosts(ctx, candidate)
+		if err != nil {
+			return nil, fmt.Errorf("cannot verify CIDR %s, refusing to allocate: %w", candidate, err)
+		}
+		if free {
+			cidr = candidate
+			break
+		}
+
+		log.Printf("[VPC] CIDR %s is in use on a host (%s), trying next", candidate, reason)
+		usedCIDRs = append(usedCIDRs, candidate)
+	}
+	if cidr == "" {
+		return nil, fmt.Errorf("no free CIDR found after %d attempts", maxCIDRAttempts)
 	}
 
 	gateway, err := GatewayFromCIDR(cidr)
@@ -166,4 +202,57 @@ func (s *Service) createVPC(ctx context.Context, tenantID, name string, isDefaul
 
 	log.Printf("[VPC] Created VPC %s (CIDR: %s, bridge: %s, default: %v)", vpc.ID, cidr, bridge, isDefault)
 	return vpc, nil
+}
+
+func (s *Service) cidrFreeOnAllHosts(ctx context.Context, cidr string) (bool, string, error) {
+	hosts, err := s.hostRepo.ListAll(ctx) // adapt to your host repo; must return distinct IPs
+	if err != nil {
+		return false, "", fmt.Errorf("list hosts: %w", err)
+	}
+	for _, host := range hosts {
+		free, reason, err := s.checkCIDROnHost(ctx, host.IP, cidr)
+		if err != nil {
+			return false, "", fmt.Errorf("host %s: %w", host.IP, err)
+		}
+		if !free {
+			return false, fmt.Sprintf("host %s: %s", host.IP, reason), nil
+		}
+	}
+	return true, "", nil
+}
+
+func (s *Service) checkCIDROnHost(ctx context.Context, hostIP, cidr string) (bool, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	body, err := json.Marshal(map[string]string{"cidr": cidr})
+	if err != nil {
+		return false, "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("http://%s:9030/cidr-check", hostIP), bytes.NewReader(body))
+	if err != nil {
+		return false, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "", fmt.Errorf("agent unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return false, "", fmt.Errorf("agent returned %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	var out struct {
+		Free      bool     `json:"free"`
+		Conflicts []string `json:"conflicts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, "", fmt.Errorf("decode agent response: %w", err)
+	}
+	return out.Free, strings.Join(out.Conflicts, "; "), nil
 }

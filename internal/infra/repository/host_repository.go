@@ -184,7 +184,44 @@ func (r *hostRepository) GetBestHosts(limit int) ([]*domain.Host, error) {
 	}
 	return hosts, nil
 }
+func (r *hostRepository) GetBestGatewayHosts(limit int, targetType string) ([]*domain.Host, error) {
+	// Scoring logic: sort by RAM free desc, CPU used asc, Disk free desc
+	query := `
+		SELECT id,hosttype, hostname, ip, ssh_user, cpu_total, cpu_used, ram_total, ram_free, disk_total, disk_free, status, last_heartbeat, created_at, available_templates
+		FROM hosts
+		WHERE status = 'active' AND last_heartbeat > $1 AND hosttype = $2
+		ORDER BY ram_free DESC, cpu_used ASC, disk_free DESC
+		LIMIT $3
+	`
+	// Assume heartbeats within last 5 minutes are active
+	// threshold := time.Now().Add(-5 * time.Minute)
+	threshold := time.Now().Add(-12 * time.Hour)
+	rows, err := r.db.Query(query, threshold, targetType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query best hosts by type: %w", err)
+	}
+	defer rows.Close()
 
+	var hosts []*domain.Host
+	for rows.Next() {
+		h := &domain.Host{}
+		err := rows.Scan(
+			&h.ID, &h.HostType, &h.Hostname, &h.IP, &h.SSHUser, &h.CPUTotal, &h.CPUUsed,
+			&h.RAMTotal, &h.RAMFree, &h.DiskTotal, &h.DiskFree,
+			&h.Status, &h.LastHeartbeat, &h.CreatedAt,
+			pq.Array(&h.AvailableTemplates),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		fmt.Printf("the choosen gateway rew host %v \n",h.ID )
+		fmt.Printf("the choosen hosts type %v \n",h.HostType )
+		fmt.Printf("Target type %v \n",targetType )
+
+		hosts = append(hosts, h)
+	}
+	return hosts, nil
+}
 func (r *hostRepository) GetBestHostsByType(limit int, targetType string) ([]*domain.Host, error) {
 	// Scoring logic: sort by RAM free desc, CPU used asc, Disk free desc
 	query := `
