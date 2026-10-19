@@ -145,8 +145,8 @@ func (s *InstanceService) HandleLambdaRealease(ctx context.Context, event *domai
 }
 func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.ProvisionInstanceEvent) (domain.EC2Response, error) {
 
-	log.Printf("[PROVISIONER] profile=%s ",
-		event.Profile)
+	log.Printf("[**PROVISIONER] profile=%+v ",
+		event)
 
 	req := &domain.CreateInstanceRequest{
 		Specs:          event.Specs,
@@ -218,6 +218,10 @@ func (s *InstanceService) HandleProvision(ctx context.Context, event *domain.Pro
 	}
 
 	instance := &domain.Instance{}
+
+	if event.Profile=="rds"{
+		req.Name=fmt.Sprintf("rds-%s-%s", event.Name,event.ResourceID)
+	}
 
 	// Call core logic
 	instance, err := s.CreateInstance(ctx, req, userID)

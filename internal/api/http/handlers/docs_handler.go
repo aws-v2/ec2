@@ -24,7 +24,7 @@ func (h *DocsHandler) GetManifest(c *gin.Context) {
 
 	requestID := c.GetString("requestID")
 
-	if role == "USER" {
+	if role == "USER"  {
 		data, err := h.service.GetManifest(false)
 		if err != nil {
 			log.Printf("[Handler:GetManifest] Service call, requestID %s  error %s", requestID, err.Error())
@@ -57,13 +57,16 @@ func (h *DocsHandler) GetManifest(c *gin.Context) {
 		return
 	}
 
-	vpcpkg.RespondSucces(c, http.StatusOK, "Fetched documents successfully", gin.H{
+	reponse := gin.H{
 		"service":    chooseString(publicData, internalData),
 		"apiVersion": chooseVersion(publicData, internalData),
 		"scope":      "internal",
 		"internal":   safeCategories(internalData),
 		"public":     safeCategories(publicData),
-	})
+	}
+
+
+	vpcpkg.RespondSucces(c, http.StatusOK, "Fetched documents successfully",reponse)
 }
 
 func (h *DocsHandler) GetDoc(c *gin.Context) {

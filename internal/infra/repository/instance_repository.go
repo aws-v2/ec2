@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -221,7 +222,108 @@ func (r *instanceRepository) FindByID(id string) (*domain.Instance, error) {
 	}
 	return &instance, err
 }
+func (r *instanceRepository) FindAMIsByUserID(userID string) ([]domain.AMISummary, error) {
+	query := `
+		SELECT id, name, COALESCE(description, ''), status,
+		       COALESCE(source_instance_id, ''), created_at
+		FROM golden_images
+		WHERE user_id = $1
+		ORDER BY created_at DESC`
 
+	rows, err := r.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query amis for user %s: %w", userID, err)
+	}
+	defer rows.Close()
+
+	images := make([]domain.AMISummary, 0) // empty slice, so JSON renders [] instead of null
+	for rows.Next() {
+		var a domain.AMISummary
+		if err := rows.Scan(
+			&a.ID, &a.Name, &a.Description, &a.Status,
+			&a.SourceInstanceID, &a.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan ami row: %w", err)
+		}
+		images = append(images, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ami rows: %w", err)
+	}
+	return images, nil
+}
+
+func (r *instanceRepository) FindAMIByIDAndUserID(id, userID string) (*domain.Image, error) {
+	query := `
+		SELECT id, name, COALESCE(description, ''), user_id,
+		       COALESCE(source_instance_id, ''), COALESCE(host_id, ''),
+		       status, no_reboot, COALESCE(consistency, ''),
+		       disk_path, COALESCE(size_bytes, 0), COALESCE(sha256, ''),
+		       COALESCE(error_message, ''), created_at, updated_at
+		FROM golden_images
+		WHERE id = $1 AND user_id = $2`
+
+	var img domain.Image
+	err := r.db.QueryRow(query, id, userID).Scan(
+		&img.ID, &img.Name, &img.Description, &img.UserID,
+		&img.SourceInstanceID, &img.HostID,
+		&img.Status, &img.NoReboot, &img.Consistency,
+		&img.DiskPath, &img.SizeBytes, &img.SHA256,
+		&img.ErrorMessage, &img.CreatedAt, &img.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("No found")
+		}
+		return nil, fmt.Errorf("find ami %s for user %s: %w", id, userID, err)
+	}
+	return &img, nil
+}
+
+func (r *instanceRepository) CreateAMI(image *domain.Image) error {
+	query := `
+		INSERT INTO golden_images (
+			id, name, description, user_id, source_instance_id, host_id,
+			status, no_reboot, consistency, disk_path, size_bytes, sha256, error_message
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12, $13
+		)
+		RETURNING created_at, updated_at`
+
+	return r.db.QueryRow(
+		query,
+		image.ID, image.Name, image.Description, image.UserID, image.SourceInstanceID, image.HostID,
+		image.Status, image.NoReboot, image.Consistency, image.DiskPath, image.SizeBytes, image.SHA256, image.ErrorMessage,
+	).Scan(&image.CreatedAt, &image.UpdatedAt)
+}
+
+func (r *instanceRepository) UpdateAMI(image *domain.Image) error {
+	query := `
+		UPDATE golden_images SET
+			name          = $1,
+			description   = $2,
+			status        = $3,
+			consistency   = $4,
+			disk_path     = $5,
+			size_bytes    = $6,
+			sha256        = $7,
+			error_message = $8,
+			updated_at    = CURRENT_TIMESTAMP
+		WHERE id = $9 AND deleted_at IS NULL
+		RETURNING updated_at`
+
+	err := r.db.QueryRow(
+		query,
+		image.Name, image.Description, image.Status, image.Consistency, image.DiskPath,
+		image.SizeBytes, image.SHA256, image.ErrorMessage, image.ID,
+	).Scan(&image.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("image %s not found", image.ID)
+	}
+	return err
+}
 // repository
 func (r *instanceRepository) FindAll(userID string) ([]*domain.Instance, error) {
 	var instances []*domain.Instance

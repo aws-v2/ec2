@@ -24,6 +24,7 @@ type Config struct {
 	SystemUserId string
 	// Profiles
 	Profile string
+METRICS_API_KEY  string
 
 	// MinIO
 	MinIO MinIOConfig
@@ -104,8 +105,10 @@ func Load() (*Config, error) {
 	profileBaseImage["rds"] = "rds-template"
 
 	cfg := &Config{
+		METRICS_API_KEY:"e956807e27669001319d73d3a9f1728a4a1161c79a6a287160c3a73394c05df8",
+
 		SystemUserId:  "00000000-0000-0000-0000-000000000000",
-		WarmVmsTimer:  getEnvInt("WARM_VM_TIMER", 10),
+		WarmVmsTimer:  getEnvInt("WARM_VM_TIMER", 30),
 		AgentUrlParts: getEnv("API_GATEWAY", "http://localhost:8080"),
 		AgentPort:     getEnvInt("AGENT_PORT", 9030),
 		PrivateKey:    LoadKeyPair()[0],

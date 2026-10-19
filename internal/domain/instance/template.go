@@ -31,7 +31,7 @@ type Template struct {
 }
 
 type CreateTemplateRequest struct {
-	InstanceID  string `json:"instance_id"`
+	InstanceID  string `json:"instance_id" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
 }

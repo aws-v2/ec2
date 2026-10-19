@@ -1,5 +1,74 @@
 package main
 
+// import (
+// 	"fmt"
+// 	"os"
+// 	"time"
+
+// 	"golang.org/x/crypto/ssh"
+// )
+
+// func main() {
+// 	keyBytes, err := os.ReadFile("/tmp/id_rsa_debug_2018079116")
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	signer, err := ssh.ParsePrivateKey(keyBytes)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	fmt.Println("fingerprint:", ssh.FingerprintSHA256(signer.PublicKey()))
+
+// config := &ssh.ClientConfig{
+// 	User: "root",
+// 	Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+// 	HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+// 	Timeout:         10 * time.Second,
+// 	Config: ssh.Config{
+// 		KeyExchanges: []string{
+// 			"curve25519-sha256",
+// 			"curve25519-sha256@libssh.org",
+// 			"ecdh-sha2-nistp256",
+// 			"ecdh-sha2-nistp384",
+// 			"ecdh-sha2-nistp521",
+// 			"diffie-hellman-group14-sha256",
+// 			"diffie-hellman-group16-sha512",
+// 			"diffie-hellman-group-exchange-sha256",
+// 		},
+// 	},
+// 	HostKeyAlgorithms: []string{
+// 		"ssh-ed25519",
+// 		"rsa-sha2-512",
+// 		"rsa-sha2-256",
+// 		"ecdsa-sha2-nistp256",
+// 		"ecdsa-sha2-nistp384",
+// 		"ecdsa-sha2-nistp521",
+// 	},
+// }
+
+// 	client, err := ssh.Dial("tcp", "localhost:22", config)
+// 	if err != nil {
+// 		fmt.Println("DIAL FAILED:", err)
+// 		return
+// 	}
+// 	defer client.Close()
+
+// 	session, err := client.NewSession()
+// 	if err != nil {
+// 		fmt.Println("SESSION FAILED:", err)
+// 		return
+// 	}
+// 	defer session.Close()
+
+// 	out, err := session.CombinedOutput("echo connected")
+// 	if err != nil {
+// 		fmt.Println("COMMAND FAILED:", err)
+// 		return
+// 	}
+// 	fmt.Println("OUTPUT:", string(out))
+// }
 import (
 	"bytes"
 	"context"
@@ -27,6 +96,7 @@ import (
 	repository "ec2-api/internal/infra/repository"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
+	"ec2-api/internal/metrics"
 	"ec2-api/internal/vpcpkg"
 	pkg "ec2-api/pkg"
 
@@ -113,7 +183,7 @@ func main() {
 
 	slog.Info("Initializing Libvirt client...")
 	natsSubject := messaging.BuildSubject(cfg.Profile, "instance", "lifecycle")
-	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject)
+	libvirtClient, err := libvirt.NewLibvirtClient(libvirtURI, imagesDir, cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.NATS.URL, natsSubject, *cfg)
 
 	if err != nil {
 		slog.Warn("Failed to connect to libvirt", "error", err)
@@ -163,7 +233,7 @@ func main() {
 
 	vpcProvisioner := vpcpkg.NewVPCProvisioner()
 	vpcRepo := repository.NewVPCRepository(db)
-	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner,hostRepo )
+	vpcService := vpcpkg.NewVpcService(vpcRepo, vpcProvisioner, hostRepo)
 	rolloutRepo := repository.NewRolloutRepo(db)
 	metricsRepo := repository.NewMetricsRepo(db, logger)
 
@@ -185,16 +255,15 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV)
-	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient)
+	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV, cfg.AgentUrlParts)
+	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient, hostRepo, cfg.NATS.SubjectPrefix, natsPublisher, cfg.AgentUrlParts)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
 	templateService := application.NewTemplateService(templateRepo, instanceRepo, libvirtClient)
 	terminalService := application.NewTerminalService(instanceRepo)
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 	docsService := application.NewDocsService("docs")
-	warmUpService := application.NewWarmupService(instanceRepo, hostRepo,*instanceService, cfg.SystemUserId)
-
+	warmUpService := application.NewWarmupService(instanceRepo, hostRepo, *instanceService, cfg.SystemUserId)
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
@@ -222,10 +291,18 @@ func main() {
 	fleetHandler := transport.NewFleetHandler(fleetService)
 	docsHandler := transport.NewDocsHandler(docsService)
 	hostHandler := transport.NewHostHandler(hostService)
+	metrics.Serve(":7085", cfg.METRICS_API_KEY)
 
 	// 5. Setup Router
 	router := gin.Default()
+		router.Use(metrics.MetricsMiddleware())   // first, before auth and before SetupRoutes
+
+
 	router.SetTrustedProxies(nil)
+
+// router.Use(metrics.GinMiddleware())                  // NEW: applies to every route registered after this
+// router.GET("/metrics", gin.WrapH(metrics.Handler())) // NEW: next to /health, no auth
+
 
 	// Health check for Eureka
 	router.GET("/health", func(c *gin.Context) {
@@ -261,36 +338,36 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-// when the server is started we get hosts from db which host is type lambda, 
-// we check if in this host has hot vms, 
-// if no vm is running on the hosts we create 1, ie send a provision request with host typelambda
-// so when we get a lmbda invocation request, 
-// instead of ceating a new vm we could take one fromthe pool,
-// since each lambda vm has the lambda runtime running on there with th efast api server, 
-// so a lambda invacation request sends
-/*
+	// when the server is started we get hosts from db which host is type lambda,
+	// we check if in this host has hot vms,
+	// if no vm is running on the hosts we create 1, ie send a provision request with host typelambda
+	// so when we get a lmbda invocation request,
+	// instead of ceating a new vm we could take one fromthe pool,
+	// since each lambda vm has the lambda runtime running on there with th efast api server,
+	// so a lambda invacation request sends
+	/*
 
-we mark the vm as in_service
+	   we mark the vm as in_service
 
-ProvisionRequest{
-		profile lambda
-}
+	   ProvisionRequest{
+	   		profile lambda
+	   }
 
-then we chack the db for a lambda host vm we return the IP and port
-we then create the forwarding rule gateway->host->vm
+	   then we chack the db for a lambda host vm we return the IP and port
+	   we then create the forwarding rule gateway->host->vm
 
-then we do gatewayip:port/invoke with request payload {function_id, function_s3_url}
-we download the function files from s3
-we return {code, message, Data}
-
-
-we remove any data that was downloaded and mark the vm as free
+	   then we do gatewayip:port/invoke with request payload {function_id, function_s3_url}
+	   we download the function files from s3
+	   we return {code, message, Data}
 
 
+	   we remove any data that was downloaded and mark the vm as free
 
-http
 
-*/
+
+	   http
+
+	*/
 
 	warmVmTimer := time.Duration(cfg.WarmVmsTimer) * time.Second
 	ticker := time.NewTicker(warmVmTimer)
@@ -298,42 +375,36 @@ http
 
 	for range ticker.C {
 
+		go func() {
+			// here before we warm up any vm, we need any left over vms tohandle an edge case like this oen
+			/*
+				suppose we preovisioned a sagemaker vm,
+				we ran a job on it, after the jib is completed and we have called  the  .ec2.task.release_lambda_vm (both sagemake and lambda vm a re release usingthis subject,tobe fixed latar TODO:)
+				and the vm is released succesfully and then we delete the vm via somethinglike
 
+				for vm in $(virsh list --all --name | grep -v '^base-template$' | grep -v '^$'); do virsh destroy "$vm" 2>/dev/null; virsh undefine "$vm" --remove-all-storage; done
 
+				in the database the vm wwill be marked as running, that is bringin up issue since the when assigning sagemaker/lambda jobs to a vm
+				we get the first record with status runnning that measns we select the vm that doesnt exist,
+				so the idea here is that before we provision any new lambda/vm we first check if there is anyleftover lambda orsagemaker vm
+				 we delete them first,
+				 ie. we purge the vms from the db
 
-	go func() {
-		// here before we warm up any vm, we need any left over vms tohandle an edge case like this oen 
-		/*
-		suppose we preovisioned a sagemaker vm,
-		we ran a job on it, after the jib is completed and we have called  the  .ec2.task.release_lambda_vm (both sagemake and lambda vm a re release usingthis subject,tobe fixed latar TODO:)
-		and the vm is released succesfully and then we delete the vm via somethinglike 
+			*/
 
-		for vm in $(virsh list --all --name | grep -v '^base-template$' | grep -v '^$'); do virsh destroy "$vm" 2>/dev/null; virsh undefine "$vm" --remove-all-storage; done
+			warmUpService.PurgeWarmLambdaVMs()
+			time.Sleep(10 * time.Second)
 
-		in the database the vm wwill be marked as running, that is bringin up issue since the when assigning sagemaker/lambda jobs to a vm
-		we get the first record with status runnning that measns we select the vm that doesnt exist, 
-		so the idea here is that before we provision any new lambda/vm we first check if there is anyleftover lambda orsagemaker vm 
-		 we delete them first, 
-		 ie. we purge the vms from the db  
+			if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
+				slog.Error("Failed to get warm Lambda VMs", "error", err)
+			}
 
-		*/
+			time.Sleep(20 * time.Second)
+			if _, err := warmUpService.GetWarmSageMakerVMs(); err != nil {
+				slog.Error("Failed to get warm SageMaker VMs", "error", err)
+			}
 
-
-		warmUpService.PurgeWarmLambdaVMs()
-time.Sleep(20 * time.Second)
-		
-
-		if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
-			slog.Error("Failed to get warm Lambda VMs", "error", err)
-		}
-
-time.Sleep(20 * time.Second)
-		if _, err := warmUpService.GetWarmSageMakerVMs(); err != nil {
-			slog.Error("Failed to get warm SageMaker VMs", "error", err)
-		}
-
-	
-	}()
+		}()
 	}
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)

@@ -81,6 +81,31 @@ func (p *NATSPublisher) Close() {
 	}
 }
 
+func (p *NATSPublisher) PublishDeleteFile(req interface{}) (domain.DeleteFileS3Resp, error) {
+	resp := domain.DeleteFileS3Resp{}
+	if p == nil || p.nc == nil {
+		return resp, fmt.Errorf("NATS publisher not initialized")
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return resp, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	subject := fmt.Sprintf("%s.s3.task.delete_file", p.profile)
+
+	msg, err := p.nc.Request(subject, data, 5*time.Second)
+	if err != nil {
+		return resp, fmt.Errorf("nats request failed for subject: %s with errir: %w",subject, err)
+	}
+
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return resp, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return resp, nil
+}
+
 func (p *NATSPublisher) PublishCreateUploadURL(req interface{}) (string, error) {
 	if p == nil || p.nc == nil {
 		return "", fmt.Errorf("NATS publisher not initialized")
@@ -153,17 +178,17 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 	if err != nil {
 		return "", fmt.Errorf("marshal presign request: %w", err)
 	}
-// type createPresignedURLRequest struct {
-//     UserID     string    `json:"user_id"`
-//     GameID     string    `json:"game_id,omitempty"`
-//     AssetID    string    `json:"asset_id"`
-//     AssetType  AssetType `json:"asset_type"`  // "game" | "template"
-//     AssetName  string    `json:"asset_name"`  // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
-//     BucketName string    `json:"bucket_name"` // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
-//     Key        string    `json:"key"`
+	// type createPresignedURLRequest struct {
+	//     UserID     string    `json:"user_id"`
+	//     GameID     string    `json:"game_id,omitempty"`
+	//     AssetID    string    `json:"asset_id"`
+	//     AssetType  AssetType `json:"asset_type"`  // "game" | "template"
+	//     AssetName  string    `json:"asset_name"`  // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
+	//     BucketName string    `json:"bucket_name"` // this is the nameof the job/game/render job this asset belongs to like kalshi or ruto tracker
+	//     Key        string    `json:"key"`
 
-//     Sha256 string `json:"sha256"`
-// }
+	//     Sha256 string `json:"sha256"`
+	// }
 	subject := fmt.Sprintf("%s.s3.task.create_presign_download_url", p.profile)
 
 	slog.Debug("publishing presign request via NATS",
@@ -223,12 +248,10 @@ func (p *NATSPublisher) FetchAgentPresignedURL(userID, version, fileName, sha256
 //
 //	A single failed publish silently dropped the registration event.
 type RDSMetadata struct {
-	HostIp string `json:"host_ip"`
+	HostIp            string `json:"host_ip"`
 	InstancePrivateIp string `json:"instance_private_ip"`
-	InstancePublicIp string `json:"instance_public_ip"`
-	ResourceID    string            `json:"resource_id"`
-
-
+	InstancePublicIp  string `json:"instance_public_ip"`
+	ResourceID        string `json:"resource_id"`
 }
 type GameliftMetadata struct {
 }
@@ -240,7 +263,7 @@ type WorkerMetadata struct {
 type InstanceMetadata struct {
 }
 
-func (p *NATSPublisher) PublishInstanceEvent(profile string, eventType string, instance *domain.Instance, agentWS string, sessionID string, stage,resourceID string) error {
+func (p *NATSPublisher) PublishInstanceEvent(profile string, eventType string, instance *domain.Instance, agentWS string, sessionID string, stage, resourceID string) error {
 	fmt.Printf("---------------------------------------")
 
 	if p == nil || p.nc == nil {
@@ -271,9 +294,9 @@ func (p *NATSPublisher) PublishInstanceEvent(profile string, eventType string, i
 		case "rds", "yellow":
 			instancemeta = RDSMetadata{
 				InstancePrivateIp: instance.IP,
-				InstancePublicIp: instance.PublicIP,
-				ResourceID: resourceID,
-				
+				InstancePublicIp:  instance.PublicIP,
+				ResourceID:        resourceID,
+
 				HostIp: instance.HostID,
 			}
 		case "gamelift", "gls", "blue":
@@ -295,9 +318,9 @@ func (p *NATSPublisher) PublishInstanceEvent(profile string, eventType string, i
 		Stage:         stage,
 
 		Payload: domain.InstanceLifecyclePayload{
-			IPAddress:   instance.IP, // ← was empty before when DHCP hadn't resolved yet
-			VPCID:       instance.VPCID,
-			ServicePort: 22,
+			IPAddress:               instance.IP, // ← was empty before when DHCP hadn't resolved yet
+			VPCID:                   instance.VPCID,
+			ServicePort:             22,
 			InstanceStartedMetadata: instancemeta,
 
 			AgentWS: agentWS,
@@ -741,9 +764,8 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 type InstanceTokenRequest struct {
 	InstanceID string `json:"instanceID"`
 	UserId     string `json:"userID"`
-	Payload string `json:"payload"`
+	Payload    string `json:"payload"`
 }
-
 
 type InstanceTokenResponse struct {
 	Token string `json:"token"`
@@ -762,7 +784,7 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	subject := fmt.Sprintf("%s.iam.token.generate", p.profile)
 	payload := map[string]interface{}{
 		"userId": userID,
-		"e":   expiresAt.Unix(),
+		"e":      expiresAt.Unix(),
 	}
 
 	payloadJSON, _ := json.Marshal(payload)
@@ -771,9 +793,8 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	req := InstanceTokenRequest{
 		InstanceID: instanceID,
 		UserId:     userID,
-		Payload:payloadEncoded,
+		Payload:    payloadEncoded,
 	}
-
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -781,11 +802,10 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 	}
 	fmt.Printf("Requesting instance token for instance %s and user %s length %v\n", instanceID, userID, len(payloadJSON))
 
-
 	log.Printf("[NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
 		subject, correlationID, userID, instanceID)
 
-	log.Printf("\nthe fullpayload we sent foratoken %v\n",req )
+	log.Printf("\nthe fullpayload we sent foratoken %v\n", req)
 
 	msg, err := p.nc.Request(subject, data, 5*time.Second)
 	if err != nil {
@@ -985,3 +1005,8 @@ func (p *NATSPublisher) PublishProvisioningProgress(instanceID, stage, message s
 
 	return p.nc.Flush()
 }
+
+// func (p *NATSPublisher) PublishS3CreatePresignedUrl(req domain.CreatePresignedURLRequest) error {
+
+// 	return nil
+// }

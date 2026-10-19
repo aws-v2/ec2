@@ -27,13 +27,16 @@ func NewVolumeHandler(service *application.VolumeService, snapshotService *appli
 
 func (h *VolumeHandler) CreateVolume(c *gin.Context) {
 	var req domain.CreateVolumeRequest
+	userId := c.GetString("userID")
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("[Handler:CreateVolume] Bad request: %v", err)
 		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
 
-	volume, err := h.service.CreateVolume(&req)
+
+	volume, err := h.service.CreateVolume(&req, userId)
 	if err != nil {
 		log.Printf("[Handler:CreateVolume] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to create volume"))
@@ -79,6 +82,7 @@ func (h *VolumeHandler) GetVolume(c *gin.Context) {
 
 func (h *VolumeHandler) AttachVolume(c *gin.Context) {
 	volumeIDStr := c.Param("id")
+	userId := c.GetString("userID")
 	volumeID, err := strconv.Atoi(volumeIDStr)
 	if err != nil {
 		log.Printf("[Handler:AttachVolume] invalid id: %v", err)
@@ -92,7 +96,7 @@ func (h *VolumeHandler) AttachVolume(c *gin.Context) {
 		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
 		return
 	}
-	volume, err := h.service.AttachVolume(volumeID, req.InstanceID)
+	volume, err := h.service.AttachVolume(volumeID, req.InstanceID, userId)
 	if err != nil {
 		log.Printf("[Handler:AttachVolume] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to attach volume"))
@@ -104,6 +108,7 @@ func (h *VolumeHandler) AttachVolume(c *gin.Context) {
 
 func (h *VolumeHandler) DetachVolume(c *gin.Context) {
 	volumeIDStr := c.Param("id")
+	userId :=c.GetString("userID")
 	volumeID, err := strconv.Atoi(volumeIDStr)
 	if err != nil {
 		log.Printf("[Handler:DetachVolume] invalid id: %v", err)
@@ -111,7 +116,7 @@ func (h *VolumeHandler) DetachVolume(c *gin.Context) {
 		return
 	}
 
-	volume, err := h.service.DetachVolume(volumeID)
+	volume, err := h.service.DetachVolume(volumeID, userId)
 	if err != nil {
 		log.Printf("[Handler:DetachVolume] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to detach volume"))
@@ -120,17 +125,47 @@ func (h *VolumeHandler) DetachVolume(c *gin.Context) {
 
 	vpcpkg.RespondSucces(c, http.StatusOK, "Volume detached successfully", volume)
 }
-
-func (h *VolumeHandler) ReserveVolume(c *gin.Context) {
+func (h *VolumeHandler) ReleaseVolumeReservation(c *gin.Context) {
 	volumeIDStr := c.Param("id")
 	volumeID, err := strconv.Atoi(volumeIDStr)
+
+
 	if err != nil {
 		log.Printf("[Handler:ReserveVolume] invalid id: %v", err)
 		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid volume id"))
 		return
 	}
+ 
 
-	volume, err := h.service.ReserveVolume(volumeID)
+	volume, err := h.service.ReleaseVolumeReservation(volumeID)
+	if err != nil {
+		log.Printf("[Handler:ReserveVolume] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to reserve volume"))
+		return
+	}
+
+	vpcpkg.RespondSucces(c, http.StatusOK, "Storage_Reservation_Created", volume)
+}
+func (h *VolumeHandler) ReserveVolume(c *gin.Context) {
+	volumeIDStr := c.Param("id")
+	volumeID, err := strconv.Atoi(volumeIDStr)
+
+
+	if err != nil {
+		log.Printf("[Handler:ReserveVolume] invalid id: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid volume id"))
+		return
+	}
+	var req domain.ReservationRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[Handler:ReserveVolume] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
+		return
+	}
+
+
+	volume, err := h.service.ReserveVolume(volumeID,req)
 	if err != nil {
 		log.Printf("[Handler:ReserveVolume] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to reserve volume"))
@@ -142,6 +177,7 @@ func (h *VolumeHandler) ReserveVolume(c *gin.Context) {
 
 func (h *VolumeHandler) ExpandVolume(c *gin.Context) {
 	volumeIDStr := c.Param("id")
+	userId :=c.GetString("userID")
 	volumeID, err := strconv.Atoi(volumeIDStr)
 	if err != nil {
 		log.Printf("[Handler:ExpandVolume] invalid id: %v", err)
@@ -160,7 +196,7 @@ func (h *VolumeHandler) ExpandVolume(c *gin.Context) {
 		return
 	}
 
-	volume, err := h.service.ExpandVolume(volumeID, req.NewSize)
+	volume, err := h.service.ExpandVolume(volumeID, req.NewSize,userId)
 	if err != nil {
 		log.Printf("[Handler:ExpandVolume] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to expand volume"))
@@ -191,7 +227,9 @@ func (h *VolumeHandler) DeleteVolume(c *gin.Context) {
 	vpcpkg.RespondSucces(c, http.StatusOK, "Volume deleted successfully", nil)
 }
 
-func (h *VolumeHandler) CreateSnapshot(c *gin.Context) {
+func (h *VolumeHandler) CreateVolumeSnapshot(c *gin.Context) {
+	userId := c.GetString("userID")
+	log.Printf("Called the CreateVolumeSnapshot handler")
 	volumeIDStr := c.Param("id")
 	volumeID, err := strconv.Atoi(volumeIDStr)
 	if err != nil {
@@ -200,13 +238,13 @@ func (h *VolumeHandler) CreateSnapshot(c *gin.Context) {
 		return
 	}
 
-	var req domain.CreateSnapshotRequest
+	var req domain.CreateVolumeSnapshotRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// If body is empty, just use default values
-		req = domain.CreateSnapshotRequest{}
+		req = domain.CreateVolumeSnapshotRequest{}
 	}
 
-	snapshot, err := h.snapshotService.CreateVolumeSnapshot(volumeID, &req)
+	snapshot, err := h.service.CreateVolumeSnapshot(&volumeID, &req, userId)
 	if err != nil {
 		log.Printf("[Handler:CreateSnapshot] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to create snapshot"))
@@ -216,7 +254,30 @@ func (h *VolumeHandler) CreateSnapshot(c *gin.Context) {
 	vpcpkg.RespondSucces(c, http.StatusAccepted, "Snapshot creation started", snapshot)
 }
 
-func (h *VolumeHandler) ListSnapshots(c *gin.Context) {
+
+
+func (h *VolumeHandler) CreateVolumeFromSnapshot(c *gin.Context) {
+	var req domain.CreateVolumeFromSnapshotRequest
+	userId := c.GetString("userId")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[Handler:CreateVolumeFromSnapshot] Bad request: %v", err)
+		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid request body"))
+		return
+	}
+
+	volume, err := h.service.CreateVolumeFromSnapshot(&req, userId)
+	if err != nil {
+		log.Printf("[Handler:CreateVolumeFromSnapshot] Service call error: %v", err)
+		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to create volume from snapshot"))
+		return
+	}
+
+	vpcpkg.RespondSucces(c, http.StatusCreated, "Volume created from snapshot", volume)
+}
+
+
+
+func (h *VolumeHandler) ListVolumeSnapshots(c *gin.Context) {
 	volumeIDStr := c.Param("id")
 	volumeID, err := strconv.Atoi(volumeIDStr)
 	if err != nil {
@@ -224,7 +285,7 @@ func (h *VolumeHandler) ListSnapshots(c *gin.Context) {
 		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid volume id"))
 		return
 	}
-	snapshots, err := h.snapshotService.ListSnapshotsByVolume(volumeID)
+	snapshots, err := h.service.ListSnapshotsByVolume(volumeID)
 	if err != nil {
 		log.Printf("[Handler:ListSnapshots] Service call error: %v", err)
 		vpcpkg.RespondError(c, http.StatusInternalServerError, fmt.Errorf("failed to list snapshots"))
@@ -240,13 +301,9 @@ func (h *VolumeHandler) ListSnapshots(c *gin.Context) {
 
 func (h *VolumeHandler) DeleteVolumeSnapshot(c *gin.Context) {
 	snapshotIDStr := c.Param("id")
-	snapshotID, err := strconv.Atoi(snapshotIDStr)
-	if err != nil {
-		log.Printf("[Handler:DeleteVolumeSnapshot] invalid id: %v", err)
-		vpcpkg.RespondError(c, http.StatusBadRequest, fmt.Errorf("invalid snapshot id"))
-		return
-	}
-	if err := h.snapshotService.DeleteVolumeSnapshot(snapshotID); err != nil {
+	snapshotID := snapshotIDStr
+	 
+	if err := h.service.DeleteVolumeSnapshot(snapshotID); err != nil {
 		if err == domain.ErrSnapshotNotFound {
 			log.Printf("[Handler:DeleteVolumeSnapshot] not found: %v", err)
 			vpcpkg.RespondError(c, http.StatusNotFound, fmt.Errorf("snapshot not found"))

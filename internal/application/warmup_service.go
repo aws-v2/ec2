@@ -49,10 +49,10 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 
 	var allDomains []string
 
-	fmt.Printf("sagemeker hosts found: %v", len(hosts))
+	// fmt.Printf("sagemeker hosts found: %v", len(hosts))
 
 	for _, host := range hosts {
-		fmt.Printf("calling lambda hosts found: %v", host.ID)
+		// fmt.Printf("calling lambda hosts found: %v", host.ID)
 
 		url := fmt.Sprintf("http://%s:%d/warm-vms", host.IP, 9030)
 
@@ -129,10 +129,10 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 
 	var allDomains []string
 
-	fmt.Printf("sagemeker hosts found: %v", len(hosts))
+	// fmt.Printf("sagemeker hosts found: %v", len(hosts))
 
 	for _, host := range hosts {
-		fmt.Printf("calling sagemeker hosts found: %v", host.ID)
+		// fmt.Printf("calling sagemeker hosts found: %v", host.ID)
 		url := fmt.Sprintf("http://%s:%d/warm-vms", host.IP, 9030)
 
 		resp, err := http.Get(url)

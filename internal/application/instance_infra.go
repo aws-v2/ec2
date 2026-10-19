@@ -3,6 +3,8 @@ package application
 import (
 	"archive/zip"
 	"context"
+	"ec2-api/internal/domain/host"
+	domain "ec2-api/internal/domain/instance"
 	"fmt"
 	"io"
 	"log"
@@ -12,11 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	domain "ec2-api/internal/domain/instance"
 )
-
-
-
 
 // Map of image download URLs
 var imageURLMap = map[string]string{
@@ -45,13 +43,33 @@ var imageURLMap = map[string]string{
 	"centos-stream-9": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
 }
 
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // ensureImageExists checks if an image exists, and downloads it if it doesn't
-func (s *InstanceService) EnsureImageExists(imageName string, imagePath string) error {
-	// Check if file exists
-	if _, err := os.Stat(imagePath); err == nil {
-		fmt.Printf("Image %s already exists at %s\n", imageName, imagePath)
+// TODO: Ensure imageexist on he host not on the contol plane
+func (s *InstanceService) EnsureImageExists(imageName string, imagePath string, host *host.Host) error {
+
+	cmd := fmt.Sprintf("test -f %s && echo exists || echo missing", shellQuote(imagePath))
+
+	out, err := s.libvirtClient.RunOnHost(host.IP, host.SSHUser, host.SSHPrivateKey, cmd)
+	if err != nil {
+		return fmt.Errorf("check image %s on host %s: %w", imageName, host.IP, err)
+	}
+
+	if strings.TrimSpace(out) == "exists" {
+		fmt.Printf("Image %s already exists at %s on %s\n", imageName, imagePath, host.IP)
 		return nil
 	}
+
+	// Check if file exists
+	if _, err := os.Stat(imagePath); err == nil {
+		fmt.Printf("Image %s already exists bad stuffffff at %s\n", imageName, imagePath)
+		return nil
+	}
+
+	fmt.Printf("*Image %s not found. Downloading from %s...", imagePath)
 
 	// Get download URL
 	downloadURL, ok := imageURLMap[imageName]
@@ -121,15 +139,12 @@ func (s *InstanceService) downloadImage(url string, destPath string) error {
 	return nil
 }
 
-
-
-
-func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profile string, manifest domain.GameManifest,arn string, diskPath string) error {
+func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profile string, manifest domain.GameManifest, arn string, diskPath string) error {
 	// Case-insensitive lookup with STORAGE_ARN as fallback for DOWNLOAD_URL
 	var downloadURL, headlessBin string
 
-	headlessBin=manifest.HeadlessBin
-	downloadURL=arn
+	headlessBin = manifest.HeadlessBin
+	downloadURL = arn
 
 	// for k, v := range params {
 	// 	switch strings.ToUpper(k) {
@@ -145,7 +160,6 @@ func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profi
 	// if downloadURL == "" {
 	// 	return fmt.Errorf("missing DOWNLOAD_URL or STORAGE_ARN in parameters (keys found: %v)", getMapKeys(params))
 	// }
-
 
 	// For gamelift, headlessBin is mandatory. For others (like ai-worker), it's optional.
 	if headlessBin == "" && instance.Image == "" { // Use a better check if needed, but for now let's just use profile if we had it here
@@ -198,7 +212,7 @@ func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profi
 
 	// 4. Multi-stage guestmount injection
 	s.publishProgress(instance.ID, StageInjectingPayload, "Injecting payload files into instance disk...")
-	
+
 	mountDir := filepath.Join(workdir, "mount")
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
 		return err
@@ -262,10 +276,6 @@ func (s *InstanceService) injectPayloadIntoDisk(instance *domain.Instance, profi
 	return nil
 }
 
-
-
-
-
 func (s *InstanceService) unzip(src, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -300,5 +310,3 @@ func (s *InstanceService) unzip(src, dest string) error {
 	}
 	return nil
 }
-
-

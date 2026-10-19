@@ -17,8 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 var imageMap = map[string]string{
@@ -65,8 +63,8 @@ var imageMap = map[string]string{
 
 // }
 
-func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID string) (
-	baseImagePath, instanceID, vmName, newDiskPath, instanceToken string, err error,
+func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceRequest, userID, instanceID, vmName string, host *host.Host) (
+	baseImagePath, newDiskPath, instanceToken string, err error,
 ) {
 	// Checks if we have that base image in servers files
 	baseImageName, ok := imageMap[req.Profile]
@@ -75,20 +73,25 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 		for k := range imageMap {
 			available = append(available, k)
 		}
-		return "", "", "", "", "", fmt.Errorf("image %s not found. Available: %v", req.Image, available)
+		return "", "", "", fmt.Errorf("image %s not found. Available: %v", req.Image, available)
 	}
 	// TODO: add an endpoint for the agentto download the base image if issues arise on the host
 	// and the baseimage is not found,
-	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
-	if err = s.EnsureImageExists(req.Image, baseImagePath); err != nil {
-		return "", "", "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
+
+	if req.Profile == "custom_ami" {
+		baseImageName = req.Image
 	}
 
-	instanceID = fmt.Sprintf(uuid.New().String()[:8])
+	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
+	if err = s.EnsureImageExists(req.Image, baseImagePath, host); err != nil {
+		return "", "", "", fmt.Errorf("failed to ensure image exists: %w", err)
+	}
 
-	vmName = fmt.Sprintf("%s-vm-%s", req.Profile, instanceID)
+	// instanceID = fmt.Sprintf(uuid.New().String()[:8])
 
-	instanceID = fmt.Sprintf("%s-i-%s", req.Profile, vmName)
+	// vmName = fmt.Sprintf("%s-vm-%s", req.Profile, instanceID)
+
+	// instanceID = fmt.Sprintf("%s-i-%s", req.Profile, vmName)
 	newDiskPath = filepath.Join(s.imagesDir, fmt.Sprintf("%s.qcow2", vmName))
 
 	// ai-worker VMs do not need an IAM token — the IAM service may not even
@@ -110,7 +113,7 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 		log.Printf("[IAM] [SKIP] Skipping IAM token for ai-worker instance %s", instanceID)
 	}
 
-	return baseImagePath, instanceID, vmName, newDiskPath, instanceToken, nil
+	return baseImagePath, newDiskPath, instanceToken, nil
 }
 
 // allocateInstanceNetwork now calls vpcService directly instead of NATS.

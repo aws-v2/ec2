@@ -39,6 +39,8 @@ type CreateInstanceRequest struct {
 	Image   string `json:"image"`
 	Cpu     int    `json:"cpu"`
 	Storage int    `json:"storage"`
+	Name    string `json:"name"`
+	AMIID   string `json:"ami_id"`
 }
 
 func (h *InstanceHandler) DownloadPem(c *gin.Context) {
@@ -49,14 +51,10 @@ func (h *InstanceHandler) DownloadPem(c *gin.Context) {
 		return
 	}
 
-
-
-
-
-	c.Header("Content-Type","application/x-pem-file")
-	c.Header("Content-Disposition",`attachment;filename="my-key.pem"`)
+	c.Header("Content-Type", "application/x-pem-file")
+	c.Header("Content-Disposition", `attachment;filename="my-key.pem"`)
 	// c.Header("Content-Length",strconv.Itoa(len(sshKey)))
-	c.Data(http.StatusOK,"application/x-pem-file",[]byte(sshKey) )
+	c.Data(http.StatusOK, "application/x-pem-file", []byte(sshKey))
 	dto.SendSuccess(c, http.StatusOK, "Instance creation started", []byte(sshKey))
 
 }
@@ -66,7 +64,19 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		dto.SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	if reqObj.AMIID != "" && reqObj.Image == "" {
+
+	}
+
 	var req domain.CreateInstanceRequest
+
+	if reqObj.AMIID != "" && reqObj.Image == "" {
+		req.Profile = "custom_ami"
+		req.CustomAMIID = reqObj.AMIID
+
+	}
+
 	userID := c.GetString("userID")
 	req.Profile = "vanilla"
 	req.Specs = domain.VMSpecs{
@@ -75,6 +85,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		Storage: 10,
 	}
 	req.Image = reqObj.Image
+	req.Name = reqObj.Name
 
 	log.Printf("Create instance request: %v", req)
 	instance, err := h.service.CreateInstance(c.Request.Context(), &req, userID)
@@ -221,6 +232,51 @@ func (h *InstanceHandler) GetTags(c *gin.Context) {
 	dto.SendSuccess(c, http.StatusOK, "Tags retrieved successfully", tags)
 }
 
+func (h *InstanceHandler) ListAMIs(c *gin.Context) {
+	userID := c.GetString("userID") // set by your auth middleware
+	if userID == "" {
+		log.Printf("userid seems  to be empty")
+		dto.SendError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	log.Printf("userid seems  to be not empty %s", userID)
+
+	images, err := h.service.ListAMIs(userID)
+	if err != nil {
+		log.Printf("list amis for user %s: %v", userID, err)
+		dto.SendError(c, http.StatusInternalServerError, "failed to list images")
+		return
+	}
+
+	dto.SendSuccess(c, http.StatusOK, "images retrieved successfully", images)
+}
+
+func (h *InstanceHandler) CreateAMIImage(c *gin.Context) {
+	vmid := c.Param("id")
+
+	userID := c.GetString("userID")
+	var req domain.AMIImageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.InstanceID = vmid
+	req.UserID = userID
+
+	img, err := h.service.CreateAMIImage(req)
+	if err != nil {
+		if err == dto.ErrInstanceNotFound {
+			dto.SendError(c, http.StatusNotFound, "instance not found")
+			return
+		}
+		dto.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	dto.SendSuccess(c, http.StatusOK, "IMA created successfully", img)
+
+}
 func (h *InstanceHandler) AddOrUpdateTag(c *gin.Context) {
 	id := c.Param("id")
 	userID := c.GetString("userID")
@@ -272,7 +328,7 @@ func (h *InstanceHandler) AssignVPC(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID,map[string]any{},map[string]string{}); err != nil {
+	if err := h.service.AssignVPC(c.Request.Context(), userID, instanceID, req.VPCID, map[string]any{}, map[string]string{}); err != nil {
 		if err == dto.ErrInstanceNotFound {
 			dto.SendError(c, http.StatusNotFound, "instance not found")
 			return

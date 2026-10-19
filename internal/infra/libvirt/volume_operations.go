@@ -5,23 +5,35 @@ package libvirt
 import (
 	"encoding/xml"
 	"fmt"
-	"os/exec"
 
 	domain "ec2-api/internal/domain/instance"
 
-
+	libvirt "libvirt.org/go/libvirt"
 	libvirtgo "libvirt.org/go/libvirt"
 )
 
-func (l *LibvirtClient) CreateVolume(volumePath string, sizeGB int) error {
-	// Create qcow2 volume using qemu-img
-	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", volumePath, fmt.Sprintf("%dG", sizeGB))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create volume: %w, output: %s", err, string(output))
-	}
-	return nil
-}
+// func (l *LibvirtClient) CreateVolume(volumePath string, sizeGB int) error {
+// 	// Create qcow2 volume using qemu-img
+// 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", volumePath, fmt.Sprintf("%dG", sizeGB))
+// 	output, err := cmd.CombinedOutput()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create volume: %w, output: %s", err, string(output))
+// 	}
+// 	return nil
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 func (l *LibvirtClient) GetUsedDeviceNames(vmName string) (map[string]bool, error) {
 	domain, err := l.conn.LookupDomainByName(vmName)
@@ -56,9 +68,43 @@ func (l *LibvirtClient) GetUsedDeviceNames(vmName string) (map[string]bool, erro
 	return used, nil
 }
 
+
+
+
+func (l *LibvirtClient) ResizeAttachedVolume(
+	remoteHostIP,
+	remoteHostUser,
+	remoteHostKey string,
+	vmName string,
+	volumePath string,
+	newSizeGB int,
+) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
+	if err != nil {
+		return fmt.Errorf("failed to connect to host: %w", err)
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
+	}
+	defer domain.Free()
+
+	newSizeBytes := uint64(newSizeGB) * 1024 * 1024 * 1024
+
+	if err := domain.BlockResize(volumePath, newSizeBytes, libvirt.DOMAIN_BLOCK_RESIZE_BYTES); err != nil {
+		return fmt.Errorf("failed to resize attached volume %s: %w", volumePath, err)
+	}
+
+	return nil
+}
+
+
+
 // devicePath=/dev/vde
 
-func (l *LibvirtClient) AttachVolume(vmName, volumePath, devicePath, format string) error {
+func (l *LibvirtClient) AttachVolume(vmName, volumePath, devicePath, format, volumeSerial string) error {
 	fmt.Printf("=== AttachVolume Debug ===\n")
 	fmt.Printf("vmName: %s\n", vmName)
 	fmt.Printf("volumePath: %s\n", volumePath)
@@ -76,12 +122,13 @@ func (l *LibvirtClient) AttachVolume(vmName, volumePath, devicePath, format stri
 	fmt.Printf("deviceName: %s\n", deviceName)
 
 	// Build disk XML for attachment
-	diskXML := fmt.Sprintf(`
+diskXML := fmt.Sprintf(`
     <disk type='file' device='disk'>
       <driver name='qemu' type='%s'/>
       <source file='%s'/>
       <target dev='%s' bus='virtio'/>
-    </disk>`, format, volumePath, deviceName)
+      <serial>%s</serial>
+    </disk>`, format, volumePath, deviceName, volumeSerial)
 
 	fmt.Printf("diskXML:\n%s\n", diskXML)
 
@@ -120,24 +167,24 @@ func (l *LibvirtClient) DetachVolume(vmName, devicePath string) error {
 	return nil
 }
 
-func (l *LibvirtClient) DeleteVolume(volumePath string) error {
-	// Delete the volume file
-	cmd := exec.Command("rm", "-f", volumePath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to delete volume: %w, output: %s", err, string(output))
-	}
-	return nil
-}
+// func (l *LibvirtClient) DeleteVolume(volumePath string) error {
+// 	// Delete the volume file
+// 	cmd := exec.Command("rm", "-f", volumePath)
+// 	output, err := cmd.CombinedOutput()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to delete volume: %w, output: %s", err, string(output))
+// 	}
+// 	return nil
+// }
 
-func (l *LibvirtClient) ResizeVolume(volumePath string, newSizeGB int) error {
-	cmd := exec.Command("qemu-img", "resize", volumePath, fmt.Sprintf("%dG", newSizeGB))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to resize volume: %w, output: %s", err, string(output))
-	}
-	return nil
-}
+// func (l *LibvirtClient) ResizeVolume(volumePath string, newSizeGB int) error {
+// 	cmd := exec.Command("qemu-img", "resize", volumePath, fmt.Sprintf("%dG", newSizeGB))
+// 	output, err := cmd.CombinedOutput()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to resize volume: %w, output: %s", err, string(output))
+// 	}
+// 	return nil
+// }
 
 func (l *LibvirtClient) ListAttachedDevicePaths(vmName string) ([]string, error) {
 	dom, err := l.conn.LookupDomainByName(vmName)

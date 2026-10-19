@@ -1,401 +1,200 @@
-# SageMaker Platform Architecture
+# Volumes: Overview & Architecture
 
-## Overview
+Volumes are persistent block storage devices you can create, attach to an instance, detach, resize, snapshot, tag, and reserve — independently of any single instance's lifecycle.
 
-The SageMaker platform is a distributed workflow engine designed to execute arbitrary workloads on isolated compute resources. While inspired by AWS SageMaker, the platform is intentionally more general-purpose. Rather than focusing exclusively on machine learning, it allows users to execute any script—from data ingestion and preprocessing to model training, media processing, web scraping, and deployment.
+## What is a volume?
 
-The platform treats every workload as a sequence of independent execution units connected through artifacts. Each execution unit receives input data, performs work, produces output artifacts, and terminates. This design keeps workloads reproducible, isolated, and scalable while remaining flexible enough to support a wide range of use cases.
+A volume behaves like a virtual hard disk. You create it with a given size and format, then attach it to a running instance to use it as a regular block device. A volume exists independently of any instance — detaching it does not delete its data, and it can later be reattached to the same or a different instance.
 
-Unlike traditional workflow systems that tightly couple users to a predefined execution model, this platform only defines the execution environment. Users remain free to organize their code however they choose.
+## Volume lifecycle
 
----
+A volume moves through the following states over its lifetime:
 
-# Design Philosophy
+| Status | Meaning |
+|---|---|
+| `creating` | The volume record has been created and its backing storage is being provisioned. |
+| `available` | The volume exists and is not currently attached to any instance. |
+| `reserved` | The volume has been held for a specific instance/workflow ahead of an attach — see [Reservations](#reservations) below. |
+| `attaching` | An attach operation is in progress. |
+| `attached` | The volume is attached to an instance and in use. |
+| `detaching` | A detach operation is in progress. |
+| `expanding` | A resize operation is in progress. |
 
-The platform follows a small number of guiding principles that influence every architectural decision.
+A volume can only be **attached** while it is `available`, can only be **reserved** while it is `available`, and can only be **expanded** to a larger size than it currently has.
 
-## 1. The Platform Does Not Understand User Code
+## Core concepts
 
-The platform never attempts to interpret or classify a user's script.
+### Snapshots
 
-A script may:
+A snapshot captures the state of a volume's data at a point in time, independent of the volume itself. You can create a snapshot of a volume whether or not it's currently attached to an instance, and later use that snapshot as the source for a brand-new volume — for example, to give several instances the same starting data.
 
-* Download videos from YouTube.
-* Scrape product prices.
-* Query a PostgreSQL database.
-* Fine-tune a language model.
-* Render Blender scenes.
-* Generate reports.
-* Convert videos.
-* Train a regression model.
+Creating a snapshot from an *attached* volume captures its data live, without needing to detach it or interrupt the instance using it.
 
-From the platform's perspective, every one of these workloads is simply "a program that should execute."
+### Reservations
 
-This separation keeps the execution engine generic. The orchestration layer concerns itself with compute, storage, networking, scheduling, and artifact management, leaving application-specific logic entirely to the user.
+A reservation lets you hold a specific `available` volume for a specific instance or workflow before the actual attach happens — useful when a multi-step provisioning process (create instance → attach volume → boot) needs to guarantee nothing else claims that volume in between steps.
 
----
+A reservation records who it's held for and when it expires. If the reserving workflow never completes, the reservation can be released, returning the volume to `available` for anyone to use.
 
-## 2. Compute Is Disposable
+### Tags
 
-Virtual machines exist only to execute work.
+Tags are key/value pairs you attach to a volume for your own organization, cost tracking, or automation — for example, `environment=production` or `owner=team-a`.
 
-Every workload executes inside a freshly provisioned environment. Once execution completes and artifacts have been collected, the virtual machine may be destroyed.
+### Expanding a volume
 
-This approach provides several benefits:
+A volume's size can be increased after creation, letting you grow storage without recreating the volume or migrating data. Volumes cannot be shrunk. Expansion works whether the volume is currently attached or detached.
 
-* predictable execution environments
-* reproducible workloads
-* improved security
-* simplified resource management
-* automatic cleanup after execution
+## API Reference
 
-Users should never rely on state stored inside a VM after execution has completed.
+All endpoints below require authentication and are scoped under `/api/v1/ec2/volumes`.
 
----
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/volumes` | Create a new volume. |
+| `GET` | `/volumes` | List all volumes belonging to your account. |
+| `GET` | `/volumes/:id` | Get details of a specific volume. |
+| `POST` | `/volumes/:id/reserve` | Reserve an available volume for later use. |
+| `POST` | `/volumes/:id/release-reservation` | Release a volume's reservation, returning it to `available`. |
+| `POST` | `/volumes/:id/attach` | Attach a volume to an instance. |
+| `POST` | `/volumes/:id/detach` | Detach a volume from its current instance. |
+| `POST` | `/volumes/:id/expand` | Increase a volume's size. |
+| `DELETE` | `/volumes/:id` | Delete a volume. |
+| `POST` | `/volumes/:id/snapshots` | Create a snapshot of a volume. |
+| `GET` | `/volumes/:id/snapshots` | List snapshots for a volume. |
+| `DELETE` | `/volumes/:id/snapshot` | Delete a volume snapshot. |
+| `POST` | `/volumes/from-snapshot` | Create a new volume from an existing, ready snapshot. |
+| `GET` | `/volumes/:id/tags` | List a volume's tags. |
+| `POST` | `/volumes/:id/tags` | Add or update a tag on a volume. |
+| `DELETE` | `/volumes/:id/tags/:key` | Remove a tag from a volume. |
 
-## 3. Artifacts Are the Contract Between Tasks
+### Create a volume
 
-Tasks do not communicate directly.
+```http
+POST /api/v1/ec2/volumes
+Content-Type: application/json
 
-Instead, every task produces one or more artifacts which become inputs to downstream tasks.
-
-Examples of artifacts include:
-
-* datasets
-* trained models
-* checkpoints
-* reports
-* videos
-* images
-* log files
-
-This model removes coupling between scripts and allows pipelines to evolve independently.
-
----
-
-## 4. Scripts Own Their Dependencies
-
-Dependencies belong to individual scripts rather than entire pipelines or nodes.
-
-Each script executes inside an isolated runtime containing only the packages required by that script.
-
-This avoids version conflicts and allows completely unrelated workloads to coexist within the same pipeline.
-
-For example, one script may require:
-
-```
-requests==2.31
-beautifulsoup4
+{
+  "name": "my-data-volume",
+  "size": 20,
+  "type": "gp3",
+  "availability_zone": "us-east-1a"
+}
 ```
 
-while another requires:
+Returns `202 Accepted` with the created volume record. Volume creation is asynchronous — check the volume's `status` field to see when it transitions from `creating` to `available`.
 
-```
-requests==3.x
-torch
-transformers
-```
+### Reserve a volume
 
-Because each script executes in its own isolated container, both environments can coexist without conflict.
+```http
+POST /api/v1/ec2/volumes/{id}/reserve
+Content-Type: application/json
 
----
-
-# High-Level Architecture
-
-The platform is composed of several logical layers.
-
-```
-Pipeline
-    │
-    ▼
-Node
-    │
-    ▼
-Task
-    │
-    ▼
-Container
-    │
-    ▼
-Virtual Machine
-    │
-    ▼
-Physical Host
+{
+  "reserved_to": "i-0123456789abcdef0",
+  "expires_at": "2026-09-24T18:00:00Z"
+}
 ```
 
-Each layer has a single responsibility.
+Returns `200 OK` with the volume in `reserved` status. Only an `available` volume can be reserved. If the reservation is never confirmed by an attach, it should be explicitly released — a reservation that's simply forgotten will eventually expire based on `expires_at`, but releasing it explicitly frees the volume immediately.
 
-Pipelines organize work.
+### Release a reservation
 
-Nodes group related tasks.
-
-Tasks execute user code.
-
-Containers isolate dependencies.
-
-Virtual machines provide compute.
-
-Physical hosts provide infrastructure.
-
-Keeping these responsibilities separate allows the platform to evolve without affecting user workloads.
-
----
-
-# Pipelines
-
-A pipeline is a directed workflow describing how work should be performed.
-
-Typical pipelines may contain stages such as:
-
-```
-Ingest
-    │
-    ▼
-Clean
-    │
-    ▼
-Train
-    │
-    ▼
-Evaluate
-    │
-    ▼
-Deploy
+```http
+POST /api/v1/ec2/volumes/{id}/release-reservation
 ```
 
-These stage names are intentionally semantic.
+Returns `200 OK` with the volume back in `available` status. Fails if the volume isn't currently `reserved` — for example, if it's already been attached, or was never reserved to begin with.
 
-The execution engine does not attach special meaning to the names.
+### Attach a volume to an instance
 
-For example, nothing prevents a user from:
+```http
+POST /api/v1/ec2/volumes/{id}/attach
+Content-Type: application/json
 
-* training a model inside an Ingest node
-* downloading datasets inside a Deploy node
-* combining the entire workflow into a single node
-
-The labels exist purely to improve readability and organization.
-
----
-
-# Nodes
-
-A node represents a logical stage within a pipeline.
-
-Nodes do not execute code directly.
-
-Instead, each node contains one or more independent tasks.
-
-For example:
-
-```
-Ingest
-
-├── youtube.py
-├── stocks.py
-└── weather.py
+{
+  "instance_id": "i-0123456789abcdef0"
+}
 ```
 
-Although these scripts perform different operations, they all contribute toward the same logical objective: collecting data.
+Returns `200 OK` with the updated volume record once the attach operation completes, with `status` set to `attached`.
 
-Nodes also describe the compute resources required for execution.
+> **Note:** The device name your instance's operating system assigns to the volume (e.g. `/dev/vdb`) is not guaranteed to remain the same across future detach/reattach cycles. See [Attaching & Detaching Volumes](../volumes-attaching-detaching-volumes) for how to reliably locate and mount the volume inside your instance.
 
-For example:
+### Detach a volume
 
-* CPU cores
-* Memory
-* Storage
-* GPU requirements
-* Network access
-
-The scheduler uses these requirements when selecting the appropriate virtual machine.
-
-Importantly, a node describes *what resources are required*, not *where those resources come from*. Infrastructure decisions remain the responsibility of the scheduler.
-
----
-
-# Tasks
-
-Tasks are the smallest schedulable execution unit within the platform.
-
-A task consists of:
-
-* a script
-* a dependency definition
-* execution metadata
-* runtime configuration
-
-Unlike nodes, tasks actually execute code.
-
-Every task executes independently inside its own isolated runtime.
-
-This allows multiple tasks within the same node to use completely different dependency sets without interfering with one another.
-
----
-
-# Why Tasks Execute Independently
-
-Suppose an ingest node contains three scripts.
-
-```
-youtube.py
-stocks.py
-reddit.py
+```http
+POST /api/v1/ec2/volumes/{id}/detach
 ```
 
-Each script requires different Python packages.
+Returns `200 OK` with the volume back in the `available` state. Always unmount the volume from inside your instance before detaching, to avoid data corruption from in-flight writes.
 
-Running all three scripts inside a single Python environment would inevitably create dependency conflicts.
+### Expand a volume
 
-Instead, every task executes inside its own isolated container.
+```http
+POST /api/v1/ec2/volumes/{id}/expand
+Content-Type: application/json
 
-Each container installs only the dependencies required for that specific task.
-
-Once execution completes, the container is destroyed.
-
-This guarantees reproducible execution while eliminating dependency conflicts.
-
----
-
-# Virtual Machines
-
-Virtual machines provide the execution environment for tasks.
-
-Rather than provisioning a separate VM for every script, the platform provisions a VM capable of executing the tasks assigned to a node.
-
-The VM contains only a minimal runtime environment:
-
-* Ubuntu
-* Docker
-* Cloud Agent
-* Cached runtime images
-
-The VM does not contain user code.
-
-Instead, user code is copied into a temporary workspace before execution begins.
-
----
-
-# Why Containers Execute Inside Virtual Machines
-
-Containers solve dependency isolation.
-
-Virtual machines solve infrastructure isolation.
-
-These are different problems.
-
-Virtual machines provide:
-
-* security boundaries
-* hardware isolation
-* GPU allocation
-* network isolation
-* resource scheduling
-
-Containers provide:
-
-* dependency isolation
-* reproducible environments
-* lightweight execution
-* fast startup
-* filesystem isolation
-
-Using both technologies allows the platform to benefit from the strengths of each.
-
----
-
-# Workspace
-
-Before execution begins, the Cloud Agent creates a temporary workspace for the job.
-
-```
-/workspace/<job-id>/
-
-    code/
-
-    input/
-
-    output/
-
-    logs/
-
-    cache/
+{
+  "new_size": 50
+}
 ```
 
-The workspace serves as the communication layer between the platform and the user's scripts.
+`new_size` must be larger than the volume's current size. Returns `202 Accepted` — expansion is asynchronous and works whether the volume is attached or detached. After expansion completes, you'll typically still need to grow the filesystem inside the instance to make use of the new space.
 
-User code is copied into the `code` directory.
+### Create a snapshot
 
-Input artifacts are downloaded into `input`.
+```http
+POST /api/v1/ec2/volumes/{id}/snapshots
+Content-Type: application/json
 
-Generated artifacts are placed into `output`.
-
-Logs produced during execution are streamed from `logs` back to the control plane.
-
-After execution completes and artifacts have been uploaded, the workspace may be removed.
-
----
-
-# The SDK
-
-The SDK intentionally remains minimal.
-
-Its purpose is not to replace existing Python libraries but to provide a small bridge between user code and the platform.
-
-Currently, the SDK exposes two primary concepts:
-
-* retrieving input artifacts
-* publishing output artifacts
-
-For example, a task may request an artifact produced by a previous task.
-
-```
-dataset = ctx.input("training-data")
+{
+  "name": "before-migration",
+  "description": "Snapshot before running the data migration"
+}
 ```
 
-The SDK automatically downloads the artifact into the workspace and returns the local path.
+Both fields are optional — if `name` is omitted, one is generated automatically. Returns `202 Accepted` with the created snapshot record. Snapshot creation works the same way whether the volume is currently attached or not.
 
-Similarly, publishing an artifact is as simple as:
+### Create a volume from a snapshot
 
+```http
+POST /api/v1/ec2/volumes/from-snapshot
+Content-Type: application/json
+
+{
+  "snapshot_id": "b3f1c2e4-...",
+  "volume_name": "restored-data-volume"
+}
 ```
-ctx.publish(
-    "trained-model",
-    "./model"
-)
+
+Returns `201 Created` with the new volume, pre-populated with the snapshot's data. The source snapshot must be in `READY` status.
+
+### Tag a volume
+
+```http
+POST /api/v1/ec2/volumes/{id}/tags
+Content-Type: application/json
+
+{
+  "key": "environment",
+  "value": "production"
+}
 ```
 
-The platform is then responsible for storing the artifact, recording metadata, and making it available to downstream tasks.
+Adding a tag with a key that already exists on the volume updates its value.
 
-The user's code never interacts directly with object storage.
+### Deleting a volume
 
----
+```http
+DELETE /api/v1/ec2/volumes/{id}?force=true
+```
 
-# Execution Lifecycle
+By default, deletion is blocked if the volume is currently `attached`. Passing `force=true` overrides this: the volume is detached from its instance first, then its storage and database record are removed. Use `force` carefully — it can result in an instance losing access to a disk it still expects to be present.
 
-Every task follows the same execution lifecycle.
+## Related documentation
 
-1. The scheduler determines that a task is ready to execute.
-2. A suitable virtual machine is provisioned.
-3. The Cloud Agent creates a temporary workspace.
-4. Input artifacts are downloaded.
-5. A container is started.
-6. Task dependencies are installed.
-7. The user's script executes.
-8. Output artifacts are collected.
-9. Artifacts are uploaded to object storage.
-10. Logs and metadata are recorded.
-11. The container exits.
-12. The virtual machine is returned to the scheduler or destroyed.
-
-Because every task follows the same lifecycle, the platform can execute a wide variety of workloads without requiring task-specific logic.
-
----
-
-# Conclusion
-
-The core idea behind the platform is deliberately simple:
-
-> Users write arbitrary code. The platform is responsible for everything else.
-
-By separating user logic from infrastructure concerns, the platform provides a consistent execution model regardless of whether the workload involves machine learning, data engineering, media processing, automation, or any other computational task.
-
-This separation keeps the system modular, scalable, and easy to extend while allowing users to focus entirely on solving their own problems rather than managing infrastructure.
+- [Attaching & Detaching Volumes](../volumes-attaching-detaching-volumes)
+- [Snapshots](../volumes-attaching-detaching-volumes)
+- [Expanding Volumes](../volumes-attaching-detaching-volumes)
+- [Tags & Reservations](../volumes-attaching-detaching-volumes)
+- [Known Issues](../volumes-attaching-detaching-volumes)

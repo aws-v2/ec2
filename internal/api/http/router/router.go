@@ -51,6 +51,7 @@ func SetupRoutes(r *gin.Engine,
 		health.GET("", hostHandler.HandleHealth)
 	}
 	api := r.Group("/api/v1/ec2")
+	api.Use(middleware.AuthMiddleware())
 
 	// Docs
 	docs := api.Group("/docs")
@@ -59,7 +60,6 @@ func SetupRoutes(r *gin.Engine,
 		docs.GET("/:slug", docsHandler.GetDoc)
 	}
 
-	api.Use(middleware.AuthMiddleware())
 	{
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
@@ -74,6 +74,8 @@ func SetupRoutes(r *gin.Engine,
 		api.DELETE("/instances/:id", instanceHandler.DeleteInstance)
 		api.PUT("/instances/:id/vpc", networkingHandler.AssignVPC)
 		api.GET("/instances/:id/terminal/:session", terminalHandler.HandleTerminal)
+		api.POST("/instances/:id/images", instanceHandler.CreateAMIImage)
+		api.GET("/instances/ami/images", instanceHandler.ListAMIs)
 
 		// Instance control
 		api.POST("/instances/:id/start", instanceHandler.StartInstance)
@@ -88,8 +90,14 @@ func SetupRoutes(r *gin.Engine,
 
 		// Snapshots
 		api.POST("/instances/:id/snapshot", snapshotHandler.CreateSnapshot)
-		api.GET("/snapshots", snapshotHandler.ListSnapshots)
-		api.GET("/snapshots/:id", snapshotHandler.GetSnapshot)
+		api.GET("/snapshots/:id", snapshotHandler.ListSnapshots)
+		api.GET("/snapshots/:id/restore", snapshotHandler.RevertSnapshot)
+		api.GET("/snapshots", snapshotHandler.ListSnapshotsForUser)
+		// api.GET("/snapshots/ami/list", snapshotHandler.ListSnapshotsForUser)
+		// api.GET("/snapshots/ami/clone-from", snapshotHandler.ListSnapshotsForUser)
+		// api.GET("/snapshots/ami/delete", snapshotHandler.ListSnapshotsForUser)
+		api.GET("/snapshots/:id/clear", snapshotHandler.ClearSnapshot)
+		api.GET("/snapshot/:id", snapshotHandler.GetSnapshot)
 		api.DELETE("/snapshots/:id", snapshotHandler.DeleteSnapshot)
 
 		// Templates
@@ -133,13 +141,15 @@ func SetupRoutes(r *gin.Engine,
 
 		api.POST("/volumes", volumeHandler.CreateVolume)                        // Create new block volume
 		api.POST("/volumes/:id/reserve", volumeHandler.ReserveVolume)           // Reserve volume record
+		api.POST("/volumes/:id/release-reservation", volumeHandler.ReleaseVolumeReservation)           // Reserve volume record
 		api.GET("/volumes", volumeHandler.ListVolumes)                          // List all volumes
 		api.GET("/volumes/:id", volumeHandler.GetVolume)                        // Get volume details
 		api.POST("/volumes/:id/attach", volumeHandler.AttachVolume)             // Attach volume to instance
 		api.POST("/volumes/:id/expand", volumeHandler.ExpandVolume)             // Expand volume size
 		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume)             // Detach volume from instance
-		api.POST("/volumes/:id/snapshots", volumeHandler.CreateSnapshot)        // Create volume snapshot
-		api.GET("/volumes/:id/snapshots", volumeHandler.ListSnapshots)          // List volume snapshots
+		api.POST("/volumes/:id/snapshots", volumeHandler.CreateVolumeSnapshot)        // Create volume snapshot
+		api.POST("/volumes/from-snapshot", volumeHandler.CreateVolumeFromSnapshot) // Create volume from snapshot
+		api.GET("/volumes/:id/snapshots", volumeHandler.ListVolumeSnapshots)          // List volume snapshots
 		api.DELETE("/volumes/:id/snapshot", volumeHandler.DeleteVolumeSnapshot) // Delete volume snapshot
 		api.GET("/volumes/:id/tags", volumeHandler.ListTags)                    // List volume tags
 		api.POST("/volumes/:id/tags", volumeHandler.AddTag)                     // Add/Update volume tag

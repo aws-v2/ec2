@@ -2,7 +2,12 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type InstanceStatus string
@@ -198,6 +203,7 @@ type CreateInstanceRequest struct {
 	SessionID  string          `json:"session_id"`
 	Assets     []Asset         `json:"assets,omitempty"`
 	Config     json.RawMessage `json:"config,omitempty"` // profile-specific config, opaque to the core service
+	CustomAMIID string  `json:"custom_ami_id"`
 
 }
 type AssetConfigs struct {
@@ -256,4 +262,82 @@ type InstanceInfo struct {
 	SSHUser   string
 	SSHKey    string // private key PEM content
 	VMHost    string
+}
+
+
+// domain
+type AMIImageRequest struct {
+	InstanceID  string `json:"instance_id"`
+	UserID      string `json:"user_id"`
+	SessionID   string `json:"session_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	NoReboot    bool   `json:"no_reboot"`
+
+}
+
+
+
+
+
+
+
+
+type ImageStatus string
+
+const (
+	ImageStatusPending   ImageStatus = "pending"
+	ImageStatusAvailable ImageStatus = "available"
+	ImageStatusFailed    ImageStatus = "failed"
+	ImageStatusDeleting  ImageStatus = "deleting"
+)
+
+type Image struct {
+	ID               string      `json:"id" gorm:"primaryKey;type:text"`
+	Name             string      `json:"name" gorm:"type:text;not null"`
+	Description      string      `json:"description" gorm:"type:text"`
+	UserID           string      `json:"user_id" gorm:"type:text;not null;index"`
+	SourceInstanceID string      `json:"source_instance_id" gorm:"type:text;index"`
+	HostID           string      `json:"host_id,omitempty" gorm:"type:text"`
+	Status           ImageStatus `json:"status" gorm:"type:text;not null;default:'pending';index"`
+	NoReboot         bool        `json:"no_reboot" gorm:"not null;default:false"`
+	Consistency      string      `json:"consistency,omitempty" gorm:"type:text"` // "filesystem" | "crash"
+	DiskPath         string      `json:"-" gorm:"type:text"`                     // host path, not exposed to clients
+	SizeBytes        int64       `json:"size_bytes" gorm:"default:0"`
+	SHA256           string      `json:"sha256,omitempty" gorm:"column:sha256;type:text"`
+	ErrorMessage     string      `json:"error_message,omitempty" gorm:"type:text"`
+
+	CreatedAt time.Time      `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+
+func (v *Image) GetStoragePath() (string, error) {
+	amiRoot := "/var/lib/libvirt/images/amis"
+	if err := os.MkdirAll(amiRoot, 0755); err != nil {
+		return "", fmt.Errorf("failed to create volume root %s: %w", amiRoot, err)
+	}
+
+	filename := v.Name
+	ext := "." + "qcow2"
+	if !strings.HasSuffix(filename, ext) {
+		filename = filename + ext
+	}
+
+	return fmt.Sprintf("%s/%s", amiRoot, filename), nil
+}
+
+
+func (Image) TableName() string { return "images" }
+
+// AMISummary is the trimmed projection returned by the list-AMIs endpoint.
+// It maps directly to columns in the golden_images table.
+type AMISummary struct {
+	ID               string      `json:"id"                 db:"id"`
+	Name             string      `json:"name"               db:"name"`
+	Description      string      `json:"description"        db:"description"`
+	Status           ImageStatus `json:"status"             db:"status"`
+	SourceInstanceID string      `json:"source_instance_id" db:"source_instance_id"`
+	CreatedAt        time.Time   `json:"created_at"         db:"created_at"`
 }

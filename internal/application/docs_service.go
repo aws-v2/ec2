@@ -67,7 +67,6 @@ func (s *DocsService) GetManifest(internal bool) (*DocManifest, error) {
 	path := filepath.Join(s.basePath, scope, "manifest.json")
 
 	// Log the resolved path — helps debug container vs dev mismatches
-	fmt.Printf("[DocsService] reading manifest: %s\n", path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -154,22 +153,44 @@ func isValidSlug(slug string) bool {
 func parseMarkdownWithFrontmatter(input string) (Metadata, string) {
 	var meta Metadata
 
-	parts := strings.SplitN(input, "---", 3)
+	trimmed := strings.TrimLeft(input, "\r\n \t")
 
-	// No frontmatter
-	if len(parts) < 3 {
+	// Frontmatter must start with a line that is exactly "---".
+	if !strings.HasPrefix(trimmed, "---") {
 		meta.LastUpdated = time.Now().Format("2006-01-02")
 		return meta, strings.TrimSpace(input)
 	}
 
-	rawMeta := parts[1]
-	content := parts[2]
+	lines := strings.Split(trimmed, "\n")
 
-	lines := strings.Split(rawMeta, "\n")
+	if strings.TrimSpace(lines[0]) != "---" {
+		meta.LastUpdated = time.Now().Format("2006-01-02")
+		return meta, strings.TrimSpace(input)
+	}
 
-	for _, line := range lines {
+	// Find the closing "---" as its own line — not a substring match
+	// anywhere else in the document (e.g. inside a markdown table
+	// separator like "|---|---|").
+	closingIndex := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			closingIndex = i
+			break
+		}
+	}
+
+	if closingIndex == -1 {
+		// Opened with "---" but never closed on its own line — treat the
+		// whole thing as content rather than guessing.
+		meta.LastUpdated = time.Now().Format("2006-01-02")
+		return meta, strings.TrimSpace(input)
+	}
+
+	rawMetaLines := lines[1:closingIndex]
+	content := strings.Join(lines[closingIndex+1:], "\n")
+
+	for _, line := range rawMetaLines {
 		line = strings.TrimSpace(line)
-
 		if line == "" {
 			continue
 		}

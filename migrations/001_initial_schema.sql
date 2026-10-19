@@ -19,9 +19,9 @@ CREATE TABLE IF NOT EXISTS volumes (
     id SERIAL PRIMARY KEY,
     volume_name VARCHAR(100) NOT NULL,
     size INTEGER NOT NULL,
-    format VARCHAR(20) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    attached_to VARCHAR(20),
+    format VARCHAR(100) NOT NULL,
+    status VARCHAR(100) NOT NULL,
+    attached_to VARCHAR(100),
     device_path TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS volumes (
 
 CREATE TABLE IF NOT EXISTS snapshots (
     id SERIAL PRIMARY KEY,
-    instance_id VARCHAR(20) NOT NULL REFERENCES instances(id),
+    instance_id VARCHAR(50) NOT NULL REFERENCES instances(id),
     name VARCHAR(100) NOT NULL,
     description TEXT,
     status VARCHAR(20) NOT NULL,
@@ -81,6 +81,18 @@ CREATE TABLE IF NOT EXISTS ec2_scaling_policies (
     scale_out_cooldown  INT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE if not exists vm_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    vm_name TEXT NOT NULL,
+    snapshot_name TEXT NOT NULL,   -- must match libvirt's snapshot name
+    description TEXT,
+    user_id TEXT,
+    disk_only BOOLEAN NOT NULL DEFAULT true,
+    status TEXT NOT NULL DEFAULT 'READY', -- CREATING, READY, REVERTING, FAILED
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (vm_name, snapshot_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ec2_scaling_policies_user_id ON ec2_scaling_policies(user_id);

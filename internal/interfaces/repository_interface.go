@@ -15,19 +15,16 @@ type HostRepository interface {
 	GetBestGatewayHosts(limit int, targetType string) ([]*hostdomain.Host, error)
 	GetByID(id string) (*hostdomain.Host, error)
 	ListAll(ctx context.Context) ([]hostdomain.Host, error)
-	UpdatePortStatus(ctx context.Context, action, gatewayID,vmID string, port int) (int64, error) 
+	UpdatePortStatus(ctx context.Context, action, gatewayID, vmID string, port int) (int64, error)
 	GetByGatewayHost(ctx context.Context, gatewayID string) (*hostdomain.GatewayHostResponse, error)
-
-
 }
 
-
 type RolloutRepository interface {
-    CreateRollout(ctx context.Context, r domain.AgentRollout) error
-    UpdateRolloutSummary(ctx context.Context, rolloutID uuid.UUID, ok, failed int, s3Err string) error
-    InsertUpdateStatus(ctx context.Context, s domain.AgentUpdateStatus) error
-    UpdateStatusByHostAndVersion(ctx context.Context, hostID uuid.UUID, version, status string) error // called on agent ping
-    GetStatusByRollout(ctx context.Context, rolloutID uuid.UUID) ([]domain.AgentUpdateStatus, error)
+	CreateRollout(ctx context.Context, r domain.AgentRollout) error
+	UpdateRolloutSummary(ctx context.Context, rolloutID uuid.UUID, ok, failed int, s3Err string) error
+	InsertUpdateStatus(ctx context.Context, s domain.AgentUpdateStatus) error
+	UpdateStatusByHostAndVersion(ctx context.Context, hostID uuid.UUID, version, status string) error // called on agent ping
+	GetStatusByRollout(ctx context.Context, rolloutID uuid.UUID) ([]domain.AgentUpdateStatus, error)
 }
 
 type InstanceRepository interface {
@@ -48,17 +45,20 @@ type InstanceRepository interface {
 	GetInstanceInfo(instanceID, userID string) (*domain.InstanceInfo, error)
 	FindAndMarkWarmInstanceInUse(ctx context.Context, profile string) (*domain.Instance, error)
 	ReleaseLambdaVM(ctx context.Context, vmid string) (*domain.Instance, error)
+	CreateAMI(image *domain.Image) error
+	UpdateAMI(image *domain.Image) error
+	FindAMIsByUserID(userID string) ([]domain.AMISummary, error)
+	FindAMIByIDAndUserID(id, userID string) (*domain.Image, error)
 }
-
 
 type SnapshotRepository interface {
 	Create(snapshot *domain.Snapshot) error
-	FindByID(id int) (*domain.Snapshot, error)
-	FindAll() ([]*domain.Snapshot, error)
+	FindByID(id string) (*domain.Snapshot, error)
+	FindAll(userID string) ([]*domain.Snapshot, error)
 	FindByInstanceID(instanceID string) ([]*domain.Snapshot, error)
 	FindByVolumeID(volumeID int) ([]*domain.VolumeSnapshot, error)
-	UpdateStatus(id int, status domain.SnapshotStatus) error
-	Delete(id int) error
+	UpdateStatus(id string, status domain.SnapshotStatus) error
+	Delete(id string) error
 }
 type VolumeRepository interface {
 	Create(volume *domain.Volume) error
@@ -68,13 +68,26 @@ type VolumeRepository interface {
 	Update(volume *domain.Volume) error
 	UpdateSize(id int, newSize int) error
 	Delete(volume *domain.Volume) error
-
+	CreateVolumeSnapshot(snapshot *domain.VolumeSnapshot) error
 	GetTags(volumeID int) ([]*domain.VolumeTag, error)
+	FindByVolumeSnapshotByVolumeID(volumeID *int) ([]*domain.VolumeSnapshot, error)
+	FindByAllVolumeSnapshot() ([]*domain.VolumeSnapshot, error)
 	AddOrUpdateTag(volumeID int, tag *domain.VolumeTag) error
 	DeleteTag(volumeID int, key string) error
+	UpdateVolumeSnapshotStatus(
+		snapshotID uuid.UUID,
+		status domain.VolumeSnapshotStatus,
+	) error
+	FindVolumeSnapshotByID(id string) (*domain.VolumeSnapshot, error)
+	UpdateVolumeSnapshot(snapshot *domain.VolumeSnapshot) error
+	UpdateVolumeStatus(
+		volumeId int,
+		status domain.VolumeStatus,
+	) error
+	DeleteVolumeSnapshot(
+		snapshotID string,
+	) error
 }
-
-
 
 type TemplateRepository interface {
 	Create(template *domain.Template) error
@@ -92,13 +105,10 @@ type SSHKeyRepository interface {
 	Delete(id int) error
 }
 
-
 // LambdaRepository placeholder for future implementation
 type LambdaRepository interface {
 	CountActive(userID string) (int, error)
 }
-
-
 
 // Repositories
 type IPRepository interface {

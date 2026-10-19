@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"ec2-api/config"
 	domain "ec2-api/internal/domain/instance"
 
 	libvirt "libvirt.org/go/libvirt"
@@ -27,9 +28,10 @@ type LibvirtClient struct {
 	minioSK       string
 	natsURL       string
 	natsSubject   string
+	cfg config.Config
 }
 
-func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, natsURL, natsSubject string) (*LibvirtClient, error) {
+func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, natsURL, natsSubject string,cfg config.Config) (*LibvirtClient, error) {
 	conn, err := libvirt.NewConnect(uri)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
@@ -40,8 +42,10 @@ func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, na
 		minioEndpoint: minioEndpoint,
 		minioAK:       minioAK,
 		minioSK:       minioSK,
+
 		natsURL:       natsURL,
 		natsSubject:   natsSubject,
+		cfg: cfg,
 	}, nil
 }
 func (c *LibvirtClient) Conn() *libvirt.Connect {
@@ -302,20 +306,20 @@ func (l *LibvirtClient) CreateCloudInitISO(vmName, combinedKeys, privateIP, gate
 
 	// This is the ONLY place config.env gets written now — the switch
 	// case below no longer writes it a second time.
-if profile == "rds" {
-	// nil => user requested no extra permissions
-	perms := ParseRDSPermissionsString(rDSParticulars["PERMISSIONS"])
+	if profile == "rds" {
+		// nil => user requested no extra permissions
+		perms := ParseRDSPermissionsString(rDSParticulars["PERMISSIONS"])
 
-	alterRoleLine := ""
-	if perms != nil {
-		// values were validated by the RDS service, e.g. ["CREATEDB","CREATEROLE"]
-		alterRoleLine = fmt.Sprintf(
-			"\n      sudo -u postgres psql -c \"ALTER ROLE ${DB_USER} WITH %s;\"",
-			strings.Join(perms, " "),
-		)
-	}
+		alterRoleLine := ""
+		if perms != nil {
+			// values were validated by the RDS service, e.g. ["CREATEDB","CREATEROLE"]
+			alterRoleLine = fmt.Sprintf(
+				"\n      sudo -u postgres psql -c \"ALTER ROLE ${DB_USER} WITH %s;\"",
+				strings.Join(perms, " "),
+			)
+		}
 
-	writeFiles += fmt.Sprintf(`
+		writeFiles += fmt.Sprintf(`
  
   - path: /etc/rds/config.env
     permissions: '0600'
@@ -334,9 +338,9 @@ if profile == "rds" {
       sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME};" || true
       sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';" || true
       sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" || true%s`,
-		rDSParticulars["DB_USER"], rDSParticulars["DB_PASSWORD"], rDSParticulars["DB_NAME"],
-		alterRoleLine)
-}
+			rDSParticulars["DB_USER"], rDSParticulars["DB_PASSWORD"], rDSParticulars["DB_NAME"],
+			alterRoleLine)
+	}
 
 	runCmd := `  - systemctl daemon-reload
   - systemctl enable metrics-agent
@@ -637,6 +641,11 @@ ethernets:
 
 	return isoPath, cleanup, nil
 }
+
+func (l *LibvirtClient) ConnectToHost(remoteHostIP, remoteHostUser, remoteHostKey string) (*libvirt.Connect, error) {
+	con, _, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
+	return con, err
+}
 func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKey string) (*libvirt.Connect, func(), error) {
 	log.Printf("[Libvirt][getConnection] called — remoteHostIP=%q remoteHostUser=%q hasKey=%v",
 		remoteHostIP, remoteHostUser, remoteHostKey != "")
@@ -715,6 +724,77 @@ func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKe
 			cf()
 		}
 	}, nil
+}
+
+
+
+
+
+
+func (l *LibvirtClient) CreateAttachedVolumeSnapshot(
+	remoteHostIP,
+	remoteHostUser,
+	remoteHostKey string,
+	vmName string,
+	volumePath string,
+	snapshotPath string,
+) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
+	if err != nil {
+		return fmt.Errorf("failed to connect to host: %w", err)
+	}
+	defer cleanup()
+
+	domain, err := conn.LookupDomainByName(vmName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
+	}
+	defer domain.Free()
+
+	// Clear any stuck/orphaned block job from a previous failed attempt
+	// before starting a new one — libvirt refuses to start a second job
+	// on the same disk while one is still registered as active.
+	if info, err := domain.GetBlockJobInfo(volumePath, 0); err == nil && info != nil && info.Type != libvirt.DOMAIN_BLOCK_JOB_TYPE_UNKNOWN {
+		log.Printf("found stale block job on %s (type=%v), aborting before retry", volumePath, info.Type)
+		if err := domain.BlockJobAbort(volumePath, 0); err != nil {
+			return fmt.Errorf("failed to clear stale block job on %s: %w", volumePath, err)
+		}
+	}
+
+	destXML := fmt.Sprintf(`
+		<disk type='file'>
+			<driver name='qemu' type='qcow2'/>
+			<source file='%s'/>
+		</disk>`, snapshotPath)
+
+	if err := domain.BlockCopy(
+		volumePath,
+		destXML,
+		&libvirt.DomainBlockCopyParameters{},
+		libvirt.DOMAIN_BLOCK_COPY_TRANSIENT_JOB,
+	); err != nil {
+		return fmt.Errorf("failed to create volume snapshot for %s: %w", volumePath, err)
+	}
+
+	// Poll until the copy actually finishes.
+	for {
+		info, err := domain.GetBlockJobInfo(volumePath, 0)
+		if err != nil {
+			return fmt.Errorf("failed to get block job status: %w", err)
+		}
+		if info == nil || info.End == 0 || info.Cur >= info.End {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// Do NOT pivot — pivoting swaps the VM's live disk to the copy.
+	// We only want a standalone copy; the original stays untouched.
+	if err := domain.BlockJobAbort(volumePath, 0); err != nil {
+		return fmt.Errorf("failed to finalize block copy for %s: %w", volumePath, err)
+	}
+
+	return nil
 }
 
 func (l *LibvirtClient) RestartVM(remoteHostIP, remoteHostUser, remoteHostKey, vmName string) error {
@@ -1011,7 +1091,65 @@ func (l *LibvirtClient) getVMIP(domain *libvirt.Domain) (string, error) {
 	}
 	return "", fmt.Errorf("no IP found")
 }
+func (l *LibvirtClient) RevertToSnapshot(remoteHostIP, remoteHostUser, remoteHostKey, vmName, snapshotName string) error {
+	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
+	domain, err := conn.LookupDomainByName(vmName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup domain %s: %w", vmName, err)
+	}
+	defer domain.Free()
+
+	active, err := domain.IsActive()
+	if err != nil {
+		return fmt.Errorf("failed to check domain state for %s: %w", vmName, err)
+	}
+
+	if active {
+		if err := domain.Shutdown(); err != nil {
+			return fmt.Errorf("failed to shutdown domain %s: %w", vmName, err)
+		}
+
+		if err := waitForShutdown(domain, 30*time.Second); err != nil {
+			// clean shutdown didn't happen in time — force it
+			if destroyErr := domain.Destroy(); destroyErr != nil {
+				return fmt.Errorf("failed to force stop domain %s after shutdown timeout: %w", vmName, destroyErr)
+			}
+		}
+	}
+
+	snapshot, err := domain.SnapshotLookupByName(snapshotName, 0)
+	if err != nil {
+		return fmt.Errorf("failed to find snapshot %s for %s: %w", snapshotName, vmName, err)
+	}
+	defer snapshot.Free()
+
+	if err := snapshot.RevertToSnapshot(0); err != nil {
+		return fmt.Errorf("failed to revert %s to snapshot %s: %w", vmName, snapshotName, err)
+	}
+
+	return nil
+}
+
+func waitForShutdown(domain *libvirt.Domain, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		active, err := domain.IsActive()
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("shutdown timed out after %s", timeout)
+}
+// func (l *LibvirtClient) CreateVolumeSnapshot(remoteHostIP, remoteHostUser, remoteHostKey, vmName, snapshotName, description string) error {}
 func (l *LibvirtClient) CreateSnapshot(remoteHostIP, remoteHostUser, remoteHostKey, vmName, snapshotName, description string) error {
 	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)
 	if err != nil {

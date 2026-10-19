@@ -2,23 +2,92 @@
   "service": "EC2 compute",
   "version": "V1",
   "type": "internal-docs",
-  "description": "Internal engineering documentation for the SageMaker service. Covers pipeline execution, VM orchestration, task scheduling, SDK design, artifact management, container runtime, deployment, and platform architecture.",
+  "description": "Internal engineering documentation for the EC2 compute service. Covers instance lifecycle, VM orchestration, host selection, compute networking, block volumes, host agents, and platform architecture.",
   "audience": "developers",
   "visibility": "internal",
-
   "categories": [
     {
       "title": "Getting Started",
       "items": [
-        {
-          "title": "Overview & Architecture",
-          "slug": "architecture"
-        },
+     
         {
           "title": "Api Architexture",
           "slug": "api-architexture"
         }
       ]
+    },
+    {
+      "title": "Implementation Characteristics",
+      "items": []
+    },
+    {
+      "title": "Instances",
+      "items": []
+    },
+    {
+      "title": "Host Agent",
+      "items": []
+    },
+    {
+      "title": "Networking",
+      "items": []
+    },
+    {
+      "title": "Volumes",
+      "items": [
+        {
+          "title": "Overview & Architecture",
+          "slug": "volumes-architecture"
+        },
+        {
+          "title": "Attach ",
+          "slug": "attaching-volumes"
+        },
+         {
+          "title": "Detach ",
+          "slug": "dettaching-volumes"
+        },
+         {
+          "title": "Snapshots ",
+          "slug": "volume-snapshots"
+        },
+         {
+          "title": "Expanding ",
+          "slug": "volume-expand"
+        },
+         {
+          "title": "Tags & Reservation ",
+          "slug": "volumes-tags-and-reservation"
+        },
+         {
+          "title": "Known Issues",
+          "slug": "known-issues"
+        }
+      ]
+    },
+    {
+      "title": "Security",
+      "items": []
+    },
+        {
+      "title": "Libvirt",
+      "items": []
+    },
+    {
+      "title": "Snapshots",
+      "items": []
+    },
+    {
+      "title": "Communication Architecture",
+      "items": []
+    },
+    {
+      "title": "Health & Docs",
+      "items": []
     }
   ]
 }
+
+
+
+ 

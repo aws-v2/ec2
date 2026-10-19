@@ -52,4 +52,11 @@ var schema16 string
 //go:embed 021_create_gateway_table.sql
 var schema21 string
 
-var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12 + "\n" + schema13 + "\n" + schema14 + "\n" + schema15 + "\n" + schema16+"\n"+schema21
+//go:embed 022_add_volume_reservation_fields.sql
+var schema22 string
+
+//go:embed 023_add_volume_snapshot_table.sql
+var schema23 string
+
+
+var Schema = schema1 + "\n" + schema_userid + "\n" + schema2 + "\n" + schema3 + "\n" + schema4 + "\n" + schema5 + "\n" + schema6 + "\n" + schema7 + "\n" + schema8 + "\n" + schema9 + "\n" + schema10 + "\n" + schema11 + "\n" + schema12 + "\n" + schema13 + "\n" + schema14 + "\n" + schema15 + "\n" + schema16 + "\n" + schema21 + "\n" + schema22+"\n" + schema23

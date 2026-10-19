@@ -1,0 +1,6 @@
+Implementation Characteristics
+### 4.1 Concurrency
+### 4.2 Asynchronous Operations
+### 4.3 State Synchronization
+### 4.4 Known Limitations
+### 4.5 Architectural Trade-offs

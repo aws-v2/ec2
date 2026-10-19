@@ -122,6 +122,7 @@ jobs:
               -e AGENT_URL=ws://host.docker.internal:9030/terminal \
               -e "LIBVIRT_URI=qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock" \
               -e WARM_VM_TIMER=10 \
+              -e METRICS_API_KEY=e956807e27669001319d73d3a9f1728a4a1161c79a6a287160c3a73394c05df8 \
               qarani/ec2-api:staging-${{ github.sha }}
 
  
