@@ -28,10 +28,10 @@ type LibvirtClient struct {
 	minioSK       string
 	natsURL       string
 	natsSubject   string
-	cfg config.Config
+	cfg           config.Config
 }
 
-func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, natsURL, natsSubject string,cfg config.Config) (*LibvirtClient, error) {
+func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, natsURL, natsSubject string, cfg config.Config) (*LibvirtClient, error) {
 	conn, err := libvirt.NewConnect(uri)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
@@ -43,9 +43,9 @@ func NewLibvirtClient(uri string, imagesDir, minioEndpoint, minioAK, minioSK, na
 		minioAK:       minioAK,
 		minioSK:       minioSK,
 
-		natsURL:       natsURL,
-		natsSubject:   natsSubject,
-		cfg: cfg,
+		natsURL:     natsURL,
+		natsSubject: natsSubject,
+		cfg:         cfg,
 	}, nil
 }
 func (c *LibvirtClient) Conn() *libvirt.Connect {
@@ -726,11 +726,6 @@ func (l *LibvirtClient) getConnection(remoteHostIP, remoteHostUser, remoteHostKe
 	}, nil
 }
 
-
-
-
-
-
 func (l *LibvirtClient) CreateAttachedVolumeSnapshot(
 	remoteHostIP,
 	remoteHostUser,
@@ -862,7 +857,26 @@ func (l *LibvirtClient) StopVM(remoteHostIP, remoteHostUser, remoteHostKey, vmNa
 		return err
 	}
 	defer domain.Free()
-	return domain.Shutdown()
+
+	active, err := domain.IsActive()
+	if err != nil {
+		return fmt.Errorf("failed to check VM state for %s: %w", vmName, err)
+	}
+	if !active {
+		return nil
+	}
+
+	if err := domain.Shutdown(); err != nil {
+		return fmt.Errorf("failed to request graceful shutdown for VM %s: %w", vmName, err)
+	}
+	if err := waitForShutdown(domain, 30*time.Second); err == nil {
+		return nil
+	}
+
+	if err := domain.Destroy(); err != nil {
+		return fmt.Errorf("failed to force stop VM %s after graceful shutdown timed out: %w", vmName, err)
+	}
+	return nil
 }
 
 func (l *LibvirtClient) StartVM(remoteHostIP, remoteHostUser, remoteHostKey, vmName string) error {
@@ -1149,6 +1163,7 @@ func waitForShutdown(domain *libvirt.Domain, timeout time.Duration) error {
 	}
 	return fmt.Errorf("shutdown timed out after %s", timeout)
 }
+
 // func (l *LibvirtClient) CreateVolumeSnapshot(remoteHostIP, remoteHostUser, remoteHostKey, vmName, snapshotName, description string) error {}
 func (l *LibvirtClient) CreateSnapshot(remoteHostIP, remoteHostUser, remoteHostKey, vmName, snapshotName, description string) error {
 	conn, cleanup, err := l.getConnection(remoteHostIP, remoteHostUser, remoteHostKey)

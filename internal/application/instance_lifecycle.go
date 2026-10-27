@@ -125,7 +125,9 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 	// Allocate an IP within that VPC
 	network, err := s.vpcService.AllocateInstanceNetwork(ctx, userID, instanceID, defaultVPC.ID)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
+		er :=fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
+		log.Printf("%s",er)
+		return "", "", "", "", er
 	}
 
 	log.Printf("[NETWORK] [OK] Network ready for instance %s — IP: %s, gateway: %s, bridge: %s",

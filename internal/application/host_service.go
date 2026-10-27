@@ -339,12 +339,12 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 	sshUser := req.SSHUser
 	parts := strings.Split(req.Hostname, ":")
 	if len(parts) >= 7 && parts[6] != "root" && parts[6] != "" {
-		log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
+		// log.Printf("[host-service] Extracted SSH user '%s' from heartbeat hostname", parts[6])
 		sshUser = parts[6]
 	}
 
 	if req.HostType == "gateway" {
-		log.Printf("[host-service] Host of type gateway")
+		// log.Printf("[host-service] Host of type gateway")
 
 		_, err := s.metricsRepo.GetByGatewayHostID(c, req.HostID)
 		if err != nil {
@@ -376,7 +376,7 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 		LastHeartbeat:      time.Now(),
 	}
 	if err := s.repo.Update(host); err != nil {
-		log.Printf("[host-service] Failed to database update host %s: %v", req.HostID, err)
+		// log.Printf("[host-service] Failed to database update host %s: %v", req.HostID, err)
 		return nil, err
 	}
 
@@ -394,8 +394,8 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 			State:     vm.State,
 			CreatedAt: time.Now(),
 		}
-		log.Printf("  -> [vm-met8rics] name=%-15s state=%-10s cpu=%.2f ram=%d disk(r/w)=%d/%d net(rx/tx)=%d/%d",
-			metric.Name, metric.State, metric.CPUUsed, metric.Memory, metric.DiskRead, metric.DiskWrite, metric.NetRx, metric.NetTx)
+		// log.Printf("  -> [vm-met8rics] name=%-15s state=%-10s cpu=%.2f ram=%d disk(r/w)=%d/%d net(rx/tx)=%d/%d",
+			// metric.Name, metric.State, metric.CPUUsed, metric.Memory, metric.DiskRead, metric.DiskWrite, metric.NetRx, metric.NetTx)
 		go func(hID string, m domain.DomainStats) {
 			if err := s.metricsRepo.Insert(context.Background(), hID, m); err != nil {
 				log.Printf("[host-service] Failed to insert metrics for VM %s: %v", m.VMID, err)

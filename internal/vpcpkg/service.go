@@ -70,7 +70,9 @@ func (s *Service) AllocateInstanceNetwork(ctx context.Context, tenantID, instanc
 
 	ip, err := NextAvailableIP(vpc.CIDRBlock, usedIPs)
 	if err != nil {
-		return nil, fmt.Errorf("IP exhaustion in VPC %s: %w", vpcID, err)
+		er:=fmt.Errorf("IP exhaustion in VPC %s: %w", vpcID, err)
+		log.Printf("Error: %v" , er)
+		return nil, er
 	}
 
 	alloc := &NetworkAllocation{

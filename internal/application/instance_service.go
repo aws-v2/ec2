@@ -460,6 +460,8 @@ func (s *InstanceService) CreateAMIImage(req domain.AMIImageRequest) (*domain.Im
 		return nil, fmt.Errorf("image name is required")
 	}
 
+	log.Printf("Starting creationof the ami image,")
+
 	instance, err := s.GetInstance(req.InstanceID, req.UserID)
 	if err != nil {
 		return nil, err
@@ -492,10 +494,10 @@ func (s *InstanceService) CreateAMIImage(req domain.AMIImageRequest) (*domain.Im
 
 		var buildErr error
 		if live {
-			log.Printf("Building Live AmI image,")
-			buildErr = s.buildAMILive(host, instance, img)
+			log.Printf("Building*& Live AmI image,")
+			// buildErr = s.buildAMILive(host, instance, img)
 		} else {
-			log.Printf("Building Offline AmI image,")
+			log.Printf("Building*& Offline AmI image,")
 
 			buildErr = s.buildAMIOffline(host, instance, img)
 		}
@@ -548,7 +550,6 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 	amiLogf(img.ID, "offline build started: vm=%s host=%q wasRunning=%t src=%s dst=%s start =%v",
 		instance.VMName, host.IP, wasRunning, srcDisk, img.DiskPath, start)
 
-
 	if wasRunning {
 		t := time.Now()
 		amiLogf(img.ID, "stopping vm %s", instance.VMName)
@@ -585,26 +586,25 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 	} else {
 		amiLogf(img.ID, "vm %s already stopped, skipping shutdown", instance.VMName)
 	}
-		return nil
 
-	// // convert flattens any backing file (template) into a standalone, compressed image
-	// t := time.Now()
-	// amiLogf(img.ID, "copying disk (qemu-img convert) %s -> %s", srcDisk, img.DiskPath)
-	// if err := s.libvirtClient.ConvertDisk(host.IP, host.User, host.Key, srcDisk, img.DiskPath); err != nil {
-	// 	amiLogf(img.ID, "ERROR disk copy failed after %s: %v", time.Since(t).Round(time.Millisecond), err)
-	// 	return fmt.Errorf("copy disk: %w", err)
-	// }
-	// amiLogf(img.ID, "disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
+	// convert flattens any backing file (template) into a standalone, compressed image
+	t := time.Now()
+	amiLogf(img.ID, "copying disk (qemu-img convert) %s -> %s", srcDisk, img.DiskPath)
+	if err := s.libvirtClient.ConvertDisk(host.IP, host.User, host.Key, srcDisk, img.DiskPath); err != nil {
+		amiLogf(img.ID, "ERROR disk copy failed after %s: %v", time.Since(t).Round(time.Millisecond), err)
+		return fmt.Errorf("copy disk: %w", err)
+	}
+	amiLogf(img.ID, "disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
 
-	// // we update the ami status from building to ready
+	// we update the ami status from building to ready
 
-	// if err := s.finalizeImage(host, img); err != nil {
-	// 	amiLogf(img.ID, "ERROR finalize failed: %v", err)
-	// 	return err
-	// }
-	// amiLogf(img.ID, "offline build finished: size=%d bytes sha256=%s total=%s",
-	// 	img.SizeBytes, img.SHA256, time.Since(start).Round(time.Millisecond))
-	// return nil
+	if err := s.finalizeImage(host, img); err != nil {
+		amiLogf(img.ID, "ERROR finalize failed: %v", err)
+		return err
+	}
+	amiLogf(img.ID, "offline build finished: size=%d bytes sha256=%s total=%s",
+		img.SizeBytes, img.SHA256, time.Since(start).Round(time.Millisecond))
+	return nil
 }
 
 // buildAMILive: no_reboot == true. VM keeps running.
@@ -679,6 +679,7 @@ func (s *InstanceService) buildAMILive(host hostConn, instance *domain.Instance,
 
 // finalizeImage records size and checksum, and generalizes the image if needed.
 func (s *InstanceService) finalizeImage(host hostConn, img *domain.Image) error {
+	log.Printf("Callingfinalize image")
 	size, sum, err := s.libvirtClient.StatAndHash(host.IP, host.User, host.Key, img.DiskPath)
 	if err != nil {
 		return fmt.Errorf("stat image: %w", err)

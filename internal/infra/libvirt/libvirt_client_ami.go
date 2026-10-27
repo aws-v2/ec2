@@ -1,6 +1,7 @@
 package libvirt
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -210,6 +212,127 @@ func (l *LibvirtClient) WaitForState(remoteHostIP, remoteHostUser, remoteHostKey
 // ---------------------------------------------------------------------
 // 3. ConvertDisk  (flattens backing chain into a standalone compressed qcow2)
 // ---------------------------------------------------------------------
+var progressRe = regexp.MustCompile(`\((\d+(?:\.\d+)?)/100%\)`)
+
+// splits on \r or \n, because qemu-img overwrites the same line with \r
+func scanCRLF(data []byte, atEOF bool) (int, []byte, error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+
+func (l *LibvirtClient) dialSSH(hostIP, user, privateKey string) (*ssh.Client, error) {
+	signer, err := ssh.ParsePrivateKey([]byte(strings.TrimSpace(privateKey) + "\n"))
+	if err != nil {
+		return nil, fmt.Errorf("parse ssh private key: %w", err)
+	}
+
+	cfg := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		// Matches the no_verify=1 you use for libvirt. See the note below for production.
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         15 * time.Second,
+	}
+
+	addr := hostIP
+	if _, _, err := net.SplitHostPort(hostIP); err != nil {
+		addr = net.JoinHostPort(hostIP, "22")
+	}
+
+	client, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("ssh dial %s@%s: %w", user, addr, err)
+	}
+
+	// Keepalive: the convert runs ~10 minutes, and idle NAT/firewalls can drop the
+	// connection if there's no traffic. Stops automatically when the client closes.
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				return
+			}
+		}
+	}()
+
+	return client, nil
+}
+
+
+
+
+
+// onProgress receives 0-100
+func (l *LibvirtClient) ConvertDiskWithProgress(
+	remoteHostIP, remoteHostUser, remoteHostKey, srcPath, dstPath string,
+	onProgress func(pct int),
+) error {
+	if err := validateImagePath(srcPath); err != nil {
+		return err
+	}
+	if err := validateImagePath(dstPath); err != nil {
+		return err
+	}
+
+	cmd := fmt.Sprintf("mkdir -p %s && qemu-img convert -U -p -c -O qcow2 %s %s 2>&1",
+		shellQuote(filepath.Dir(dstPath)), shellQuote(srcPath), shellQuote(dstPath))
+
+	// Reuse whatever your RunOnHost uses to build the ssh client.
+	client, err := l.dialSSH(remoteHostIP, remoteHostUser, remoteHostKey) // *ssh.Client
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := sess.Start(cmd); err != nil {
+		return err
+	}
+
+	var tail []string // keep last lines for error context
+	sc := bufio.NewScanner(stdout)
+	sc.Split(scanCRLF)
+	for sc.Scan() {
+		line := sc.Text()
+		if m := progressRe.FindStringSubmatch(line); m != nil {
+			f, _ := strconv.ParseFloat(m[1], 64)
+			onProgress(int(f))
+			continue
+		}
+		if line != "" {
+			tail = append(tail, line)
+			if len(tail) > 5 {
+				tail = tail[1:]
+			}
+		}
+	}
+
+	if err := sess.Wait(); err != nil {
+		return fmt.Errorf("qemu-img convert failed: %w (output: %v)", err, tail)
+	}
+	return nil
+}
+
+
 
 func (l *LibvirtClient) ConvertDisk(remoteHostIP, remoteHostUser, remoteHostKey, srcPath, dstPath string) error {
 	if err := validateImagePath(srcPath); err != nil {
