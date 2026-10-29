@@ -19,7 +19,8 @@ func SetupRoutes(r *gin.Engine,
 	terminalHandler *transport.TerminalHandler,
 	fleetHandler *transport.FleetHandler,
 	docsHandler *transport.DocsHandler,
-	hostHandler *transport.HostHandler) {
+	hostHandler *transport.HostHandler,
+	notificationHandler *transport.NotificationHandler) {
 
 	// Fleet Console Endpoints
 	fleet := r.Group("/api/v1/compute/fleet")
@@ -61,6 +62,8 @@ func SetupRoutes(r *gin.Engine,
 	}
 
 	{
+
+		api.GET("/instances/notifications/stream", notificationHandler.Stream)
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
 		api.GET("/instances/:id/download/key", instanceHandler.DownloadPem)
@@ -139,22 +142,22 @@ func SetupRoutes(r *gin.Engine,
 		api.DELETE("/instances/:id/security-groups/:sgId", networkingHandler.RemoveFromInstance)
 		api.GET("/instances/:id/security-groups", networkingHandler.ListForInstance)
 
-		api.POST("/volumes", volumeHandler.CreateVolume)                        // Create new block volume
-		api.POST("/volumes/:id/reserve", volumeHandler.ReserveVolume)           // Reserve volume record
-		api.POST("/volumes/:id/release-reservation", volumeHandler.ReleaseVolumeReservation)           // Reserve volume record
-		api.GET("/volumes", volumeHandler.ListVolumes)                          // List all volumes
-		api.GET("/volumes/:id", volumeHandler.GetVolume)                        // Get volume details
-		api.POST("/volumes/:id/attach", volumeHandler.AttachVolume)             // Attach volume to instance
-		api.POST("/volumes/:id/expand", volumeHandler.ExpandVolume)             // Expand volume size
-		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume)             // Detach volume from instance
-		api.POST("/volumes/:id/snapshots", volumeHandler.CreateVolumeSnapshot)        // Create volume snapshot
-		api.POST("/volumes/from-snapshot", volumeHandler.CreateVolumeFromSnapshot) // Create volume from snapshot
-		api.GET("/volumes/:id/snapshots", volumeHandler.ListVolumeSnapshots)          // List volume snapshots
-		api.DELETE("/volumes/:id/snapshot", volumeHandler.DeleteVolumeSnapshot) // Delete volume snapshot
-		api.GET("/volumes/:id/tags", volumeHandler.ListTags)                    // List volume tags
-		api.POST("/volumes/:id/tags", volumeHandler.AddTag)                     // Add/Update volume tag
-		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)           // Delete volume tag
-		api.DELETE("/volumes/:id", volumeHandler.DeleteVolume)                  // Delete volume
+		api.POST("/volumes", volumeHandler.CreateVolume)                                     // Create new block volume
+		api.POST("/volumes/:id/reserve", volumeHandler.ReserveVolume)                        // Reserve volume record
+		api.POST("/volumes/:id/release-reservation", volumeHandler.ReleaseVolumeReservation) // Reserve volume record
+		api.GET("/volumes", volumeHandler.ListVolumes)                                       // List all volumes
+		api.GET("/volumes/:id", volumeHandler.GetVolume)                                     // Get volume details
+		api.POST("/volumes/:id/attach", volumeHandler.AttachVolume)                          // Attach volume to instance
+		api.POST("/volumes/:id/expand", volumeHandler.ExpandVolume)                          // Expand volume size
+		api.POST("/volumes/:id/detach", volumeHandler.DetachVolume)                          // Detach volume from instance
+		api.POST("/volumes/:id/snapshots", volumeHandler.CreateVolumeSnapshot)               // Create volume snapshot
+		api.POST("/volumes/from-snapshot", volumeHandler.CreateVolumeFromSnapshot)           // Create volume from snapshot
+		api.GET("/volumes/:id/snapshots", volumeHandler.ListVolumeSnapshots)                 // List volume snapshots
+		api.DELETE("/volumes/:id/snapshot", volumeHandler.DeleteVolumeSnapshot)              // Delete volume snapshot
+		api.GET("/volumes/:id/tags", volumeHandler.ListTags)                                 // List volume tags
+		api.POST("/volumes/:id/tags", volumeHandler.AddTag)                                  // Add/Update volume tag
+		api.DELETE("/volumes/:id/tags/:key", volumeHandler.DeleteTag)                        // Delete volume tag
+		api.DELETE("/volumes/:id", volumeHandler.DeleteVolume)                               // Delete volume
 	}
 
 }

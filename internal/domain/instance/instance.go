@@ -306,6 +306,7 @@ type Image struct {
 	SizeBytes        int64       `json:"size_bytes" gorm:"default:0"`
 	SHA256           string      `json:"sha256,omitempty" gorm:"column:sha256;type:text"`
 	ErrorMessage     string      `json:"error_message,omitempty" gorm:"type:text"`
+	Progress int    `json:"progress"` // 0-100
 
 	CreatedAt time.Time      `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
@@ -319,7 +320,7 @@ func (v *Image) GetStoragePath() (string, error) {
 		return "", fmt.Errorf("failed to create volume root %s: %w", amiRoot, err)
 	}
 
-	filename := v.Name
+	filename := v.ID
 	ext := "." + "qcow2"
 	if !strings.HasSuffix(filename, ext) {
 		filename = filename + ext

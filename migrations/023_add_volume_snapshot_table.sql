@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS golden_images (
     disk_path           TEXT,
     size_bytes          BIGINT DEFAULT 0,
     sha256              TEXT,
+    progress              INTEGER,
     error_message       TEXT,
     created_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -57,6 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_images_status ON golden_images (status);
 CREATE INDEX IF NOT EXISTS idx_images_deleted_at ON golden_images (deleted_at);
 
 
+  ALTER TABLE golden_images ADD COLUMN IF NOT EXISTS progress integer DEFAULT 0; 
 
 
   ALTER TABLE golden_images

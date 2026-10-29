@@ -70,6 +70,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	}
 
 	var req domain.CreateInstanceRequest
+	req.Profile = "vanilla"
 
 	if reqObj.AMIID != "" && reqObj.Image == "" {
 		req.Profile = "custom_ami"
@@ -78,7 +79,6 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 	}
 
 	userID := c.GetString("userID")
-	req.Profile = "vanilla"
 	req.Specs = domain.VMSpecs{
 		CPU:     reqObj.Cpu,
 		RAM:     reqObj.Ram,

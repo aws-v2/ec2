@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os/exec"
@@ -272,6 +273,95 @@ func (l *LibvirtClient) dialSSH(hostIP, user, privateKey string) (*ssh.Client, e
 
 
 
+// RunOnHostStream is like RunOnHost but streams output to onChunk while the
+// command runs. Chunks are split on \r or \n (qemu-img rewrites its progress line with \r).
+func (l *LibvirtClient) RunOnHostStream(
+	remoteHostIP, remoteHostUser, remoteHostKey, command string,
+	onChunk func(chunk string),
+) error {
+	if l.cfg.PrivateKey != "" {
+		remoteHostKey = l.cfg.PrivateKey
+	}
+
+	pr, pw := io.Pipe()
+	var runErr error
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		defer pw.Close()
+
+		// ---- local ----
+		if remoteHostIP == "" {
+			cmd := exec.Command("bash", "-c", command)
+			cmd.Stdout = pw
+			cmd.Stderr = pw
+			runErr = cmd.Run()
+			return
+		}
+
+		// ---- ssh ----
+		if remoteHostUser == "" {
+			runErr = fmt.Errorf("no ssh user for host %s", remoteHostIP)
+			return
+		}
+		if strings.TrimSpace(remoteHostKey) == "" {
+			runErr = fmt.Errorf("no ssh private key for %s@%s", remoteHostUser, remoteHostIP)
+			return
+		}
+		signer, err := ssh.ParsePrivateKey([]byte(remoteHostKey))
+		if err != nil {
+			runErr = fmt.Errorf("parse ssh key: %w", err)
+			return
+		}
+		client, err := ssh.Dial("tcp", net.JoinHostPort(remoteHostIP, "22"), &ssh.ClientConfig{
+			User:            remoteHostUser,
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: pin host keys in production
+			Timeout:         15 * time.Second,
+		})
+		if err != nil {
+			runErr = fmt.Errorf("ssh dial: %w", err)
+			return
+		}
+		defer client.Close()
+
+		session, err := client.NewSession()
+		if err != nil {
+			runErr = fmt.Errorf("ssh session: %w", err)
+			return
+		}
+		defer session.Close()
+		session.Stdout = pw
+		session.Stderr = pw
+		runErr = session.Run(command)
+	}()
+
+	var tail []string
+	sc := bufio.NewScanner(pr)
+	sc.Split(scanCRLF)
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			continue
+		}
+		onChunk(line)
+		tail = append(tail, line)
+		if len(tail) > 5 {
+			tail = tail[1:]
+		}
+	}
+	<-done
+
+	if runErr != nil {
+		return fmt.Errorf("%w (output: %v)", runErr, tail)
+	}
+	return nil
+}
+
+
+
+
 // onProgress receives 0-100
 func (l *LibvirtClient) ConvertDiskWithProgress(
 	remoteHostIP, remoteHostUser, remoteHostKey, srcPath, dstPath string,
@@ -287,52 +377,24 @@ func (l *LibvirtClient) ConvertDiskWithProgress(
 	cmd := fmt.Sprintf("mkdir -p %s && qemu-img convert -U -p -c -O qcow2 %s %s 2>&1",
 		shellQuote(filepath.Dir(dstPath)), shellQuote(srcPath), shellQuote(dstPath))
 
-	// Reuse whatever your RunOnHost uses to build the ssh client.
-	client, err := l.dialSSH(remoteHostIP, remoteHostUser, remoteHostKey) // *ssh.Client
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	sess, err := client.NewSession()
-	if err != nil {
-		return err
-	}
-	defer sess.Close()
-
-	stdout, err := sess.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := sess.Start(cmd); err != nil {
-		return err
-	}
-
-	var tail []string // keep last lines for error context
-	sc := bufio.NewScanner(stdout)
-	sc.Split(scanCRLF)
-	for sc.Scan() {
-		line := sc.Text()
+	last := -1
+	err := l.RunOnHostStream(remoteHostIP, remoteHostUser, remoteHostKey, cmd, func(line string) {
 		if m := progressRe.FindStringSubmatch(line); m != nil {
 			f, _ := strconv.ParseFloat(m[1], 64)
-			onProgress(int(f))
-			continue
-		}
-		if line != "" {
-			tail = append(tail, line)
-			if len(tail) > 5 {
-				tail = tail[1:]
+			if pct := int(f); pct != last { // only report changes
+				last = pct
+				onProgress(pct)
 			}
 		}
+	})
+	if err != nil {
+		return fmt.Errorf("qemu-img convert failed: %w", err)
 	}
-
-	if err := sess.Wait(); err != nil {
-		return fmt.Errorf("qemu-img convert failed: %w (output: %v)", err, tail)
+	if last != 100 {
+		onProgress(100)
 	}
 	return nil
 }
-
-
 
 func (l *LibvirtClient) ConvertDisk(remoteHostIP, remoteHostUser, remoteHostKey, srcPath, dstPath string) error {
 	if err := validateImagePath(srcPath); err != nil {

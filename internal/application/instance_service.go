@@ -8,6 +8,7 @@ import (
 	domain "ec2-api/internal/domain/instance"
 	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
+	"ec2-api/internal/infra/notifications"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
 	"ec2-api/internal/vpcpkg"
@@ -53,6 +54,8 @@ type InstanceService struct {
 	ENV                 string
 	profileBaseImage    map[string]string
 	assetServiceBaseURL string
+		hub                 *notifications.Hub
+
 }
 
 func NewInstanceService(
@@ -71,6 +74,7 @@ func NewInstanceService(
 	profileBaseImage map[string]string,
 	ENV string,
 	assetServiceBaseURL string,
+	hub *notifications.Hub,
 ) *InstanceService {
 
 	return &InstanceService{
@@ -93,6 +97,7 @@ func NewInstanceService(
 		profileBaseImage:    profileBaseImage,
 		ENV:                 ENV,
 		assetServiceBaseURL: assetServiceBaseURL,
+				hub:                 hub,
 	}
 }
 
@@ -122,6 +127,9 @@ func (s *InstanceService) resolveCustomImage(userID, amiID, hostip string) (stri
 		return "", err // dto.ErrAMINotFound if missing or owned by someone else
 	}
 
+
+	log.Printf("The retrieed image has these propetis %+v", image)
+
 	if image.Status != domain.ImageStatusAvailable {
 		return "", fmt.Errorf("image %s is not available (status: %s)", amiID, image.Status)
 	}
@@ -134,10 +142,14 @@ func (s *InstanceService) resolveCustomImage(userID, amiID, hostip string) (stri
 	if err != nil {
 		return "", fmt.Errorf("get presigned url for image %s: %w", amiID, err)
 	}
+
+
+
+
 	if url == "" {
 		return "", fmt.Errorf("presigned url for image %s is empty", amiID)
 	}
-	log.Printf("returned s3 url: %+v", url)
+	log.Printf("returned s3 url while resolving the ami: %+v", url)
 	fullUrl := fmt.Sprintf("%s%s", s.assetServiceBaseURL, url)
 
 	s.DownloadFileViaAgent(hostip, fullUrl, "/var/lib/libvirt/images", image.ID)
@@ -230,7 +242,7 @@ func (s *InstanceService) DownloadPem(ctx context.Context, instanceID string) (s
 }
 func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
 
-	log.Printf("[SCHEDULER][] %d profile", req.Specs.CPU)
+	log.Printf("[SCHEDULER][] %s profile", req.Profile)
 
 	instanceID := fmt.Sprintf(uuid.New().String()[:8])
 
@@ -279,6 +291,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		if req.CustomAMIID == "" {
 			return nil, fmt.Errorf("custom_ami_id is required when profile is custom_ami")
 		}
+		log.Printf("[AMIRESOLVE] resolving ami image: with profile %s", req.Profile)
 
 		image, err := s.resolveCustomImage(userID, req.CustomAMIID, bestHost.IP)
 
@@ -495,7 +508,7 @@ func (s *InstanceService) CreateAMIImage(req domain.AMIImageRequest) (*domain.Im
 		var buildErr error
 		if live {
 			log.Printf("Building*& Live AmI image,")
-			// buildErr = s.buildAMILive(host, instance, img)
+			buildErr = s.buildAMILive(host, instance, img)
 		} else {
 			log.Printf("Building*& Offline AmI image,")
 
@@ -542,7 +555,18 @@ func instanceDiskPath(imagesDir, instanceID string) string {
 }
 
 // buildAMIOffline: no_reboot == false. Stop, copy, start again.
-func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instance, img *domain.Image) error {
+func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instance, img *domain.Image) (err error) {
+
+	defer func() {
+		n := notifications.Notification{ID: img.ID, Kind: "ami_build", Title: fmt.Sprintf("Creating AMI %q", img.Name)}
+		if err != nil {
+			n.Status, n.Message = "failed", err.Error()
+		} else {
+			n.Status = "completed"
+		}
+		s.hub.Publish(img.UserID, n)
+	}()
+
 	start := time.Now()
 	wasRunning := instance.Status == domain.StatusRunning
 	// srcDisk := s.hostService.Cfg.Libvirt.ImagesDir+"/"+instance.ID+".qcow2" // the VM's qcow2 file, NOT the images directory
@@ -590,11 +614,30 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 	// convert flattens any backing file (template) into a standalone, compressed image
 	t := time.Now()
 	amiLogf(img.ID, "copying disk (qemu-img convert) %s -> %s", srcDisk, img.DiskPath)
-	if err := s.libvirtClient.ConvertDisk(host.IP, host.User, host.Key, srcDisk, img.DiskPath); err != nil {
+
+	lastPct, lastWrite := -1, time.Time{}
+	err = s.libvirtClient.ConvertDiskWithProgress(host.IP, host.User, host.Key, srcDisk, img.DiskPath,
+		func(pct int) {
+			if pct == lastPct || (time.Since(lastWrite) < 2*time.Second && pct < 100) {
+				return
+			}
+			lastPct, lastWrite = pct, time.Now()
+			img.Progress = pct
+			if err := s.repo.UpdateAMI(img); err != nil {
+				amiLogf(img.ID, "WARN failed to save progress=%d: %v", pct, err)
+			}
+			p := pct
+			s.hub.Publish(img.UserID, notifications.Notification{
+				ID: img.ID, Kind: "ami_build", Title: fmt.Sprintf("Creating AMI %q", img.Name),
+				Status: "running", Progress: &p,
+			})
+			amiLogf(img.ID, "copy progress %d%%", pct)
+		})
+	if err != nil {
 		amiLogf(img.ID, "ERROR disk copy failed after %s: %v", time.Since(t).Round(time.Millisecond), err)
 		return fmt.Errorf("copy disk: %w", err)
 	}
-	amiLogf(img.ID, "disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
+	amiLogf(img.ID, "offline disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
 
 	// we update the ami status from building to ready
 
@@ -602,6 +645,10 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 		amiLogf(img.ID, "ERROR finalize failed: %v", err)
 		return err
 	}
+
+
+
+
 	amiLogf(img.ID, "offline build finished: size=%d bytes sha256=%s total=%s",
 		img.SizeBytes, img.SHA256, time.Since(start).Round(time.Millisecond))
 	return nil
@@ -609,11 +656,20 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 
 // buildAMILive: no_reboot == true. VM keeps running.
 func (s *InstanceService) buildAMILive(host hostConn, instance *domain.Instance, img *domain.Image) (err error) {
+
+	defer func() {
+		n := notifications.Notification{ID: img.ID, Kind: "ami_build", Title: fmt.Sprintf("Creating AMI %q", img.Name)}
+		if err != nil {
+			n.Status, n.Message = "failed", err.Error()
+		} else {
+			n.Status = "completed"
+		}
+		s.hub.Publish(img.UserID, n)
+	}()
+
 	start := time.Now()
 	const diskTarget = "vda"
-	srcDisk := s.hostService.Cfg.Libvirt.ImagesDir + "/" + instance.ID // the VM's qcow2 file, NOT the images directory
-
-	// srcDisk := instance.DiskPath // the VM's qcow2 file, NOT the images directory
+	srcDisk := instanceDiskPath(s.hostService.Cfg.Libvirt.ImagesDir, instance.ID) // same helper as the offline build
 	overlay := fmt.Sprintf("/var/lib/libvirt/images/amis/%s.overlay.qcow2", img.ID)
 
 	amiLogf(img.ID, "live build started: vm=%s host=%q disk=%s src=%s overlay=%s dst=%s",
@@ -658,14 +714,32 @@ func (s *InstanceService) buildAMILive(host hostConn, instance *domain.Instance,
 		}
 	}()
 
-	// 3. Copy the frozen base disk (nothing writes to it any more).
+	// 3. Copy the frozen base disk (nothing writes to it any more), with live progress.
 	t = time.Now()
 	amiLogf(img.ID, "copying frozen base disk (qemu-img convert) %s -> %s", srcDisk, img.DiskPath)
-	if err = s.libvirtClient.ConvertDisk(host.IP, host.User, host.Key, srcDisk, img.DiskPath); err != nil {
+
+	lastPct, lastWrite := -1, time.Time{}
+	if err = s.libvirtClient.ConvertDiskWithProgress(host.IP, host.User, host.Key, srcDisk, img.DiskPath,
+		func(pct int) {
+			if pct == lastPct || (time.Since(lastWrite) < 2*time.Second && pct < 100) {
+				return
+			}
+			lastPct, lastWrite = pct, time.Now()
+			img.Progress = pct
+			if uErr := s.repo.UpdateAMI(img); uErr != nil {
+				amiLogf(img.ID, "WARN failed to save progress=%d: %v", pct, uErr)
+			}
+			p := pct
+			s.hub.Publish(img.UserID, notifications.Notification{
+				ID: img.ID, Kind: "ami_build", Title: fmt.Sprintf("Creating AMI %q", img.Name),
+				Status: "running", Progress: &p,
+			})
+			amiLogf(img.ID, "copy progress %d%%", pct)
+		}); err != nil {
 		amiLogf(img.ID, "ERROR disk copy failed after %s: %v", time.Since(t).Round(time.Millisecond), err)
 		return fmt.Errorf("copy disk: %w", err)
 	}
-	amiLogf(img.ID, "disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
+	amiLogf(img.ID, "online disk copy done (took %s)", time.Since(t).Round(time.Millisecond))
 
 	if err = s.finalizeImage(host, img); err != nil {
 		amiLogf(img.ID, "ERROR finalize failed: %v", err)
@@ -679,11 +753,12 @@ func (s *InstanceService) buildAMILive(host hostConn, instance *domain.Instance,
 
 // finalizeImage records size and checksum, and generalizes the image if needed.
 func (s *InstanceService) finalizeImage(host hostConn, img *domain.Image) error {
-	log.Printf("Callingfinalize image")
 	size, sum, err := s.libvirtClient.StatAndHash(host.IP, host.User, host.Key, img.DiskPath)
 	if err != nil {
 		return fmt.Errorf("stat image: %w", err)
 	}
+	log.Printf("Callingfinalize image, Size of the image %v with this checksum %v for ths diskpath : %v", size, sum, img.DiskPath)
+
 	img.SizeBytes = size
 	img.SHA256 = sum
 	s3Key := fmt.Sprintf("ami/%s", img.Name)
@@ -715,6 +790,7 @@ func (s *InstanceService) finalizeImage(host hostConn, img *domain.Image) error 
 		log.Printf("Volume path error: %v", err)
 		return err
 	}
+	storagePath=img.DiskPath
 
 	err = s.UploadAndDeleteFileViaAgent(host.IP, storagePath, fullUrl, "")
 	if err != nil {

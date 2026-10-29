@@ -93,6 +93,7 @@ import (
 	database "ec2-api/internal/infra/database"
 	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
+	"ec2-api/internal/infra/notifications"
 	repository "ec2-api/internal/infra/repository"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
@@ -255,7 +256,9 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV, cfg.AgentUrlParts)
+hub := notifications.NewHub()
+
+	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV, cfg.AgentUrlParts, hub)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient, hostRepo, cfg.NATS.SubjectPrefix, natsPublisher, cfg.AgentUrlParts)
 	snapshotService := application.NewSnapshotService(snapshotRepo, instanceRepo, volumeRepo, libvirtClient, hostRepo)
 	sshKeyService := application.NewSSHKeyService(sshKeyRepo, systemKeyService, keysDir)
@@ -293,6 +296,12 @@ func main() {
 	hostHandler := transport.NewHostHandler(hostService)
 	metrics.Serve(":7085", cfg.METRICS_API_KEY)
 
+
+
+notificationHandler := transport.NewNotificationHandler(hub)
+
+
+
 	// 5. Setup Router
 	router := gin.Default()
 		router.Use(metrics.MetricsMiddleware())   // first, before auth and before SetupRoutes
@@ -309,7 +318,7 @@ func main() {
 		c.JSON(httpd.StatusOK, gin.H{"status": "UP"})
 	})
 
-	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler)
+	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler,notificationHandler)
 
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()

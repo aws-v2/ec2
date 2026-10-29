@@ -257,7 +257,7 @@ func (r *instanceRepository) FindAMIByIDAndUserID(id, userID string) (*domain.Im
 	query := `
 		SELECT id, name, COALESCE(description, ''), user_id,
 		       COALESCE(source_instance_id, ''), COALESCE(host_id, ''),
-		       status, no_reboot, COALESCE(consistency, ''),
+		       status,sha256, no_reboot, COALESCE(consistency, ''),
 		       disk_path, COALESCE(size_bytes, 0), COALESCE(sha256, ''),
 		       COALESCE(error_message, ''), created_at, updated_at
 		FROM golden_images
@@ -267,7 +267,7 @@ func (r *instanceRepository) FindAMIByIDAndUserID(id, userID string) (*domain.Im
 	err := r.db.QueryRow(query, id, userID).Scan(
 		&img.ID, &img.Name, &img.Description, &img.UserID,
 		&img.SourceInstanceID, &img.HostID,
-		&img.Status, &img.NoReboot, &img.Consistency,
+		&img.Status, &img.SHA256,&img.NoReboot, &img.Consistency,
 		&img.DiskPath, &img.SizeBytes, &img.SHA256,
 		&img.ErrorMessage, &img.CreatedAt, &img.UpdatedAt,
 	)
@@ -309,14 +309,15 @@ func (r *instanceRepository) UpdateAMI(image *domain.Image) error {
 			size_bytes    = $6,
 			sha256        = $7,
 			error_message = $8,
+			progress      = $9,
 			updated_at    = CURRENT_TIMESTAMP
-		WHERE id = $9 AND deleted_at IS NULL
+		WHERE id = $10 AND deleted_at IS NULL
 		RETURNING updated_at`
 
 	err := r.db.QueryRow(
 		query,
 		image.Name, image.Description, image.Status, image.Consistency, image.DiskPath,
-		image.SizeBytes, image.SHA256, image.ErrorMessage, image.ID,
+		image.SizeBytes, image.SHA256, image.ErrorMessage, image.Progress, image.ID,
 	).Scan(&image.UpdatedAt)
 
 	if err == sql.ErrNoRows {
