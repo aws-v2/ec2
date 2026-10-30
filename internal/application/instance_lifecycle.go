@@ -67,19 +67,21 @@ func (s *InstanceService) prepareInstanceResources(req *domain.CreateInstanceReq
 	baseImagePath, newDiskPath, instanceToken string, err error,
 ) {
 	// Checks if we have that base image in servers files
-	baseImageName, ok := imageMap[req.Profile]
-	if !ok {
-		available := make([]string, 0, len(imageMap))
-		for k := range imageMap {
-			available = append(available, k)
-		}
-		return "", "", "", fmt.Errorf("image %s not found. Available: %v", req.Image, available)
-	}
-	// TODO: add an endpoint for the agentto download the base image if issues arise on the host
-	// and the baseimage is not found,
+	var baseImageName string
 
 	if req.Profile == "custom_ami" {
+		// Custom AMIs are resolved earlier (resolveCustomImage) and are not in imageMap.
 		baseImageName = req.Image
+	} else {
+		var ok bool
+		baseImageName, ok = imageMap[req.Profile]
+		if !ok {
+			available := make([]string, 0, len(imageMap))
+			for k := range imageMap {
+				available = append(available, k)
+			}
+			return "", "", "", fmt.Errorf("profile %s not found. Available: %v", req.Profile, available)
+		}
 	}
 
 	baseImagePath = filepath.Join(s.imagesDir, baseImageName)
@@ -125,8 +127,8 @@ func (s *InstanceService) allocateInstanceNetwork(ctx context.Context, userID, i
 	// Allocate an IP within that VPC
 	network, err := s.vpcService.AllocateInstanceNetwork(ctx, userID, instanceID, defaultVPC.ID)
 	if err != nil {
-		er :=fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
-		log.Printf("%s",er)
+		er := fmt.Errorf("failed to allocate network for instance %s: %w", instanceID, err)
+		log.Printf("%s", er)
 		return "", "", "", "", er
 	}
 
@@ -590,9 +592,19 @@ func (s *InstanceService) createVMAsync(
 		}
 	}
 
-	if remoteHostUser == "" {
-		remoteHostUser = "root"
-	}
+	// createVMAsync
+if bestHost == nil || bestHost.IP == "" {
+    log.Printf("[VM] no host IP for instance %s", instance.ID)
+    go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, instance, "", req.SessionID, domain.StartVM, req.ResourceID)
+    s.markTerminatedAndReleaseNetwork(instance, newDiskPath)
+    return
+}
+
+remoteHostIP = bestHost.IP
+remoteHostUser = bestHost.SSHUser
+if remoteHostUser == "" {
+    remoteHostUser = "root"
+}
 
 	// ---------------------------------------------------
 	// Absolute paths

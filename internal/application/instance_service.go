@@ -14,6 +14,7 @@ import (
 	"ec2-api/internal/vpcpkg"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -54,8 +55,7 @@ type InstanceService struct {
 	ENV                 string
 	profileBaseImage    map[string]string
 	assetServiceBaseURL string
-		hub                 *notifications.Hub
-
+	hub                 *notifications.Hub
 }
 
 func NewInstanceService(
@@ -97,7 +97,7 @@ func NewInstanceService(
 		profileBaseImage:    profileBaseImage,
 		ENV:                 ENV,
 		assetServiceBaseURL: assetServiceBaseURL,
-				hub:                 hub,
+		hub:                 hub,
 	}
 }
 
@@ -111,6 +111,8 @@ const (
 	StageCompleted          = "COMPLETED"
 	StageFailed             = "FAILED"
 )
+
+var ErrAMINotFound = errors.New("AMI not found")
 
 // ─── SSH Key Pair ─────────────────────────────────────────────────────────────
 
@@ -127,7 +129,6 @@ func (s *InstanceService) resolveCustomImage(userID, amiID, hostip string) (stri
 		return "", err // dto.ErrAMINotFound if missing or owned by someone else
 	}
 
-
 	log.Printf("The retrieed image has these propetis %+v", image)
 
 	if image.Status != domain.ImageStatusAvailable {
@@ -142,9 +143,6 @@ func (s *InstanceService) resolveCustomImage(userID, amiID, hostip string) (stri
 	if err != nil {
 		return "", fmt.Errorf("get presigned url for image %s: %w", amiID, err)
 	}
-
-
-
 
 	if url == "" {
 		return "", fmt.Errorf("presigned url for image %s is empty", amiID)
@@ -177,26 +175,38 @@ func (s *InstanceService) DownloadFileViaAgent(hostIP, fileURL, destination, fil
 		return fmt.Errorf("failed to build host action request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// req.Header.Set("X-Agent-Key", l.agentAPIKey)
 
-	// Generous timeout for now since we're downloading synchronously and
-	// waiting for the agent's confirmation before proceeding to attach.
-	// This will need to become async once volumes are large enough that
-	// blocking the whole attach request on a download isn't viable.
+	log.Printf("[DownloadFileViaAgent] POST %s destination=%q filename=%q", url, destination, filename)
+
+	started := time.Now()
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("[DownloadFileViaAgent] request to %s failed after %s: %v",
+			hostIP, time.Since(started).Round(time.Millisecond), err)
 		return fmt.Errorf("failed to reach agent on host %s: %w", hostIP, err)
 	}
 	defer resp.Body.Close()
 
-	var result HostActionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("failed to decode agent response: %w", err)
+	// Read the raw body first so we can log it even if JSON decoding fails.
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read agent response: %w", err)
 	}
 
+	log.Printf("[DownloadFileViaAgent] agent responded in %s: http=%d body=%s",
+		time.Since(started).Round(time.Millisecond), resp.StatusCode, string(raw))
+
+	var result HostActionResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("failed to decode agent response (http %d): %w", resp.StatusCode, err)
+	}
+
+	log.Printf("[DownloadFileViaAgent] parsed: status=%q message=%q", result.Status, result.Message)
+
 	if resp.StatusCode != http.StatusAccepted || result.Status != "success" {
-		return fmt.Errorf("agent reported failure downloading file: %s", result.Message)
+		return fmt.Errorf("agent reported failure downloading file (http %d, status %q): %s",
+			resp.StatusCode, result.Status, result.Message)
 	}
 
 	return nil
@@ -291,23 +301,28 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 		if req.CustomAMIID == "" {
 			return nil, fmt.Errorf("custom_ami_id is required when profile is custom_ami")
 		}
-		log.Printf("[AMIRESOLVE] resolving ami image: with profile %s", req.Profile)
+		log.Printf("[AMIRESOLVE] resolving custom ami: id=%s profile=%s host=%s user=%s",
+			req.CustomAMIID, req.Profile, bestHost.IP, userID)
 
+		started := time.Now()
 		image, err := s.resolveCustomImage(userID, req.CustomAMIID, bestHost.IP)
-
 		if err != nil {
-			if errors.Is(err, fmt.Errorf("AMI not found")) {
-				return nil, fmt.Errorf("AMI not found") // let the handler map this to 404
+			log.Printf("[AMIRESOLVE] FAILED id=%s host=%s after %s: %v",
+				req.CustomAMIID, bestHost.IP, time.Since(started).Round(time.Millisecond), err)
+
+			if errors.Is(err, ErrAMINotFound) {
+				return nil, ErrAMINotFound // let the handler map this to 404
 			}
 			return nil, fmt.Errorf("resolve custom image %s: %w", req.CustomAMIID, err)
 		}
 
-		// here
+		log.Printf("[AMIRESOLVE] OK id=%s host=%s resolved_image=%v took=%s",
+			req.CustomAMIID, bestHost.IP, image, time.Since(started).Round(time.Millisecond))
 
 		req.Image = image
-
 	} else {
 		req.Image = resolveImage(req.Profile, s.profileBaseImage)
+		log.Printf("[AMIRESOLVE] using profile base image: profile=%s image=%v", req.Profile, req.Image)
 	}
 
 	// Step 1: Validate image and acquire IAM token
@@ -327,42 +342,6 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	fmt.Printf("The choosen base-image----->: %s", baseImagePath)
 
-	// Step 2: VPC Placement & Host Selection
-	// // ─── NEW PLACEMENT LOGIC ──────────────────────────────────────
-
-	// defaultVPC, err := s.vpcService.GetOrCreateDefaultVPC(ctx, userID)
-	// if err != nil {
-	// 	go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{ID: instanceID}, "", req.SessionID, domain.VMStoped, req.ResourceID)
-	// 	return nil, fmt.Errorf("failed to get default VPC for user %s: %w", userID, err)
-	// }
-
-	// bestHost, gatewayHost, err := s.hostService.SelectBestHost(req.Profile, defaultVPC.HostID)
-	// // beshHost== the host where the vms will be running
-	// // gatewayHost == the public vps that is available
-	// if err != nil {
-	// 	go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
-	// 	log.Printf("[SCHEDULER] [ERROR] Failed to select best host: %v", err)
-	// 	return nil, err
-	// }
-
-	// hostID := ""
-	// if bestHost != nil {
-	// 	hostID = bestHost.ID
-	// 	log.Printf("[SCHEDULER] [OK] Selected host %s (%s) for instance %s with thsi ip: %s", bestHost.Hostname, hostID, instanceID, bestHost.IP)
-	// } else {
-	// 	go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
-	// 	log.Printf("[SCHEDULER] [WARN] No active hosts found, provisioning locally for profile:%s", req.Profile)
-	// 	return nil, ErrNoActiveHosts
-	// }
-
-	// // Always bind the VPC to the actively selected compute host lock-in
-	// if bestHost.ID != defaultVPC.HostID {
-	// 	if err := s.vpcService.UpdateVPCHost(ctx, defaultVPC.ID, bestHost.ID); err != nil {
-	// 		log.Printf("[SCHEDULER] [WARN] Failed to update VPC HostID lock: %v", err)
-	// 	}
-	// }
-
-	// // ─── END PLACEMENT LOGIC ──────────────────────────────────────
 
 	// Step 2.5: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID, defaultVPC)
@@ -646,9 +625,6 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 		return err
 	}
 
-
-
-
 	amiLogf(img.ID, "offline build finished: size=%d bytes sha256=%s total=%s",
 		img.SizeBytes, img.SHA256, time.Since(start).Round(time.Millisecond))
 	return nil
@@ -790,7 +766,7 @@ func (s *InstanceService) finalizeImage(host hostConn, img *domain.Image) error 
 		log.Printf("Volume path error: %v", err)
 		return err
 	}
-	storagePath=img.DiskPath
+	storagePath = img.DiskPath
 
 	err = s.UploadAndDeleteFileViaAgent(host.IP, storagePath, fullUrl, "")
 	if err != nil {
