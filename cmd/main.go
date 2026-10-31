@@ -174,6 +174,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	metrics.RegisterDB(db.DB, "ec2")
 
 	slog.Info("Running database migrations...", "migrations_dir", cfg.MigrationsDir)
 	if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
@@ -256,7 +257,7 @@ func main() {
 	if err := os.MkdirAll(keysDir, 0755); err != nil {
 		slog.Warn("Failed to create keys directory", "error", err)
 	}
-hub := notifications.NewHub()
+	hub := notifications.NewHub()
 
 	instanceService := application.NewInstanceService(instanceRepo, hostRepo, networkingService, libvirtClient, cfg.PublicKey, imagesDir, natsPublisher, minioAdapter, vpcService, hostService, cfg.PrivateKey, cfg.AgentPort, cfg.ProfileBaseImage, cfg.ENV, cfg.AgentUrlParts, hub)
 	volumeService := application.NewVolumeService(volumeRepo, instanceRepo, libvirtClient, hostRepo, cfg.NATS.SubjectPrefix, natsPublisher, cfg.AgentUrlParts)
@@ -267,6 +268,19 @@ hub := notifications.NewHub()
 	fleetService := application.NewFleetService(fleetRepo, instanceRepo)
 	docsService := application.NewDocsService("docs")
 	warmUpService := application.NewWarmupService(instanceRepo, hostRepo, *instanceService, cfg.SystemUserId)
+
+	if err := metrics.RefreshDatabaseGauges(db.DB); err != nil {
+		slog.Error("Failed to refresh Prometheus database gauges", "error", err)
+	}
+	gaugeRefreshTicker := time.NewTicker(time.Minute)
+	defer gaugeRefreshTicker.Stop()
+	go func() {
+		for range gaugeRefreshTicker.C {
+			if err := metrics.RefreshDatabaseGauges(db.DB); err != nil {
+				slog.Error("Failed to refresh Prometheus database gauges", "error", err)
+			}
+		}
+	}()
 
 	// 3.5 Initialize NATS Subscriber for Scaling Enforcement
 	if cfg.NATS.URL != "" {
@@ -296,29 +310,23 @@ hub := notifications.NewHub()
 	hostHandler := transport.NewHostHandler(hostService)
 	metrics.Serve(":7085", cfg.METRICS_API_KEY)
 
-
-
-notificationHandler := transport.NewNotificationHandler(hub)
-
-
+	notificationHandler := transport.NewNotificationHandler(hub)
 
 	// 5. Setup Router
 	router := gin.Default()
-		router.Use(metrics.MetricsMiddleware())   // first, before auth and before SetupRoutes
-
+	router.Use(metrics.MetricsMiddleware()) // first, before auth and before SetupRoutes
 
 	router.SetTrustedProxies(nil)
 
-// router.Use(metrics.GinMiddleware())                  // NEW: applies to every route registered after this
-// router.GET("/metrics", gin.WrapH(metrics.Handler())) // NEW: next to /health, no auth
-
+	// router.Use(metrics.GinMiddleware())                  // NEW: applies to every route registered after this
+	// router.GET("/metrics", gin.WrapH(metrics.Handler())) // NEW: next to /health, no auth
 
 	// Health check for Eureka
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(httpd.StatusOK, gin.H{"status": "UP"})
 	})
 
-	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler,notificationHandler)
+	routes.SetupRoutes(router, instanceHandler, volumeHandler, snapshotHandler, sshKeyHandler, networkingHandler, templateHandler, terminalHandler, fleetHandler, docsHandler, hostHandler, notificationHandler)
 
 	// 6. Eureka Registration
 	eurekaConfig := getEurekaConfig()

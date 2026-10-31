@@ -16,6 +16,7 @@ import (
 	libvirt "ec2-api/internal/infra/libvirt"
 	messaging "ec2-api/internal/infra/messaging"
 	interfaces "ec2-api/internal/interfaces"
+	ec2metrics "ec2-api/internal/metrics"
 
 	"crypto/sha256"
 	"encoding/hex"
@@ -169,7 +170,13 @@ func (s *VolumeService) createVolumeAsync(volume *domain.Volume, userId string, 
 		return
 	}
 }
-func (l *VolumeService) CreateVolumeViaAgent(hostIP, volumePath string, sizeGB int) (string, error) {
+func (l *VolumeService) CreateVolumeViaAgent(hostIP, volumePath string, sizeGB int) (checksum string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("volume_create", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "create_volume",
 		Params: map[string]string{
@@ -245,7 +252,6 @@ func uploadFileToPresignedURL(url, path string) error {
 
 	return nil
 }
-
 
 // CalculateSHA256File hashes a file by streaming it, without loading
 // the whole file into memory — needed for large volume/disk files.
@@ -640,7 +646,13 @@ func (s *VolumeService) CreateVolumeSnapshot(
 		SHA256:       snapshot.SHA256,
 	}, nil
 }
-func (l *VolumeService) ConvertImageViaAgent(hostIP, sourcePath, destPath, format string) (string, error) {
+func (l *VolumeService) ConvertImageViaAgent(hostIP, sourcePath, destPath, format string) (checksum string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("volume_convert", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "convert_image",
 		Params: map[string]string{
@@ -733,7 +745,13 @@ func (s *VolumeService) ReserveVolume(volumeID int, req domain.ReservationReques
 
 	return volume, nil
 }
-func (l *VolumeService) UploadAndDeleteFileViaAgent(hostIP, filePath, presignedURL, extra string) error {
+func (l *VolumeService) UploadAndDeleteFileViaAgent(hostIP, filePath, presignedURL, extra string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("upload_and_delete", hostIP)
+		}
+	}()
+
 	params := map[string]string{
 		"path": filePath,
 		"url":  presignedURL,
@@ -1064,7 +1082,13 @@ func (s *VolumeService) AttachVolume(volumeID int, instanceID, userId string) (*
 
 	return volume, nil
 }
-func (s *VolumeService) ResizeImageViaAgent(hostIP, volumePath string, newSizeGB int) (string, error) {
+func (s *VolumeService) ResizeImageViaAgent(hostIP, volumePath string, newSizeGB int) (checksum string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("volume_resize", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "Resize_volume",
 		Params: map[string]string{
@@ -1104,7 +1128,13 @@ func (s *VolumeService) ResizeImageViaAgent(hostIP, volumePath string, newSizeGB
 
 	return result.Checksum, nil
 }
-func (l *VolumeService) DownloadVolumeFileViaAgent(hostIP, fileURL, destination, filename string) error {
+func (l *VolumeService) DownloadVolumeFileViaAgent(hostIP, fileURL, destination, filename string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("download_file", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "download_file",
 		Params: map[string]string{
@@ -1271,7 +1301,13 @@ type HostActionResponse struct {
 	Checksum string `json:"checksum,omitempty"`
 }
 
-func (l *VolumeService) CalculateChecksumViaAgent(hostIP, filePath string) (string, error) {
+func (l *VolumeService) CalculateChecksumViaAgent(hostIP, filePath string) (checksum string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("calculate_checksum", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "calculate_checksum",
 		Params: map[string]string{
@@ -1311,7 +1347,13 @@ func (l *VolumeService) CalculateChecksumViaAgent(hostIP, filePath string) (stri
 
 	return result.Checksum, nil
 }
-func (s *VolumeService) DeleteVolumeFileViaAgent(hostIP, storagePath string) error {
+func (s *VolumeService) DeleteVolumeFileViaAgent(hostIP, storagePath string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("delete_file", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "delete_file",
 		Params: map[string]string{

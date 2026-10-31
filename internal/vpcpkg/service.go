@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"ec2-api/internal/interfaces"
+	ec2metrics "ec2-api/internal/metrics"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,8 +71,8 @@ func (s *Service) AllocateInstanceNetwork(ctx context.Context, tenantID, instanc
 
 	ip, err := NextAvailableIP(vpc.CIDRBlock, usedIPs)
 	if err != nil {
-		er:=fmt.Errorf("IP exhaustion in VPC %s: %w", vpcID, err)
-		log.Printf("Error: %v" , er)
+		er := fmt.Errorf("IP exhaustion in VPC %s: %w", vpcID, err)
+		log.Printf("Error: %v", er)
 		return nil, er
 	}
 
@@ -223,7 +224,13 @@ func (s *Service) cidrFreeOnAllHosts(ctx context.Context, cidr string) (bool, st
 	return true, "", nil
 }
 
-func (s *Service) checkCIDROnHost(ctx context.Context, hostIP, cidr string) (bool, string, error) {
+func (s *Service) checkCIDROnHost(ctx context.Context, hostIP, cidr string) (free bool, reason string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("cidr_check", hostIP)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

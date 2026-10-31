@@ -9,6 +9,7 @@ import (
 	agentDomain "ec2-api/internal/domain/instance"
 	messaging "ec2-api/internal/infra/messaging"
 	"ec2-api/internal/interfaces"
+	ec2metrics "ec2-api/internal/metrics"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -250,7 +251,13 @@ func (s *HostService) validateS3URL(url string) error {
 	return nil
 }
 
-func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdatePayload) error {
+func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdatePayload) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("agent_update", hostIP)
+		}
+	}()
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -272,7 +279,13 @@ func (s *HostService) pushUpdateToAgent(hostIP string, payload domain.AgentUpdat
 	return nil
 }
 
-func (s *HostService) SendPowerAction(ctx context.Context, hostIP string, vmID string, action string) error {
+func (s *HostService) SendPowerAction(ctx context.Context, hostIP string, vmID string, action string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError(action, hostIP)
+		}
+	}()
+
 	req := struct {
 		VMID   string `json:"vm_id"`
 		Action string `json:"action"`
@@ -395,7 +408,7 @@ func (s *HostService) HandleHeartbeat(c *gin.Context, req domain.HeartbeatReques
 			CreatedAt: time.Now(),
 		}
 		// log.Printf("  -> [vm-met8rics] name=%-15s state=%-10s cpu=%.2f ram=%d disk(r/w)=%d/%d net(rx/tx)=%d/%d",
-			// metric.Name, metric.State, metric.CPUUsed, metric.Memory, metric.DiskRead, metric.DiskWrite, metric.NetRx, metric.NetTx)
+		// metric.Name, metric.State, metric.CPUUsed, metric.Memory, metric.DiskRead, metric.DiskWrite, metric.NetRx, metric.NetTx)
 		go func(hID string, m domain.DomainStats) {
 			if err := s.metricsRepo.Insert(context.Background(), hID, m); err != nil {
 				log.Printf("[host-service] Failed to insert metrics for VM %s: %v", m.VMID, err)

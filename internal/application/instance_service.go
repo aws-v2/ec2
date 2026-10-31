@@ -11,6 +11,7 @@ import (
 	"ec2-api/internal/infra/notifications"
 	storage "ec2-api/internal/infra/storage"
 	interfaces "ec2-api/internal/interfaces"
+	ec2metrics "ec2-api/internal/metrics"
 	"ec2-api/internal/vpcpkg"
 	"encoding/json"
 	"errors"
@@ -154,7 +155,13 @@ func (s *InstanceService) resolveCustomImage(userID, amiID, hostip string) (stri
 
 	return image.ID, nil
 }
-func (s *InstanceService) DownloadFileViaAgent(hostIP, fileURL, destination, filename string) error {
+func (s *InstanceService) DownloadFileViaAgent(hostIP, fileURL, destination, filename string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("download_file", hostIP)
+		}
+	}()
+
 	reqBody := HostActionRequest{
 		Type: "download_file",
 		Params: map[string]string{
@@ -250,7 +257,13 @@ func (s *InstanceService) DownloadPem(ctx context.Context, instanceID string) (s
 	}
 	return instance.PrivateSshKey, nil
 }
-func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (*domain.Instance, error) {
+func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.CreateInstanceRequest, userID string) (created *domain.Instance, retErr error) {
+	provisioningStarted := time.Now()
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordInstanceCreate(req.Profile, "failed", time.Since(provisioningStarted))
+		}
+	}()
 
 	log.Printf("[SCHEDULER][] %s profile", req.Profile)
 
@@ -342,7 +355,6 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 
 	fmt.Printf("The choosen base-image----->: %s", baseImagePath)
 
-
 	// Step 2.5: Allocate networking — direct call, no NATS
 	vpcID, privateIP, gateway, bridgeName, err := s.allocateInstanceNetwork(ctx, userID, instanceID, defaultVPC)
 	if err != nil {
@@ -356,7 +368,7 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req *domain.Create
 	// --------------
 
 	// Step 3: Persist the record and launch VM creation asynchronously
-	instance, err := s.persistAndLaunch(ctx, req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost, gatewayHost)
+	instance, err := s.persistAndLaunch(ctx, req, userID, instanceID, vmName, newDiskPath, baseImagePath, bridgeName, privateIP, gateway, vpcID, instanceToken, bestHost, gatewayHost, provisioningStarted)
 	if err != nil {
 		go s.publisher.PublishInstanceEvent(req.Profile, domain.EventInstanceError, &domain.Instance{}, "", req.SessionID, domain.VMStoped, req.ResourceID)
 		return nil, err
@@ -480,11 +492,21 @@ func (s *InstanceService) CreateAMIImage(req domain.AMIImageRequest) (*domain.Im
 
 	go func() {
 		started := time.Now()
+		ec2metrics.SetAMIBuildProgress(img.ID, 0)
+		defer ec2metrics.ClearAMIBuildProgress(img.ID)
+
 		live := req.NoReboot && instance.Status == domain.StatusRunning
 		amiLogf(img.ID, "build queued: name=%q instance=%s no_reboot=%t mode=%s",
 			img.Name, instance.ID, req.NoReboot, map[bool]string{true: "live", false: "offline"}[live])
 
 		var buildErr error
+		result := "success"
+		defer func() {
+			if buildErr != nil {
+				result = "failed"
+			}
+			ec2metrics.RecordAMIBuild(result, time.Since(started))
+		}()
 		if live {
 			log.Printf("Building*& Live AmI image,")
 			buildErr = s.buildAMILive(host, instance, img)
@@ -602,6 +624,7 @@ func (s *InstanceService) buildAMIOffline(host hostConn, instance *domain.Instan
 			}
 			lastPct, lastWrite = pct, time.Now()
 			img.Progress = pct
+			ec2metrics.SetAMIBuildProgress(img.ID, float64(pct))
 			if err := s.repo.UpdateAMI(img); err != nil {
 				amiLogf(img.ID, "WARN failed to save progress=%d: %v", pct, err)
 			}
@@ -702,6 +725,7 @@ func (s *InstanceService) buildAMILive(host hostConn, instance *domain.Instance,
 			}
 			lastPct, lastWrite = pct, time.Now()
 			img.Progress = pct
+			ec2metrics.SetAMIBuildProgress(img.ID, float64(pct))
 			if uErr := s.repo.UpdateAMI(img); uErr != nil {
 				amiLogf(img.ID, "WARN failed to save progress=%d: %v", pct, uErr)
 			}
@@ -776,7 +800,13 @@ func (s *InstanceService) finalizeImage(host hostConn, img *domain.Image) error 
 
 	return nil
 }
-func (s *InstanceService) UploadAndDeleteFileViaAgent(hostIP, filePath, presignedURL, extra string) error {
+func (s *InstanceService) UploadAndDeleteFileViaAgent(hostIP, filePath, presignedURL, extra string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("upload_and_delete", hostIP)
+		}
+	}()
+
 	params := map[string]string{
 		"path": filePath,
 		"url":  presignedURL,

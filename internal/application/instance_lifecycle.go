@@ -5,6 +5,7 @@ import (
 	"context"
 	"ec2-api/internal/domain/host"
 	domain "ec2-api/internal/domain/instance"
+	ec2metrics "ec2-api/internal/metrics"
 	"ec2-api/internal/vpcpkg"
 	"encoding/json"
 	"io"
@@ -146,6 +147,7 @@ func (s *InstanceService) persistAndLaunch(
 	req *domain.CreateInstanceRequest,
 	userID, instanceID, vmName, newDiskPath, baseImagePath,
 	bridgeName, privateIP, gateway, vpcID, instanceToken string, bestHost *host.Host, publicGateway *host.Host,
+	provisioningStarted time.Time,
 ) (*domain.Instance, error) {
 	keyPair, err := GenerateSSHKeyPair()
 	if err != nil {
@@ -291,7 +293,7 @@ func (s *InstanceService) persistAndLaunch(
 
 	}
 	log.Printf("Port status updated")
-	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets, bestHost)
+	go s.createVMAsync(instance, req, baseImagePath, newDiskPath, bridgeName, privateIP, gateway, instanceToken, keyPair, assets, bestHost, provisioningStarted)
 
 	instance.PrivateSshKey = keyPair.PrivateKeyPEM
 	instance.GatewayIP = publicGateway.IP
@@ -319,7 +321,12 @@ func (s *InstanceService) RemoveForwardingRule(
 	targetPort int,
 	externalPort int,
 	profile, SessionID string,
-) (bool, error) {
+) (ok bool, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("gateway_remove", gatewayIP)
+		}
+	}()
 
 	req := RemoveForwardingRuleRequest{
 		ExternalPort: externalPort,
@@ -378,7 +385,12 @@ func (s *InstanceService) AddGatewayForwardingRule(
 	externalPort int,
 	profile, SessionID string,
 
-) (bool, error) {
+) (ok bool, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("gateway_add", gatewayIP)
+		}
+	}()
 
 	req := host.AddForwardingRuleRequest{
 		ExternalPort: targetPort, // gateway port
@@ -431,7 +443,13 @@ func (s *InstanceService) AddGatewayForwardingRule(
 	return true, nil
 }
 
-func (s *InstanceService) ReconcileNetwork(profile, agentIP string, req host.NetworkReconcileRequest) (bool, error) {
+func (s *InstanceService) ReconcileNetwork(profile, agentIP string, req host.NetworkReconcileRequest) (ok bool, retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("reconcile_network", agentIP)
+		}
+	}()
+
 
 	url := fmt.Sprintf("http://%s:9030/reconcile/network", agentIP)
 
@@ -576,7 +594,17 @@ func (s *InstanceService) createVMAsync(
 	keyPair *SSHKeyPair,
 	assets []domain.Asset,
 	bestHost *host.Host,
+	provisioningStarted time.Time,
 ) {
+	provisioned := false
+	defer func() {
+		result := "failed"
+		if provisioned {
+			result = "success"
+		}
+		ec2metrics.RecordInstanceCreate(req.Profile, result, time.Since(provisioningStarted))
+	}()
+
 	// ---------------------------------------------------
 	// Resolve host
 	// ---------------------------------------------------
@@ -798,6 +826,7 @@ if remoteHostUser == "" {
 		log.Printf("[VM] failed to update instance: %v", err)
 		return
 	}
+	provisioned = true
 
 	log.Printf(
 		"[VM] instance %s running on host %s",

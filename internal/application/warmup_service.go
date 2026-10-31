@@ -5,6 +5,7 @@ import (
 	"context"
 	domain "ec2-api/internal/domain/instance"
 	interfaces "ec2-api/internal/interfaces"
+	ec2metrics "ec2-api/internal/metrics"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,11 +59,13 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 
 		resp, err := http.Get(url)
 		if err != nil {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("failed to reach host %s: %v", host.IP, err)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("bad status from host %s: %s", host.IP, resp.Status)
 			resp.Body.Close()
 			continue
@@ -70,6 +73,7 @@ func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
 
 		var domains []string
 		if err := json.NewDecoder(resp.Body).Decode(&domains); err != nil {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("failed to decode domains from host %s: %v", host.IP, err)
 			resp.Body.Close()
 			continue
@@ -137,11 +141,13 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 
 		resp, err := http.Get(url)
 		if err != nil {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("failed to reach host %s: %v", host.IP, err)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("bad status from host %s: %s", host.IP, resp.Status)
 			resp.Body.Close()
 			continue
@@ -149,6 +155,7 @@ func (w *WarmupService) GetWarmSageMakerVMs() ([]string, error) {
 
 		var domains []string
 		if err := json.NewDecoder(resp.Body).Decode(&domains); err != nil {
+			ec2metrics.RecordAgentCallError("warm_vms", host.IP)
 			log.Printf("failed to decode domains from host %s: %v", host.IP, err)
 			resp.Body.Close()
 			continue
@@ -235,7 +242,13 @@ func (w *WarmupService) PurgeWarmLambdaVMs() {
 
 // sendDestroyCommand posts a destroy action to the agent running on hostIP:9030
 // and returns an error unless the agent responds with 202 Accepted.
-func sendDestroyCommand(hostIP string, vmID string) error {
+func sendDestroyCommand(hostIP string, vmID string) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			ec2metrics.RecordAgentCallError("destroy_vm", hostIP)
+		}
+	}()
+
 	url := fmt.Sprintf("http://%s:9030/vm/power", hostIP)
 
 	body, err := json.Marshal(VMPowerRequest{
