@@ -62,7 +62,6 @@ func SetupRoutes(r *gin.Engine,
 	}
 
 	{
-
 		api.GET("/instances/notifications/stream", notificationHandler.Stream)
 		// Instance CRUD
 		api.POST("/instances", instanceHandler.CreateInstance)
