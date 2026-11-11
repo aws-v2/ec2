@@ -413,7 +413,7 @@ func main() {
 			time.Sleep(10 * time.Second)
 
 			if _, err := warmUpService.GetWarmLambdaVMs(); err != nil {
-				slog.Error("Failed to get warm Lambda VMs", "error", err)
+				slog.Error("Failed to get warm Lambda VMs******", "error", err)
 			}
 
 			time.Sleep(20 * time.Second)

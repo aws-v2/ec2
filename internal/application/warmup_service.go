@@ -40,7 +40,7 @@ func NewWarmupService(
 }
 
 func (w *WarmupService) GetWarmLambdaVMs() ([]string, error) {
-	fmt.Println("=========Warming lambda vms =============")
+	fmt.Println("====**=====Warming lambda vms =============")
 
 	hosts, err := w.hostRepo.GetBestHostsByType(5, "lambda")
 	if err != nil {
